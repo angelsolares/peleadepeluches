@@ -1009,6 +1009,8 @@ function handlePlayerInput(data) {
         }
         
         // Handle attacks (use AnimationController which handles transitions properly)
+        // Note: Mobile controller already emits 'player-attack' to server directly
+        // We just handle the animation here
         if (data.input.punch && !player.animController.isAttacking) {
             if (player.controller.punch()) {
                 player.playAnimation('punch');
@@ -1027,7 +1029,11 @@ function handleGameState(data) {
     data.players.forEach(state => {
         const player = players.get(state.id);
         if (player) {
+            // Apply server state (position, velocity, health, stocks)
             player.controller.applyServerState(state);
+            
+            // Update HUD with latest health/stocks from server
+            updatePlayerHUD(player);
         }
     });
 }
@@ -1225,11 +1231,19 @@ function setupKeyboardControls() {
                 // Use animController to check if not already attacking
                 if (!localPlayer.animController.isAttacking && localPlayer.controller.punch()) {
                     localPlayer.playAnimation('punch');
+                    // Send attack to server for hit detection
+                    if (socket && socket.connected) {
+                        socket.emit('player-attack', 'punch');
+                    }
                 }
                 break;
             case 'k':
                 if (!localPlayer.animController.isAttacking && localPlayer.controller.kick()) {
                     localPlayer.playAnimation('kick');
+                    // Send attack to server for hit detection
+                    if (socket && socket.connected) {
+                        socket.emit('player-attack', 'kick');
+                    }
                 }
                 break;
         }
@@ -1293,7 +1307,7 @@ function createPlayerHUD(player) {
             </div>
             <span class="player-name">${player.name}</span>
         </div>
-        <div class="player-damage low" style="color: ${player.color};">0%</div>
+        <div class="player-damage low">0%</div>
         <div class="player-stocks">
             ${[0, 1, 2].map(i => `
                 <div class="stock-icon" style="border-color: ${player.color}; background: ${player.color};"></div>
@@ -1385,6 +1399,48 @@ function onWindowResize() {
 }
 
 // =================================
+// Player Collision Detection
+// =================================
+
+/**
+ * Check and resolve collisions between players
+ * Prevents players from walking through each other
+ */
+function checkPlayerCollisions() {
+    const playerArray = Array.from(players.values());
+    const COLLISION_RADIUS = 0.6; // How close players can get before being pushed apart
+    
+    for (let i = 0; i < playerArray.length; i++) {
+        for (let j = i + 1; j < playerArray.length; j++) {
+            const p1 = playerArray[i].controller;
+            const p2 = playerArray[j].controller;
+            
+            // Calculate horizontal distance between players
+            const dx = p2.position.x - p1.position.x;
+            const dy = p2.position.y - p1.position.y;
+            const dist = Math.abs(dx);
+            
+            // Only collide if players are at similar height (not jumping over each other)
+            const verticalOverlap = Math.abs(dy) < 1.5;
+            
+            if (dist < COLLISION_RADIUS && dist > 0.01 && verticalOverlap) {
+                // Push players apart equally
+                const pushAmount = (COLLISION_RADIUS - dist) / 2;
+                const pushDir = Math.sign(dx);
+                
+                // Apply push (only if not being knocked back)
+                if (Math.abs(p1.velocity.x) < 5) {
+                    p1.position.x -= pushDir * pushAmount;
+                }
+                if (Math.abs(p2.velocity.x) < 5) {
+                    p2.position.x += pushDir * pushAmount;
+                }
+            }
+        }
+    }
+}
+
+// =================================
 // Animation Loop
 // =================================
 
@@ -1407,6 +1463,9 @@ function animate() {
             updatePlayerHUD(player);
         }
     });
+    
+    // Check collisions between players (push them apart)
+    checkPlayerCollisions();
     
     // Update camera - Side view following system (Smash Bros style)
     updateSideViewCamera();

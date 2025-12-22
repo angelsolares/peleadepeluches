@@ -110,16 +110,14 @@ class GameStateManager {
             player.velocity.y = 0;
         }
         
-        // Arena boundaries
-        const distFromCenter = Math.sqrt(
-            player.position.x ** 2 + player.position.z ** 2
-        );
+        // 2D Stage boundaries (Smash Bros style - players can fall off but have limits during normal play)
+        const STAGE_LEFT = -6;
+        const STAGE_RIGHT = 6;
         
-        if (distFromCenter > this.ARENA_RADIUS) {
-            const angle = Math.atan2(player.position.z, player.position.x);
-            player.position.x = Math.cos(angle) * this.ARENA_RADIUS;
-            player.position.z = Math.sin(angle) * this.ARENA_RADIUS;
-        }
+        // Soft boundary - allow players to go slightly off stage but not walk infinitely
+        // Blast zones handle actual KOs (in checkKOs)
+        player.position.x = Math.max(STAGE_LEFT - 2, Math.min(STAGE_RIGHT + 2, player.position.x));
+        player.position.z = 0; // Lock Z axis for 2D gameplay
         
         return {
             position: { ...player.position },
@@ -175,8 +173,8 @@ class GameStateManager {
         // Check for hits
         const hits = [];
         
-        // Determine attacker facing direction
-        const facingDir = attacker.velocity.x >= 0 ? 1 : -1;
+        // Determine attacker facing direction (use facingRight property, not velocity)
+        const facingDir = attacker.facingRight ? 1 : -1;
         
         for (const [targetId, target] of room.players) {
             if (targetId === attackerId) continue;
