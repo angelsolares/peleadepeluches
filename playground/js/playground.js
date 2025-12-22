@@ -165,11 +165,11 @@ async function loadCharacter() {
         // Load base model (walk has the skinned mesh)
         loadingText.textContent = 'Cargando modelo...';
         model = await loadFBX(loader, `../assets/${animationFiles.walk}`);
-        // Scale (will be adjusted based on facing direction)
+        // Scale
         model.scale.set(0.01, 0.01, 0.01);
         
-        // Rotate model 180 degrees so it faces the direction it walks
-        model.rotation.y = Math.PI;
+        // Rotate model 90° to show profile view
+        model.rotation.y = -Math.PI / 2;
         
         // Enable shadows
         model.traverse((child) => {
@@ -619,10 +619,11 @@ function animate() {
             model.position.x = positionX;
         }
         
-        // Update model facing direction using scale.x flip
-        // Positive scale = facing right, negative scale = facing left
-        const targetScaleX = facingRight ? 0.01 : -0.01;
-        model.scale.x = THREE.MathUtils.lerp(model.scale.x, targetScaleX, 0.15);
+        // Update model facing direction using scale.z flip
+        // After -90° rotation, scale.z controls left/right facing
+        // Positive = facing right, negative = facing left
+        const targetScaleZ = facingRight ? 0.01 : -0.01;
+        model.scale.z = THREE.MathUtils.lerp(model.scale.z, targetScaleZ, 0.15);
         
         // Update animation mixer
         animationController.update(delta);

@@ -204,11 +204,11 @@ class PlayerEntity {
         
         // Clone the model
         this.model = SkeletonUtils.clone(baseModel);
-        // Scale (will be adjusted based on facing direction)
+        // Scale
         this.model.scale.set(0.01, 0.01, 0.01);
         
-        // Rotate model 180 degrees so it faces the direction it walks
-        this.model.rotation.y = Math.PI;
+        // Rotate model 90° to show profile view
+        this.model.rotation.y = -Math.PI / 2;
         
         // Apply color tint to materials
         this.applyColorTint(color);
@@ -298,10 +298,11 @@ class PlayerEntity {
         // Update model position
         this.model.position.copy(this.controller.position);
         
-        // Update model facing direction using scale.x flip
-        // Positive scale = facing right, negative scale = facing left
-        const targetScaleX = this.controller.facingRight ? 0.01 : -0.01;
-        this.model.scale.x = THREE.MathUtils.lerp(this.model.scale.x, targetScaleX, 0.2);
+        // Update model facing direction using scale.z flip
+        // After -90° rotation, scale.z controls left/right facing
+        // Positive = facing right, negative = facing left
+        const targetScaleZ = this.controller.facingRight ? 0.01 : -0.01;
+        this.model.scale.z = THREE.MathUtils.lerp(this.model.scale.z, targetScaleZ, 0.2);
         
         // Update animation based on movement state (using shared AnimationController)
         const input = this.controller.input;
