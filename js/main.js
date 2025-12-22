@@ -995,13 +995,9 @@ function handleGameStarted(data) {
 }
 
 function handlePlayerInput(data) {
-    console.log('[Game] handlePlayerInput received:', data);
-    
     const player = players.get(data.playerId);
     
     if (player) {
-        console.log('[Game] Updating player input for:', data.playerId, data.input);
-        
         // Update player input from mobile controller
         player.controller.input = { ...player.controller.input, ...data.input };
         
@@ -1023,8 +1019,6 @@ function handlePlayerInput(data) {
                 player.playAnimation('kick');
             }
         }
-    } else {
-        console.log('[Game] Player not found for input update:', data.playerId);
     }
 }
 
