@@ -369,6 +369,80 @@ body {
 }
 
 /* =================================
+   FBX Loader
+   ================================= */
+
+#fbx-loader {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#fbx-target-slot {
+    padding: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+#fbx-target-slot:focus {
+    outline: none;
+    border-color: var(--accent-cyan);
+}
+
+.file-input-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.file-input-label:hover {
+    background: rgba(0, 255, 204, 0.1);
+    border-color: var(--accent-cyan);
+}
+
+.file-input-label input[type="file"] {
+    display: none;
+}
+
+.file-input-label span {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.fbx-status {
+    font-size: 0.75rem;
+    padding: 8px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.fbx-status.success {
+    background: rgba(0, 255, 204, 0.1);
+    color: var(--accent-cyan);
+}
+
+.fbx-status.error {
+    background: rgba(255, 51, 102, 0.1);
+    color: var(--accent-pink);
+}
+
+.fbx-status.loading {
+    background: rgba(255, 204, 0, 0.1);
+    color: var(--accent-yellow);
+}
+
+/* =================================
    Shortcuts Info
    ================================= */
 

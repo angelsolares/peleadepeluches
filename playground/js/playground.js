@@ -12,10 +12,11 @@ import { AnimationController, ANIMATION_CONFIG, AnimationState } from '../../js/
 // Configuration
 // =================================
 
+// Camera positions - Side view is the default for 2D fighting game testing
 const CAMERA_POSITIONS = {
-    front: { x: 0, y: 1.5, z: 4 },
-    side: { x: 4, y: 1.5, z: 0 },
-    back: { x: 0, y: 1.5, z: -4 }
+    side: { x: 0, y: 1.5, z: 5 },    // TRUE side view - X movement appears horizontal
+    front: { x: 0, y: 1.5, z: -4 },   // Looking at character's front (behind the stage)
+    back: { x: 4, y: 1.5, z: 0 }      // 3/4 view from the side
 };
 
 // =================================
@@ -284,9 +285,98 @@ function setupControls() {
     document.getElementById('btn-camera-side').addEventListener('click', () => setCameraPosition('side'));
     document.getElementById('btn-camera-back').addEventListener('click', () => setCameraPosition('back'));
     
+    // Custom FBX file loader
+    const fbxFileInput = document.getElementById('fbx-file-input');
+    fbxFileInput.addEventListener('change', handleFBXUpload);
+    
     // Keyboard controls
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+}
+
+/**
+ * Handle custom FBX file upload
+ */
+async function handleFBXUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const targetSlot = document.getElementById('fbx-target-slot').value;
+    const statusEl = document.getElementById('fbx-status');
+    
+    // Show loading status
+    statusEl.textContent = `Cargando ${file.name}...`;
+    statusEl.className = 'fbx-status loading';
+    
+    try {
+        const loader = new FBXLoader();
+        const arrayBuffer = await file.arrayBuffer();
+        
+        // Create a blob URL from the file
+        const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        
+        // Load the FBX
+        loader.load(url, (loadedModel) => {
+            // Check if it has animations
+            if (loadedModel.animations && loadedModel.animations.length > 0) {
+                const newClip = loadedModel.animations[0];
+                
+                // Store the new animation
+                animations[targetSlot] = newClip;
+                
+                // Recreate the animation controller with updated animations
+                if (animationController) {
+                    animationController.dispose();
+                }
+                animationController = new AnimationController(model, animations);
+                
+                // Setup callbacks again
+                animationController.onAnimationFinished = (name) => {
+                    console.log(`[Playground] Animation finished: ${name}`);
+                    updateActiveButton();
+                };
+                
+                animationController.onStateChange = (newState, oldState) => {
+                    console.log(`[Playground] State: ${oldState} -> ${newState}`);
+                    updateActiveButton();
+                };
+                
+                // Start with idle
+                animationController.playIdle();
+                
+                // Show success
+                statusEl.textContent = `✓ ${targetSlot}: ${newClip.name} (${newClip.duration.toFixed(2)}s)`;
+                statusEl.className = 'fbx-status success';
+                
+                console.log(`[Playground] Loaded custom animation for ${targetSlot}: ${newClip.name}`);
+            } else {
+                statusEl.textContent = '✗ El archivo no contiene animaciones';
+                statusEl.className = 'fbx-status error';
+            }
+            
+            // Cleanup
+            URL.revokeObjectURL(url);
+            loadedModel.traverse((child) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    const mats = Array.isArray(child.material) ? child.material : [child.material];
+                    mats.forEach(m => m.dispose());
+                }
+            });
+        }, undefined, (error) => {
+            statusEl.textContent = `✗ Error: ${error.message}`;
+            statusEl.className = 'fbx-status error';
+            URL.revokeObjectURL(url);
+        });
+        
+    } catch (error) {
+        statusEl.textContent = `✗ Error: ${error.message}`;
+        statusEl.className = 'fbx-status error';
+    }
+    
+    // Reset file input so same file can be selected again
+    event.target.value = '';
 }
 
 function handleKeyDown(e) {

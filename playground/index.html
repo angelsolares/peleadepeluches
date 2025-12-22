@@ -123,6 +123,26 @@
                     </div>
                 </section>
 
+                <!-- Custom FBX Loader -->
+                <section class="panel-section">
+                    <h2>Cargar Animación FBX</h2>
+                    <div id="fbx-loader">
+                        <select id="fbx-target-slot">
+                            <option value="walk">Walk</option>
+                            <option value="run">Run</option>
+                            <option value="punch">Punch</option>
+                            <option value="kick">Kick</option>
+                            <option value="hit">Hit</option>
+                            <option value="fall">Fall</option>
+                        </select>
+                        <label class="file-input-label">
+                            <input type="file" id="fbx-file-input" accept=".fbx">
+                            <span>Seleccionar FBX</span>
+                        </label>
+                        <p id="fbx-status" class="fbx-status"></p>
+                    </div>
+                </section>
+
                 <!-- Info -->
                 <section class="panel-section info">
                     <h2>Atajos de Teclado</h2>
