@@ -6,9 +6,9 @@
 
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL, CONFIG } from './config.js';
+import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animation/AnimationController.js';
 
 // =================================
 // Configuration
@@ -20,7 +20,9 @@ const PHYSICS = {
     RUN_SPEED: 7,
     JUMP_FORCE: 12,
     GROUND_Y: 0,
-    ARENA_RADIUS: 4.5
+    // 2D Stage boundaries (Smash Bros style)
+    STAGE_LEFT: -6,
+    STAGE_RIGHT: 6
 };
 
 // =================================
@@ -130,13 +132,9 @@ class PlayerController {
             this.isJumping = false;
         }
         
-        // Arena boundaries
-        const distFromCenter = Math.sqrt(this.position.x ** 2 + this.position.z ** 2);
-        if (distFromCenter > PHYSICS.ARENA_RADIUS) {
-            const angle = Math.atan2(this.position.z, this.position.x);
-            this.position.x = Math.cos(angle) * PHYSICS.ARENA_RADIUS;
-            this.position.z = Math.sin(angle) * PHYSICS.ARENA_RADIUS;
-        }
+        // 2D Stage boundaries (left/right only, lock Z axis)
+        this.position.x = Math.max(PHYSICS.STAGE_LEFT, Math.min(PHYSICS.STAGE_RIGHT, this.position.x));
+        this.position.z = 0; // Lock Z axis for side-view
     }
     
     /**
@@ -211,26 +209,19 @@ class PlayerEntity {
         // Apply color tint to materials
         this.applyColorTint(color);
         
-        // Create animation mixer for this model
-        this.mixer = new THREE.AnimationMixer(this.model);
+        // Create shared AnimationController (handles mixer, actions, and transitions)
+        this.animController = new AnimationController(this.model, baseAnimations);
         
-        // Create actions from base animations
-        this.actions = {};
-        for (const [name, clip] of Object.entries(baseAnimations)) {
-            if (clip) {
-                this.actions[name] = this.mixer.clipAction(clip);
+        // Setup animation finished callback
+        this.animController.onAnimationFinished = (name) => {
+            // Sync attacking state with physics controller
+            if (!this.animController.isAttacking) {
+                this.controller.isAttacking = false;
             }
-        }
-        
-        // Configure actions
-        this.configureActions();
+        };
         
         // Controller for physics/input
         this.controller = new PlayerController(id, number, color);
-        
-        // Current animation state
-        this.currentAction = null;
-        this.currentActionName = 'idle';
     }
     
     applyColorTint(color) {
@@ -263,58 +254,35 @@ class PlayerEntity {
         });
     }
     
-    configureActions() {
-        if (this.actions.walk) {
-            this.actions.walk.setLoop(THREE.LoopRepeat);
-            this.actions.walk.clampWhenFinished = false;
+    /**
+     * Play animation by name using shared AnimationController
+     */
+    playAnimation(actionName) {
+        switch (actionName) {
+            case 'idle':
+                this.animController.playIdle();
+                break;
+            case 'walk':
+                this.animController.playWalk();
+                break;
+            case 'run':
+                this.animController.playRun();
+                break;
+            case 'punch':
+                this.animController.playPunch();
+                break;
+            case 'kick':
+                this.animController.playKick();
+                break;
+            case 'hit':
+                this.animController.playHit();
+                break;
+            case 'fall':
+                this.animController.playFall();
+                break;
+            default:
+                this.animController.play(actionName);
         }
-        
-        if (this.actions.run) {
-            this.actions.run.setLoop(THREE.LoopRepeat);
-            this.actions.run.clampWhenFinished = false;
-        }
-        
-        if (this.actions.punch) {
-            this.actions.punch.setLoop(THREE.LoopOnce);
-            this.actions.punch.clampWhenFinished = true;
-        }
-        
-        if (this.actions.kick) {
-            this.actions.kick.setLoop(THREE.LoopOnce);
-            this.actions.kick.clampWhenFinished = true;
-        }
-        
-        if (this.actions.hit) {
-            this.actions.hit.setLoop(THREE.LoopOnce);
-            this.actions.hit.clampWhenFinished = true;
-        }
-        
-        if (this.actions.fall) {
-            this.actions.fall.setLoop(THREE.LoopOnce);
-            this.actions.fall.clampWhenFinished = true;
-        }
-    }
-    
-    playAnimation(actionName, fadeDuration = 0.15) {
-        const newAction = this.actions[actionName];
-        if (!newAction) return;
-        
-        if (this.currentAction === newAction && newAction.isRunning() && 
-            actionName !== 'punch' && actionName !== 'kick' && actionName !== 'hit') {
-            return;
-        }
-        
-        newAction.reset();
-        newAction.paused = false;
-        
-        if (this.currentAction && this.currentAction !== newAction) {
-            this.currentAction.fadeOut(fadeDuration);
-            newAction.fadeIn(fadeDuration);
-        }
-        
-        newAction.play();
-        this.currentAction = newAction;
-        this.currentActionName = actionName;
     }
     
     update(delta, skipPhysics = false) {
@@ -330,52 +298,24 @@ class PlayerEntity {
         const targetScaleX = this.controller.facingRight ? 0.01 : -0.01;
         this.model.scale.x = THREE.MathUtils.lerp(this.model.scale.x, targetScaleX, 0.2);
         
-        // Update animation based on state
-        this.updateAnimation();
-        
-        // Update mixer
-        this.mixer.update(delta);
-    }
-    
-    updateAnimation() {
-        const state = this.controller.getMovementState();
+        // Update animation based on movement state (using shared AnimationController)
         const input = this.controller.input;
-        
-        // Check if moving based on input (for server-controlled players)
         const isMoving = input.left || input.right;
         const isRunning = isMoving && input.run;
         
-        // If attacking, keep current attack animation
-        if (state === 'attacking') {
-            return;
-        }
+        this.animController.updateFromMovementState({
+            isMoving,
+            isRunning,
+            isGrounded: this.controller.isGrounded,
+            isJumping: this.controller.isJumping
+        });
         
-        // Jumping animation
-        if (!this.controller.isGrounded || this.controller.isJumping) {
-            // Could add jump animation here if available
-        }
-        
-        // Movement animations
-        if (isRunning) {
-            if (this.currentActionName !== 'run') {
-                this.playAnimation('run');
-            }
-        } else if (isMoving) {
-            if (this.currentActionName !== 'walk') {
-                this.playAnimation('walk');
-            }
-            if (this.actions.walk) this.actions.walk.paused = false;
-        } else {
-            // Idle - use walk animation paused
-            if (this.currentActionName !== 'walk') {
-                this.playAnimation('walk', 0.2);
-            }
-            if (this.actions.walk) this.actions.walk.paused = true;
-        }
+        // Update animation mixer
+        this.animController.update(delta);
     }
     
     dispose() {
-        this.mixer.stopAllAction();
+        this.animController.dispose();
         this.model.traverse((child) => {
             if (child.geometry) child.geometry.dispose();
             if (child.material) {
@@ -390,7 +330,7 @@ class PlayerEntity {
 // Global Variables
 // =================================
 
-let scene, camera, renderer, controls;
+let scene, camera, renderer;
 let clock = new THREE.Clock();
 
 // Base model and animations
@@ -436,11 +376,11 @@ async function init() {
     // Create scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a2e);
-    scene.fog = new THREE.Fog(0x1a1a2e, 10, 50);
+    scene.fog = new THREE.Fog(0x1a1a2e, 15, 40);
 
-    // Setup camera
-    camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 3, 10);
+    // Setup camera - Fixed side view (Smash Bros style)
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 2, 12); // Side view, looking at center
     camera.lookAt(0, 1, 0);
 
     // Setup renderer
@@ -452,20 +392,12 @@ async function init() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    // Setup OrbitControls
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.target.set(0, 1, 0);
-    controls.minDistance = 5;
-    controls.maxDistance = 20;
-    controls.maxPolarAngle = Math.PI / 2 + 0.1;
-    controls.enablePan = false;
+    // No OrbitControls - camera follows players automatically (side-view)
 
     // Add lights
     setupLights();
     
-    // Add arena
+    // Add arena (side-view platform stage)
     createArena();
     
     // Load character and animations
@@ -523,48 +455,110 @@ function setupLights() {
 // =================================
 
 function createArena() {
-    // Ground plane
-    const groundGeometry = new THREE.CircleGeometry(15, 64);
-    const groundMaterial = new THREE.MeshStandardMaterial({
+    // === SIDE-VIEW PLATFORM STAGE (Smash Bros style) ===
+    
+    // Background plane (far back)
+    const bgGeometry = new THREE.PlaneGeometry(40, 20);
+    const bgMaterial = new THREE.MeshBasicMaterial({
+        color: 0x0a0a15,
+        side: THREE.DoubleSide
+    });
+    const background = new THREE.Mesh(bgGeometry, bgMaterial);
+    background.position.set(0, 5, -8);
+    scene.add(background);
+    
+    // Main platform
+    const platformWidth = 14;
+    const platformDepth = 4;
+    const platformHeight = 0.4;
+    
+    const platformGeometry = new THREE.BoxGeometry(platformWidth, platformHeight, platformDepth);
+    const platformMaterial = new THREE.MeshStandardMaterial({
         color: 0x2a2a4a,
-        metalness: 0.3,
-        roughness: 0.7
+        metalness: 0.4,
+        roughness: 0.6
     });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+    platform.position.set(0, -platformHeight / 2, 0);
+    platform.receiveShadow = true;
+    scene.add(platform);
     
-    // Arena ring
-    const ringGeometry = new THREE.RingGeometry(4.8, 5, 64);
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    // Platform edge glow (left)
+    const edgeGeometry = new THREE.BoxGeometry(0.15, platformHeight + 0.1, platformDepth);
+    const leftEdgeMaterial = new THREE.MeshBasicMaterial({
         color: 0xff3366,
-        side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.6
+        opacity: 0.8
     });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.01;
-    scene.add(ring);
+    const leftEdge = new THREE.Mesh(edgeGeometry, leftEdgeMaterial);
+    leftEdge.position.set(-platformWidth / 2, -platformHeight / 2, 0);
+    scene.add(leftEdge);
     
-    // Inner ring
-    const innerRingGeometry = new THREE.RingGeometry(2.9, 3, 64);
-    const innerRingMaterial = new THREE.MeshBasicMaterial({
+    // Platform edge glow (right)
+    const rightEdgeMaterial = new THREE.MeshBasicMaterial({
         color: 0x00ffcc,
-        side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.4
+        opacity: 0.8
     });
-    const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
-    innerRing.rotation.x = -Math.PI / 2;
-    innerRing.position.y = 0.02;
-    scene.add(innerRing);
+    const rightEdge = new THREE.Mesh(edgeGeometry, rightEdgeMaterial);
+    rightEdge.position.set(platformWidth / 2, -platformHeight / 2, 0);
+    scene.add(rightEdge);
     
-    // Grid helper
-    const gridHelper = new THREE.GridHelper(20, 20, 0x444466, 0x333355);
-    gridHelper.position.y = 0.001;
-    scene.add(gridHelper);
+    // Platform top line (center indicator)
+    const centerLineGeometry = new THREE.PlaneGeometry(0.1, platformDepth);
+    const centerLineMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffcc00,
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide
+    });
+    const centerLine = new THREE.Mesh(centerLineGeometry, centerLineMaterial);
+    centerLine.rotation.x = -Math.PI / 2;
+    centerLine.position.set(0, 0.01, 0);
+    scene.add(centerLine);
+    
+    // Grid on platform surface
+    const gridGeometry = new THREE.PlaneGeometry(platformWidth - 0.5, platformDepth - 0.5);
+    const gridMaterial = new THREE.MeshBasicMaterial({
+        color: 0x333355,
+        transparent: true,
+        opacity: 0.3,
+        wireframe: true
+    });
+    const grid = new THREE.Mesh(gridGeometry, gridMaterial);
+    grid.rotation.x = -Math.PI / 2;
+    grid.position.y = 0.02;
+    scene.add(grid);
+    
+    // Decorative side pillars
+    const pillarGeometry = new THREE.BoxGeometry(0.3, 3, 0.3);
+    const pillarMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1a2e,
+        metalness: 0.5,
+        roughness: 0.5
+    });
+    
+    // Left pillar
+    const leftPillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+    leftPillar.position.set(-platformWidth / 2 - 1, 1.5, -1);
+    leftPillar.castShadow = true;
+    scene.add(leftPillar);
+    
+    // Right pillar
+    const rightPillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+    rightPillar.position.set(platformWidth / 2 + 1, 1.5, -1);
+    rightPillar.castShadow = true;
+    scene.add(rightPillar);
+    
+    // Pillar glow tops
+    const glowGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+    const leftGlow = new THREE.Mesh(glowGeometry, new THREE.MeshBasicMaterial({ color: 0xff3366 }));
+    leftGlow.position.set(-platformWidth / 2 - 1, 3.2, -1);
+    scene.add(leftGlow);
+    
+    const rightGlow = new THREE.Mesh(glowGeometry, new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
+    rightGlow.position.set(platformWidth / 2 + 1, 3.2, -1);
+    scene.add(rightGlow);
 }
 
 // =================================
@@ -1008,13 +1002,13 @@ function handlePlayerInput(data) {
             player.controller.facingRight = true;
         }
         
-        // Handle attacks
-        if (data.input.punch && !player.controller.isAttacking) {
+        // Handle attacks (use AnimationController which handles transitions properly)
+        if (data.input.punch && !player.animController.isAttacking) {
             if (player.controller.punch()) {
                 player.playAnimation('punch');
             }
         }
-        if (data.input.kick && !player.controller.isAttacking) {
+        if (data.input.kick && !player.animController.isAttacking) {
             if (player.controller.kick()) {
                 player.playAnimation('kick');
             }
@@ -1222,12 +1216,13 @@ function setupKeyboardControls() {
                 input.run = true;
                 break;
             case 'j':
-                if (localPlayer.controller.punch()) {
+                // Use animController to check if not already attacking
+                if (!localPlayer.animController.isAttacking && localPlayer.controller.punch()) {
                     localPlayer.playAnimation('punch');
                 }
                 break;
             case 'k':
-                if (localPlayer.controller.kick()) {
+                if (!localPlayer.animController.isAttacking && localPlayer.controller.kick()) {
                     localPlayer.playAnimation('kick');
                 }
                 break;
@@ -1407,43 +1402,50 @@ function animate() {
         }
     });
     
-    // Update camera to follow action
-    if (players.size > 0) {
-        // Calculate center of all players
-        let centerX = 0;
-        let centerZ = 0;
-        let maxDistance = 0;
-        
-        players.forEach(player => {
-            centerX += player.controller.position.x;
-            centerZ += player.controller.position.z;
-        });
-        centerX /= players.size;
-        centerZ /= players.size;
-        
-        // Calculate spread of players for dynamic zoom
-        players.forEach(player => {
-            const dist = Math.abs(player.controller.position.x - centerX);
-            maxDistance = Math.max(maxDistance, dist);
-        });
-        
-        // Smoothly move camera target
-        controls.target.x = THREE.MathUtils.lerp(controls.target.x, centerX, 0.05);
-        controls.target.z = THREE.MathUtils.lerp(controls.target.z, centerZ, 0.05);
-        
-        // Dynamic camera distance based on player spread
-        const targetDistance = Math.max(8, 6 + maxDistance * 1.5);
-        const currentDistance = camera.position.distanceTo(controls.target);
-        const newDistance = THREE.MathUtils.lerp(currentDistance, targetDistance, 0.02);
-        
-        // Maintain camera angle while adjusting distance
-        const direction = new THREE.Vector3();
-        direction.subVectors(camera.position, controls.target).normalize();
-        camera.position.copy(controls.target).addScaledVector(direction, newDistance);
-    }
+    // Update camera - Side view following system (Smash Bros style)
+    updateSideViewCamera();
     
-    controls.update();
     renderer.render(scene, camera);
+}
+
+/**
+ * Update camera to follow players from side view (Smash Bros style)
+ */
+function updateSideViewCamera() {
+    if (players.size === 0) return;
+    
+    // Calculate bounds of all players
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let avgY = 0;
+    
+    players.forEach(player => {
+        const px = player.controller.position.x;
+        const py = player.controller.position.y;
+        minX = Math.min(minX, px);
+        maxX = Math.max(maxX, px);
+        avgY += py;
+    });
+    avgY /= players.size;
+    
+    // Calculate center and spread
+    const centerX = (minX + maxX) / 2;
+    const spread = maxX - minX;
+    
+    // Target camera position
+    // X follows players, Y stays slightly above players, Z adjusts for zoom
+    const targetX = centerX;
+    const targetY = Math.max(1.5, avgY + 1.5);
+    const targetZ = Math.max(10, 8 + spread * 0.8); // Dynamic zoom based on spread
+    
+    // Smoothly interpolate camera position
+    camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, 0.05);
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, 0.03);
+    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, 0.03);
+    
+    // Look at center of action
+    const lookAtY = Math.max(1, avgY + 0.5);
+    camera.lookAt(centerX, lookAtY, 0);
 }
 
 // =================================

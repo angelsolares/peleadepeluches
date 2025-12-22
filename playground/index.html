@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Animation Playground - Pelea de Peluches</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header id="header">
+            <h1>🎮 Animation Playground</h1>
+            <a href="../" class="back-link">← Volver al Juego</a>
+        </header>
+
+        <!-- Main Content -->
+        <main id="main">
+            <!-- 3D Canvas -->
+            <section id="canvas-container">
+                <canvas id="playground-canvas"></canvas>
+                <div id="loading-overlay">
+                    <div class="loader"></div>
+                    <p id="loading-text">Cargando modelo...</p>
+                </div>
+            </section>
+
+            <!-- Control Panel -->
+            <aside id="control-panel">
+                <!-- Animation State Display -->
+                <section class="panel-section">
+                    <h2>Estado Actual</h2>
+                    <div id="state-display">
+                        <div class="state-row">
+                            <span class="label">Animación:</span>
+                            <span id="current-animation" class="value">-</span>
+                        </div>
+                        <div class="state-row">
+                            <span class="label">Tiempo:</span>
+                            <span id="animation-time" class="value">0.00s</span>
+                        </div>
+                        <div class="state-row">
+                            <span class="label">Duración:</span>
+                            <span id="animation-duration" class="value">0.00s</span>
+                        </div>
+                        <div class="state-row">
+                            <span class="label">Estado:</span>
+                            <span id="animation-status" class="value status-idle">Idle</span>
+                        </div>
+                    </div>
+                    <!-- Progress bar -->
+                    <div id="progress-container">
+                        <div id="progress-bar"></div>
+                    </div>
+                </section>
+
+                <!-- Animation Buttons -->
+                <section class="panel-section">
+                    <h2>Animaciones</h2>
+                    <div id="animation-buttons">
+                        <button data-animation="idle" class="anim-btn looping">
+                            <span class="key">I</span>
+                            <span class="name">Idle</span>
+                        </button>
+                        <button data-animation="walk" class="anim-btn looping">
+                            <span class="key">W</span>
+                            <span class="name">Walk</span>
+                        </button>
+                        <button data-animation="run" class="anim-btn looping">
+                            <span class="key">R</span>
+                            <span class="name">Run</span>
+                        </button>
+                        <button data-animation="punch" class="anim-btn oneshot">
+                            <span class="key">J</span>
+                            <span class="name">Punch</span>
+                        </button>
+                        <button data-animation="kick" class="anim-btn oneshot">
+                            <span class="key">K</span>
+                            <span class="name">Kick</span>
+                        </button>
+                        <button data-animation="hit" class="anim-btn oneshot">
+                            <span class="key">H</span>
+                            <span class="name">Hit</span>
+                        </button>
+                        <button data-animation="fall" class="anim-btn oneshot">
+                            <span class="key">F</span>
+                            <span class="name">Fall</span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Movement Controls -->
+                <section class="panel-section">
+                    <h2>Movimiento</h2>
+                    <div id="movement-controls">
+                        <div class="movement-row">
+                            <button id="btn-left" class="move-btn">
+                                <span class="key">←</span>
+                            </button>
+                            <button id="btn-right" class="move-btn">
+                                <span class="key">→</span>
+                            </button>
+                        </div>
+                        <div class="movement-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="chk-run">
+                                <span>Correr (Shift)</span>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Camera Controls -->
+                <section class="panel-section">
+                    <h2>Cámara</h2>
+                    <div id="camera-controls">
+                        <button id="btn-camera-front" class="camera-btn active">Frontal</button>
+                        <button id="btn-camera-side" class="camera-btn">Lateral</button>
+                        <button id="btn-camera-back" class="camera-btn">Trasera</button>
+                    </div>
+                </section>
+
+                <!-- Info -->
+                <section class="panel-section info">
+                    <h2>Atajos de Teclado</h2>
+                    <ul id="shortcuts-list">
+                        <li><kbd>I</kbd> Idle</li>
+                        <li><kbd>W</kbd> Walk</li>
+                        <li><kbd>R</kbd> Run</li>
+                        <li><kbd>J</kbd> Punch</li>
+                        <li><kbd>K</kbd> Kick</li>
+                        <li><kbd>H</kbd> Hit</li>
+                        <li><kbd>F</kbd> Fall</li>
+                        <li><kbd>←</kbd><kbd>→</kbd> Mover</li>
+                        <li><kbd>Shift</kbd> Correr</li>
+                    </ul>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="js/playground.js"></script>
+</body>
+</html>
+

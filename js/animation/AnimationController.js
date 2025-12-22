@@ -1,0 +1,341 @@
+/**
+ * AnimationController - Shared Animation System
+ * Used by both main game and playground for consistent animation behavior
+ */
+
+import * as THREE from 'three';
+
+// =================================
+// Animation Configuration
+// =================================
+
+export const ANIMATION_CONFIG = {
+    // Animation file mappings
+    files: {
+        walk: 'Meshy_AI_Animation_Walking_withSkin.fbx',
+        run: 'Meshy_AI_Animation_Running_withSkin.fbx',
+        punch: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
+        kick: 'Meshy_AI_Animation_Boxing_Guard_Right_Straight_Kick_withSkin.fbx',
+        hit: 'Meshy_AI_Animation_Hit_Reaction_1_withSkin.fbx',
+        fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+    },
+    
+    // Animation types
+    looping: ['walk', 'run', 'idle'],
+    oneShot: ['punch', 'kick', 'hit', 'fall'],
+    
+    // Default fade durations
+    fadeDuration: {
+        default: 0.15,
+        toIdle: 0.2,
+        toAttack: 0.1
+    },
+    
+    // Attack cooldowns (seconds)
+    attackCooldown: {
+        punch: 0.8,
+        kick: 0.7,
+        hit: 0.5,
+        fall: 1.5
+    }
+};
+
+// Animation states
+export const AnimationState = {
+    IDLE: 'idle',
+    WALK: 'walk',
+    RUN: 'run',
+    PUNCH: 'punch',
+    KICK: 'kick',
+    HIT: 'hit',
+    FALL: 'fall',
+    JUMP: 'jump'
+};
+
+// =================================
+// AnimationController Class
+// =================================
+
+export class AnimationController {
+    constructor(model, animations) {
+        this.model = model;
+        
+        // Create mixer
+        this.mixer = new THREE.AnimationMixer(model);
+        
+        // Store animations and create actions
+        this.animations = animations;
+        this.actions = {};
+        
+        // Current state
+        this.currentAction = null;
+        this.currentActionName = AnimationState.IDLE;
+        this.previousActionName = null;
+        
+        // State flags
+        this.isAttacking = false;
+        this.isPaused = false;
+        
+        // Callbacks
+        this.onAnimationFinished = null;
+        this.onStateChange = null;
+        
+        // Initialize
+        this._setupActions();
+        this._setupEventListeners();
+    }
+    
+    /**
+     * Setup actions from animation clips
+     */
+    _setupActions() {
+        for (const [name, clip] of Object.entries(this.animations)) {
+            if (clip) {
+                const action = this.mixer.clipAction(clip);
+                this.actions[name] = action;
+                this._configureAction(name, action);
+            }
+        }
+    }
+    
+    /**
+     * Configure individual action settings
+     */
+    _configureAction(name, action) {
+        if (ANIMATION_CONFIG.looping.includes(name)) {
+            action.setLoop(THREE.LoopRepeat);
+            action.clampWhenFinished = false;
+        } else if (ANIMATION_CONFIG.oneShot.includes(name)) {
+            action.setLoop(THREE.LoopOnce);
+            action.clampWhenFinished = true;
+        }
+    }
+    
+    /**
+     * Setup mixer event listeners - KEY FIX for stuck animations
+     */
+    _setupEventListeners() {
+        this.mixer.addEventListener('finished', (event) => {
+            const finishedAction = event.action;
+            const finishedName = this._getActionName(finishedAction);
+            
+            console.log(`[AnimationController] Animation finished: ${finishedName}`);
+            
+            // Check if this was a one-shot animation
+            if (ANIMATION_CONFIG.oneShot.includes(finishedName)) {
+                this.isAttacking = false;
+                
+                // Return to idle or walk based on previous state
+                const returnState = this.previousActionName === AnimationState.WALK || 
+                                   this.previousActionName === AnimationState.RUN
+                    ? this.previousActionName 
+                    : AnimationState.IDLE;
+                
+                this.play(returnState, ANIMATION_CONFIG.fadeDuration.toIdle);
+            }
+            
+            // Fire callback
+            if (this.onAnimationFinished) {
+                this.onAnimationFinished(finishedName);
+            }
+        });
+    }
+    
+    /**
+     * Get action name from action object
+     */
+    _getActionName(action) {
+        for (const [name, act] of Object.entries(this.actions)) {
+            if (act === action) return name;
+        }
+        return null;
+    }
+    
+    /**
+     * Play an animation by name
+     */
+    play(actionName, fadeDuration = ANIMATION_CONFIG.fadeDuration.default) {
+        const newAction = this.actions[actionName];
+        if (!newAction) {
+            console.warn(`[AnimationController] Animation not found: ${actionName}`);
+            return false;
+        }
+        
+        // Don't interrupt if same animation is already playing (except for one-shots)
+        if (this.currentAction === newAction && 
+            newAction.isRunning() && 
+            !ANIMATION_CONFIG.oneShot.includes(actionName)) {
+            return false;
+        }
+        
+        // Store previous state for return
+        if (!ANIMATION_CONFIG.oneShot.includes(this.currentActionName)) {
+            this.previousActionName = this.currentActionName;
+        }
+        
+        // Reset and configure new action
+        newAction.reset();
+        newAction.paused = false;
+        
+        // Crossfade from current action
+        if (this.currentAction && this.currentAction !== newAction) {
+            this.currentAction.fadeOut(fadeDuration);
+            newAction.fadeIn(fadeDuration);
+        }
+        
+        newAction.play();
+        this.currentAction = newAction;
+        this.currentActionName = actionName;
+        
+        // Update attacking state
+        if (ANIMATION_CONFIG.oneShot.includes(actionName)) {
+            this.isAttacking = true;
+        }
+        
+        // Fire state change callback
+        if (this.onStateChange) {
+            this.onStateChange(actionName, this.previousActionName);
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Play idle animation (walk paused)
+     */
+    playIdle() {
+        if (this.isAttacking) return false;
+        
+        if (this.currentActionName !== AnimationState.WALK) {
+            this.play(AnimationState.WALK, ANIMATION_CONFIG.fadeDuration.toIdle);
+        }
+        
+        if (this.actions.walk) {
+            this.actions.walk.paused = true;
+        }
+        
+        this.currentActionName = AnimationState.IDLE;
+        return true;
+    }
+    
+    /**
+     * Play walk animation
+     */
+    playWalk() {
+        if (this.isAttacking) return false;
+        
+        if (this.currentActionName !== AnimationState.WALK) {
+            this.play(AnimationState.WALK);
+        }
+        
+        if (this.actions.walk) {
+            this.actions.walk.paused = false;
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Play run animation
+     */
+    playRun() {
+        if (this.isAttacking) return false;
+        return this.play(AnimationState.RUN);
+    }
+    
+    /**
+     * Play punch animation
+     */
+    playPunch() {
+        if (this.isAttacking) return false;
+        return this.play(AnimationState.PUNCH, ANIMATION_CONFIG.fadeDuration.toAttack);
+    }
+    
+    /**
+     * Play kick animation
+     */
+    playKick() {
+        if (this.isAttacking) return false;
+        return this.play(AnimationState.KICK, ANIMATION_CONFIG.fadeDuration.toAttack);
+    }
+    
+    /**
+     * Play hit reaction animation
+     */
+    playHit() {
+        return this.play(AnimationState.HIT, ANIMATION_CONFIG.fadeDuration.toAttack);
+    }
+    
+    /**
+     * Play fall/KO animation
+     */
+    playFall() {
+        return this.play(AnimationState.FALL, ANIMATION_CONFIG.fadeDuration.toAttack);
+    }
+    
+    /**
+     * Update animation based on movement state
+     * @param {Object} state - { isMoving, isRunning, isGrounded, isJumping }
+     */
+    updateFromMovementState(state) {
+        // Don't change animation during attack
+        if (this.isAttacking) return;
+        
+        const { isMoving, isRunning, isGrounded, isJumping } = state;
+        
+        // TODO: Add jump animation when available
+        // if (!isGrounded || isJumping) { ... }
+        
+        if (isRunning && isMoving) {
+            this.playRun();
+        } else if (isMoving) {
+            this.playWalk();
+        } else {
+            this.playIdle();
+        }
+    }
+    
+    /**
+     * Update mixer - call each frame
+     */
+    update(delta) {
+        this.mixer.update(delta);
+    }
+    
+    /**
+     * Get current animation info
+     */
+    getInfo() {
+        const action = this.currentAction;
+        return {
+            name: this.currentActionName,
+            time: action ? action.time : 0,
+            duration: action ? action.getClip().duration : 0,
+            isPlaying: action ? action.isRunning() : false,
+            isPaused: action ? action.paused : false,
+            isAttacking: this.isAttacking,
+            loop: action ? action.loop : THREE.LoopRepeat
+        };
+    }
+    
+    /**
+     * Stop all animations
+     */
+    stopAll() {
+        this.mixer.stopAllAction();
+        this.currentAction = null;
+        this.currentActionName = AnimationState.IDLE;
+        this.isAttacking = false;
+    }
+    
+    /**
+     * Dispose resources
+     */
+    dispose() {
+        this.stopAll();
+        this.mixer.uncacheRoot(this.model);
+    }
+}
+
+export default AnimationController;
+
