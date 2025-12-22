@@ -1,0 +1,521 @@
+/* ==================================
+   PELEA DE PELUCHES - Main Styles
+   ================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;700&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --primary-color: #ff3366;
+    --secondary-color: #00ffcc;
+    --accent-color: #ffcc00;
+    --dark-bg: #0a0a15;
+    --panel-bg: rgba(10, 10, 21, 0.85);
+    --glow-pink: 0 0 20px rgba(255, 51, 102, 0.6);
+    --glow-cyan: 0 0 20px rgba(0, 255, 204, 0.6);
+}
+
+body {
+    font-family: 'Rajdhani', sans-serif;
+    background: var(--dark-bg);
+    overflow: hidden;
+    color: #fff;
+}
+
+#game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+#game-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* ==================================
+   HUD / UI Overlay
+   ================================== */
+
+#hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.game-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 900;
+    text-align: center;
+    padding: 20px;
+    background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    filter: drop-shadow(0 0 10px rgba(255, 51, 102, 0.5));
+    letter-spacing: 4px;
+}
+
+/* Controls Panel */
+.controls-panel {
+    position: absolute;
+    top: 100px;
+    left: 20px;
+    background: var(--panel-bg);
+    border: 2px solid var(--secondary-color);
+    border-radius: 12px;
+    padding: 20px;
+    min-width: 200px;
+    backdrop-filter: blur(10px);
+    box-shadow: var(--glow-cyan), inset 0 0 30px rgba(0, 255, 204, 0.05);
+    pointer-events: auto;
+}
+
+.controls-panel h3 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    color: var(--secondary-color);
+    margin-bottom: 15px;
+    text-align: center;
+    border-bottom: 1px solid rgba(0, 255, 204, 0.3);
+    padding-bottom: 10px;
+}
+
+.key-bindings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.key-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.section-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.75rem;
+    color: var(--accent-color);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+}
+
+.key-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 32px;
+    padding: 0 10px;
+    background: linear-gradient(180deg, #2a2a3d 0%, #1a1a28 100%);
+    border: 2px solid var(--primary-color);
+    border-radius: 6px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    box-shadow: 0 3px 0 #0f0f18, var(--glow-pink);
+    text-shadow: 0 0 8px var(--primary-color);
+}
+
+/* Current Animation Display */
+#current-animation {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel-bg);
+    border: 2px solid var(--accent-color);
+    border-radius: 50px;
+    padding: 15px 30px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 0 20px rgba(255, 204, 0, 0.4);
+}
+
+#current-animation .label {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+#animation-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    text-transform: uppercase;
+    text-shadow: 0 0 10px var(--accent-color);
+}
+
+/* ==================================
+   Loading Screen
+   ================================== */
+
+#loading-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 50%, #0a0a15 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+#loading-screen.hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.loader-content {
+    text-align: center;
+}
+
+.spinner {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 30px;
+    border: 4px solid rgba(255, 51, 102, 0.2);
+    border-top: 4px solid var(--primary-color);
+    border-right: 4px solid var(--secondary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    box-shadow: var(--glow-pink), var(--glow-cyan);
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#loading-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    color: var(--secondary-color);
+    margin-bottom: 20px;
+    letter-spacing: 2px;
+}
+
+.progress-bar {
+    width: 300px;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 255, 204, 0.3);
+}
+
+#progress-fill {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 10px var(--secondary-color);
+}
+
+/* ==================================
+   Responsive Design
+   ================================== */
+
+@media (max-width: 768px) {
+    .game-title {
+        font-size: 1.5rem;
+        padding: 15px;
+    }
+    
+    .controls-panel {
+        top: auto;
+        bottom: 100px;
+        left: 10px;
+        padding: 15px;
+        min-width: 160px;
+    }
+    
+    .controls-panel h3 {
+        font-size: 0.85rem;
+    }
+    
+    .key-item {
+        font-size: 0.8rem;
+    }
+    
+    .key {
+        min-width: 30px;
+        height: 28px;
+        font-size: 0.7rem;
+    }
+    
+    #current-animation {
+        padding: 10px 20px;
+    }
+    
+    #animation-name {
+        font-size: 1rem;
+    }
+}
+
+/* ==================================
+   Animation Effects
+   ================================== */
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: var(--glow-cyan);
+    }
+    50% {
+        box-shadow: 0 0 30px rgba(0, 255, 204, 0.8);
+    }
+}
+
+.controls-panel {
+    animation: pulse-glow 3s ease-in-out infinite;
+}
+
+/* Key press animation class */
+.key.active {
+    background: linear-gradient(180deg, var(--primary-color) 0%, #cc2952 100%);
+    color: #fff;
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 #0f0f18;
+}
+
+/* ==================================
+   Player HUD System
+   ================================== */
+
+#player-huds {
+    position: absolute;
+    top: 80px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    padding: 0 20px;
+}
+
+.player-hud {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 180px;
+}
+
+.player-hud-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.player-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 1rem;
+    color: var(--dark-bg);
+    box-shadow: 0 0 15px currentColor;
+}
+
+.player-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.player-damage {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    font-weight: 900;
+    line-height: 1;
+    text-shadow: 0 0 20px currentColor, 0 4px 8px rgba(0,0,0,0.5);
+    transition: all 0.2s ease;
+}
+
+.player-damage.low {
+    color: #00ffcc;
+}
+
+.player-damage.medium {
+    color: #ffcc00;
+}
+
+.player-damage.high {
+    color: #ff6600;
+}
+
+.player-damage.critical {
+    color: #ff3366;
+    animation: damage-pulse 0.5s ease infinite;
+}
+
+@keyframes damage-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.player-stocks {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.stock-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    box-shadow: 0 0 8px currentColor;
+    transition: all 0.3s ease;
+}
+
+.stock-icon.lost {
+    opacity: 0.2;
+    transform: scale(0.8);
+}
+
+/* Hit Effect Animation */
+.player-hud.hit .player-damage {
+    animation: hit-shake 0.3s ease;
+}
+
+@keyframes hit-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-5px); }
+    40% { transform: translateX(5px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+}
+
+/* KO Animation */
+.player-hud.ko .player-badge {
+    animation: ko-flash 0.5s ease 3;
+}
+
+@keyframes ko-flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* ==================================
+   Fight Announcement
+   ================================== */
+
+#fight-announcement {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 6rem;
+    font-weight: 900;
+    color: var(--accent-color);
+    text-shadow: 
+        0 0 40px var(--accent-color),
+        0 0 80px var(--accent-color),
+        0 4px 0 var(--primary-color);
+    z-index: 150;
+    animation: fight-in 0.5s ease forwards, fight-out 0.3s ease 1.5s forwards;
+    pointer-events: none;
+}
+
+@keyframes fight-in {
+    0% {
+        transform: translate(-50%, -50%) scale(3);
+        opacity: 0;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(0.9);
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes fight-out {
+    to {
+        transform: translate(-50%, -50%) scale(1.5);
+        opacity: 0;
+    }
+}
+
+/* ==================================
+   Combo Counter
+   ================================== */
+
+.combo-display {
+    position: absolute;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    color: var(--accent-color);
+    text-shadow: 0 0 20px var(--accent-color);
+    pointer-events: none;
+    animation: combo-pop 0.3s ease;
+}
+
+@keyframes combo-pop {
+    0% {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* ==================================
+   Screen Shake Effect
+   ================================== */
+
+.screen-shake {
+    animation: screen-shake 0.3s ease;
+}
+
+@keyframes screen-shake {
+    0%, 100% { transform: translate(0, 0); }
+    20% { transform: translate(-3px, 2px); }
+    40% { transform: translate(3px, -2px); }
+    60% { transform: translate(-2px, 1px); }
+    80% { transform: translate(2px, -1px); }
+}
+

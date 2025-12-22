@@ -1,0 +1,17 @@
+{
+  "name": "pelea-de-peluches-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for Pelea de Peluches multiplayer game",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.2",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
+

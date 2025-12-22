@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pelea de Peluches - 3D Fighter</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- HUD / UI Overlay -->
+        <div id="hud">
+            <h1 class="game-title">PELEA DE PELUCHES</h1>
+            
+            <!-- Player HUD Bars -->
+            <div id="player-huds">
+                <!-- Dynamic player HUDs will be inserted here -->
+            </div>
+            
+            <!-- Controls Panel (shown in lobby/testing) -->
+            <div class="controls-panel" id="controls-panel">
+                <h3>⌨️ CONTROLES LOCALES</h3>
+                <div class="key-bindings">
+                    <div class="key-section">
+                        <span class="section-title">Movimiento</span>
+                        <div class="key-item"><span class="key">←</span><span class="key">→</span> Mover</div>
+                        <div class="key-item"><span class="key">↑</span> / <span class="key">SPACE</span> Saltar</div>
+                        <div class="key-item"><span class="key">SHIFT</span> Correr</div>
+                    </div>
+                    <div class="key-section">
+                        <span class="section-title">Ataques</span>
+                        <div class="key-item"><span class="key">J</span> Golpe</div>
+                        <div class="key-item"><span class="key">K</span> Patada</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Current State Display -->
+            <div id="current-animation">
+                <span class="label">Estado:</span>
+                <span id="animation-name">Cargando...</span>
+            </div>
+        </div>
+        
+        <!-- Loading screen -->
+        <div id="loading-screen">
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p id="loading-text">Cargando modelo...</p>
+                <div class="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

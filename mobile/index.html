@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0a15">
+    
+    <title>Pelea de Peluches - Control</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Join Screen -->
+        <div id="join-screen" class="screen active">
+            <div class="logo-container">
+                <h1 class="game-logo">PELEA DE<br>PELUCHES</h1>
+                <p class="subtitle">CONTROL REMOTO</p>
+            </div>
+            
+            <div class="join-form">
+                <div class="input-group">
+                    <label for="room-code">Código de Sala</label>
+                    <input 
+                        type="text" 
+                        id="room-code" 
+                        placeholder="ABCD" 
+                        maxlength="4" 
+                        autocomplete="off"
+                        autocapitalize="characters"
+                    >
+                </div>
+                
+                <div class="input-group">
+                    <label for="player-name">Tu Nombre</label>
+                    <input 
+                        type="text" 
+                        id="player-name" 
+                        placeholder="Jugador" 
+                        maxlength="12"
+                        autocomplete="off"
+                    >
+                </div>
+                
+                <button id="join-btn" class="btn-primary">
+                    <span class="btn-text">UNIRSE</span>
+                    <span class="btn-icon">→</span>
+                </button>
+                
+                <p id="join-error" class="error-message"></p>
+            </div>
+            
+            <div class="connection-status" id="connection-status">
+                <span class="status-dot"></span>
+                <span class="status-text">Conectando...</span>
+            </div>
+        </div>
+        
+        <!-- Lobby Screen -->
+        <div id="lobby-screen" class="screen">
+            <div class="lobby-header">
+                <h2>Sala: <span id="lobby-room-code">----</span></h2>
+                <button id="leave-btn" class="btn-icon-only">✕</button>
+            </div>
+            
+            <div class="player-info">
+                <div class="player-avatar" id="player-avatar">P1</div>
+                <h3 id="player-display-name">Jugador</h3>
+                <p class="player-status" id="player-status">Esperando...</p>
+            </div>
+            
+            <div class="players-list">
+                <h4>Jugadores en sala</h4>
+                <ul id="players-list"></ul>
+            </div>
+            
+            <button id="ready-btn" class="btn-ready">
+                <span class="btn-text">¡LISTO!</span>
+            </button>
+        </div>
+        
+        <!-- Controller Screen -->
+        <div id="controller-screen" class="screen">
+            <div class="controller-header">
+                <div class="player-badge" id="controller-player-badge">
+                    <span class="badge-name">P1</span>
+                </div>
+                <div class="game-info">
+                    <span class="health-label">DAÑO</span>
+                    <span class="health-value" id="player-damage">0%</span>
+                </div>
+                <div class="stocks-display" id="stocks-display">
+                    <span class="stock">●</span>
+                    <span class="stock">●</span>
+                    <span class="stock">●</span>
+                </div>
+            </div>
+            
+            <div class="controller-body">
+                <!-- D-Pad (Left side) -->
+                <div class="dpad-container">
+                    <div class="dpad">
+                        <button class="dpad-btn dpad-up" data-input="jump">
+                            <span class="arrow">▲</span>
+                        </button>
+                        <button class="dpad-btn dpad-left" data-input="left">
+                            <span class="arrow">◀</span>
+                        </button>
+                        <div class="dpad-center"></div>
+                        <button class="dpad-btn dpad-right" data-input="right">
+                            <span class="arrow">▶</span>
+                        </button>
+                        <button class="dpad-btn dpad-down" data-input="run">
+                            <span class="arrow">▼</span>
+                            <span class="label">RUN</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons (Right side) -->
+                <div class="action-buttons">
+                    <button class="action-btn btn-a" data-action="punch">
+                        <span class="btn-label">A</span>
+                        <span class="btn-action">GOLPE</span>
+                    </button>
+                    <button class="action-btn btn-b" data-action="kick">
+                        <span class="btn-label">B</span>
+                        <span class="btn-action">PATADA</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Footer with menu button -->
+            <div class="controller-footer">
+                <button id="menu-btn" class="btn-menu">
+                    <span>☰</span> MENÚ
+                </button>
+            </div>
+        </div>
+        
+        <!-- Game Over Overlay -->
+        <div id="game-over-overlay" class="overlay hidden">
+            <div class="overlay-content">
+                <h2 id="game-over-title">¡JUEGO TERMINADO!</h2>
+                <p id="game-over-message">Ganador: Player 1</p>
+                <button id="rematch-btn" class="btn-primary">REVANCHA</button>
+                <button id="exit-btn" class="btn-secondary">SALIR</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script type="module" src="js/controller.js"></script>
+</body>
+</html>
+
