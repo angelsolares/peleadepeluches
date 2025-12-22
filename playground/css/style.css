@@ -369,6 +369,161 @@ body {
 }
 
 /* =================================
+   Speed Controls
+   ================================= */
+
+#speed-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.speed-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.speed-row label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    min-width: 70px;
+}
+
+.speed-row select {
+    flex: 1;
+    padding: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.speed-row select:focus {
+    outline: none;
+    border-color: var(--accent-cyan);
+}
+
+#speed-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 6px;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+#speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--accent-cyan);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+    transition: transform 0.2s;
+}
+
+#speed-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+#speed-value {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--accent-cyan);
+    min-width: 40px;
+    text-align: right;
+}
+
+.speed-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.speed-btn {
+    flex: 1;
+    padding: 10px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid;
+}
+
+.speed-btn.preview {
+    background: var(--bg-secondary);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+}
+
+.speed-btn.preview:hover {
+    background: rgba(0, 255, 204, 0.2);
+}
+
+.speed-btn.save {
+    background: var(--bg-secondary);
+    border-color: var(--accent-yellow);
+    color: var(--accent-yellow);
+}
+
+.speed-btn.save:hover {
+    background: rgba(255, 204, 0, 0.2);
+}
+
+.speed-btn.reset {
+    background: var(--bg-secondary);
+    border-color: var(--accent-pink);
+    color: var(--accent-pink);
+}
+
+.speed-btn.reset:hover {
+    background: rgba(255, 51, 102, 0.2);
+}
+
+#saved-speeds {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+#saved-speeds h4 {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+#saved-speeds-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.saved-speed-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.7rem;
+}
+
+.saved-speed-tag .name {
+    color: var(--text-secondary);
+}
+
+.saved-speed-tag .value {
+    color: var(--accent-cyan);
+    font-weight: 600;
+}
+
+/* =================================
    FBX Loader
    ================================= */
 

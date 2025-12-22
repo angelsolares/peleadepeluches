@@ -49,6 +49,22 @@ const animationDurationEl = document.getElementById('animation-duration');
 const animationStatusEl = document.getElementById('animation-status');
 const progressBar = document.getElementById('progress-bar');
 
+// Animation Speed Storage Key
+const SPEED_STORAGE_KEY = 'pelea-peluches-animation-speeds';
+
+// Default animation speeds
+const defaultSpeeds = {
+    walk: 1.0,
+    run: 1.0,
+    punch: 1.0,
+    kick: 1.0,
+    hit: 1.0,
+    fall: 1.0
+};
+
+// Current speeds (loaded from storage or defaults)
+let animationSpeeds = { ...defaultSpeeds };
+
 // =================================
 // Initialization
 // =================================
@@ -233,6 +249,9 @@ async function loadCharacter() {
             updateActiveButton();
         };
         
+        // Apply saved animation speeds
+        applySavedSpeedsToController();
+        
         // Start with idle
         animationController.playIdle();
         
@@ -300,9 +319,167 @@ function setupControls() {
     
     fbxFileInput.addEventListener('change', handleFBXUpload);
     
+    // Animation Speed Controls
+    setupSpeedControls();
+    
     // Keyboard controls
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+}
+
+// =================================
+// Animation Speed Controls
+// =================================
+
+function setupSpeedControls() {
+    const speedSelect = document.getElementById('speed-animation-select');
+    const speedSlider = document.getElementById('speed-slider');
+    const speedValue = document.getElementById('speed-value');
+    const btnPreview = document.getElementById('btn-preview-speed');
+    const btnSave = document.getElementById('btn-save-speed');
+    const btnReset = document.getElementById('btn-reset-speed');
+    
+    // Load saved speeds from localStorage
+    loadSavedSpeeds();
+    updateSavedSpeedsList();
+    
+    // Update slider when animation selection changes
+    speedSelect.addEventListener('change', () => {
+        const animName = speedSelect.value;
+        const currentSpeed = animationSpeeds[animName] || 1.0;
+        speedSlider.value = currentSpeed;
+        speedValue.textContent = `${currentSpeed.toFixed(1)}x`;
+    });
+    
+    // Update display when slider changes
+    speedSlider.addEventListener('input', () => {
+        const speed = parseFloat(speedSlider.value);
+        speedValue.textContent = `${speed.toFixed(1)}x`;
+    });
+    
+    // Preview button - play the animation with current slider speed
+    btnPreview.addEventListener('click', () => {
+        const animName = speedSelect.value;
+        const speed = parseFloat(speedSlider.value);
+        
+        // Temporarily set the speed and play the animation
+        if (animationController) {
+            animationController.setAnimationSpeed(animName, speed);
+            playAnimation(animName);
+        }
+    });
+    
+    // Save button - save the speed to localStorage
+    btnSave.addEventListener('click', () => {
+        const animName = speedSelect.value;
+        const speed = parseFloat(speedSlider.value);
+        
+        // Update speeds object
+        animationSpeeds[animName] = speed;
+        
+        // Save to localStorage
+        saveSpeeds();
+        
+        // Update the animation controller permanently
+        if (animationController) {
+            animationController.setAnimationSpeed(animName, speed);
+        }
+        
+        // Update display
+        updateSavedSpeedsList();
+        
+        // Show confirmation
+        showSpeedSavedFeedback(animName, speed);
+    });
+    
+    // Reset button - reset current animation to default speed
+    btnReset.addEventListener('click', () => {
+        const animName = speedSelect.value;
+        const defaultSpeed = defaultSpeeds[animName] || 1.0;
+        
+        // Reset speed
+        animationSpeeds[animName] = defaultSpeed;
+        speedSlider.value = defaultSpeed;
+        speedValue.textContent = `${defaultSpeed.toFixed(1)}x`;
+        
+        // Update animation controller
+        if (animationController) {
+            animationController.setAnimationSpeed(animName, defaultSpeed);
+        }
+        
+        // Save to localStorage
+        saveSpeeds();
+        updateSavedSpeedsList();
+    });
+}
+
+function loadSavedSpeeds() {
+    try {
+        const saved = localStorage.getItem(SPEED_STORAGE_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            animationSpeeds = { ...defaultSpeeds, ...parsed };
+            console.log('[Playground] Loaded animation speeds:', animationSpeeds);
+        }
+    } catch (e) {
+        console.warn('[Playground] Failed to load saved speeds:', e);
+        animationSpeeds = { ...defaultSpeeds };
+    }
+}
+
+function saveSpeeds() {
+    try {
+        localStorage.setItem(SPEED_STORAGE_KEY, JSON.stringify(animationSpeeds));
+        console.log('[Playground] Saved animation speeds:', animationSpeeds);
+    } catch (e) {
+        console.warn('[Playground] Failed to save speeds:', e);
+    }
+}
+
+function updateSavedSpeedsList() {
+    const listEl = document.getElementById('saved-speeds-list');
+    if (!listEl) return;
+    
+    listEl.innerHTML = '';
+    
+    for (const [name, speed] of Object.entries(animationSpeeds)) {
+        const isDefault = speed === (defaultSpeeds[name] || 1.0);
+        if (!isDefault) {
+            const tag = document.createElement('span');
+            tag.className = 'saved-speed-tag';
+            tag.innerHTML = `<span class="name">${name}:</span> <span class="value">${speed.toFixed(1)}x</span>`;
+            listEl.appendChild(tag);
+        }
+    }
+    
+    if (listEl.children.length === 0) {
+        listEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.75rem;">Todas en velocidad normal (1.0x)</span>';
+    }
+}
+
+function showSpeedSavedFeedback(animName, speed) {
+    const btnSave = document.getElementById('btn-save-speed');
+    const originalText = btnSave.textContent;
+    btnSave.textContent = `✓ ${animName}: ${speed.toFixed(1)}x`;
+    btnSave.style.background = 'rgba(0, 255, 204, 0.3)';
+    
+    setTimeout(() => {
+        btnSave.textContent = originalText;
+        btnSave.style.background = '';
+    }, 1500);
+}
+
+/**
+ * Apply saved animation speeds to the animation controller
+ */
+function applySavedSpeedsToController() {
+    if (!animationController) return;
+    
+    for (const [name, speed] of Object.entries(animationSpeeds)) {
+        if (speed !== 1.0) {
+            animationController.setAnimationSpeed(name, speed);
+        }
+    }
 }
 
 /**

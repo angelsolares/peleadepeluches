@@ -18,12 +18,33 @@ const PHYSICS = {
     GRAVITY: -30,
     MOVE_SPEED: 4,
     RUN_SPEED: 7,
-    JUMP_FORCE: 12,
+    JUMP_FORCE: 15, // Increased to reach floating platforms (max height ~3.75 units)
     GROUND_Y: 0,
     // 2D Stage boundaries (Smash Bros style)
-    STAGE_LEFT: -6,
-    STAGE_RIGHT: 6
+    STAGE_LEFT: -8,  // Extended to match platform positions
+    STAGE_RIGHT: 8
 };
+
+// Animation Speed Storage Key (shared with playground)
+const SPEED_STORAGE_KEY = 'pelea-peluches-animation-speeds';
+
+/**
+ * Load saved animation speeds from localStorage
+ * These are configured in the playground and affect gameplay
+ */
+function loadSavedAnimationSpeeds() {
+    try {
+        const saved = localStorage.getItem(SPEED_STORAGE_KEY);
+        if (saved) {
+            const speeds = JSON.parse(saved);
+            console.log('[Game] Loaded animation speeds from playground:', speeds);
+            return speeds;
+        }
+    } catch (e) {
+        console.warn('[Game] Failed to load animation speeds:', e);
+    }
+    return null;
+}
 
 // =================================
 // Player Controller Class
@@ -275,6 +296,12 @@ class PlayerEntity {
         
         // Create shared AnimationController (handles mixer, actions, and transitions)
         this.animController = new AnimationController(this.model, baseAnimations);
+        
+        // Apply saved animation speeds from playground
+        const savedSpeeds = loadSavedAnimationSpeeds();
+        if (savedSpeeds) {
+            this.animController.setAnimationSpeeds(savedSpeeds);
+        }
         
         // Setup animation finished callback
         this.animController.onAnimationFinished = (name) => {

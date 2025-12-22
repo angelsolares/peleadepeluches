@@ -335,6 +335,41 @@ export class AnimationController {
     }
     
     /**
+     * Set playback speed for a specific animation
+     * @param {string} actionName - Name of the animation
+     * @param {number} speed - Playback speed (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
+     */
+    setAnimationSpeed(actionName, speed) {
+        const action = this.actions[actionName];
+        if (action) {
+            action.timeScale = speed;
+            console.log(`[AnimationController] Set ${actionName} speed to ${speed}x`);
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Get playback speed for a specific animation
+     * @param {string} actionName - Name of the animation
+     * @returns {number} Current playback speed
+     */
+    getAnimationSpeed(actionName) {
+        const action = this.actions[actionName];
+        return action ? action.timeScale : 1.0;
+    }
+    
+    /**
+     * Set playback speeds for multiple animations at once
+     * @param {Object} speeds - Object with animation names as keys and speeds as values
+     */
+    setAnimationSpeeds(speeds) {
+        for (const [name, speed] of Object.entries(speeds)) {
+            this.setAnimationSpeed(name, speed);
+        }
+    }
+    
+    /**
      * Dispose resources
      */
     dispose() {

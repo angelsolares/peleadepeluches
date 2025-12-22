@@ -123,6 +123,38 @@
                     </div>
                 </section>
 
+                <!-- Animation Speed Control -->
+                <section class="panel-section">
+                    <h2>⚡ Velocidad de Animación</h2>
+                    <div id="speed-controls">
+                        <div class="speed-row">
+                            <label for="speed-animation-select">Animación:</label>
+                            <select id="speed-animation-select">
+                                <option value="walk">Walk</option>
+                                <option value="run">Run</option>
+                                <option value="punch">Punch</option>
+                                <option value="kick">Kick</option>
+                                <option value="hit">Hit</option>
+                                <option value="fall">Fall</option>
+                            </select>
+                        </div>
+                        <div class="speed-row">
+                            <label for="speed-slider">Velocidad:</label>
+                            <input type="range" id="speed-slider" min="0.1" max="3" step="0.1" value="1">
+                            <span id="speed-value">1.0x</span>
+                        </div>
+                        <div class="speed-buttons">
+                            <button id="btn-preview-speed" class="speed-btn preview">▶ Previsualizar</button>
+                            <button id="btn-save-speed" class="speed-btn save">💾 Guardar</button>
+                            <button id="btn-reset-speed" class="speed-btn reset">↺ Reset</button>
+                        </div>
+                        <div id="saved-speeds">
+                            <h4>Velocidades Guardadas:</h4>
+                            <div id="saved-speeds-list"></div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Custom FBX Loader -->
                 <section class="panel-section">
                     <h2>Cargar Animación FBX</h2>
