@@ -76,12 +76,35 @@ class PlayerController {
             }
         }
         
-        // Don't process movement during attack
+        // Don't process movement during attack, but still apply gravity
         if (this.isAttacking) {
             if (!this.isGrounded) {
                 this.velocity.y += PHYSICS.GRAVITY * delta;
+                const prevY = this.position.y;
                 this.position.y += this.velocity.y * delta;
                 
+                // Check platform collisions during attack
+                for (const platform of stagePlatforms) {
+                    const halfWidth = platform.width / 2;
+                    if (this.position.x >= platform.x - halfWidth && this.position.x <= platform.x + halfWidth) {
+                        if (platform.isMainGround && this.position.y <= platform.y) {
+                            this.position.y = platform.y;
+                            this.velocity.y = 0;
+                            this.isGrounded = true;
+                            this.isJumping = false;
+                            break;
+                        }
+                        if (!platform.isMainGround && this.velocity.y <= 0 && prevY >= platform.y && this.position.y <= platform.y) {
+                            this.position.y = platform.y;
+                            this.velocity.y = 0;
+                            this.isGrounded = true;
+                            this.isJumping = false;
+                            break;
+                        }
+                    }
+                }
+                
+                // Fallback ground
                 if (this.position.y <= PHYSICS.GROUND_Y) {
                     this.position.y = PHYSICS.GROUND_Y;
                     this.velocity.y = 0;
@@ -120,12 +143,49 @@ class PlayerController {
             this.velocity.y += PHYSICS.GRAVITY * delta;
         }
         
+        // Store previous Y for platform detection
+        const prevY = this.position.y;
+        
         // Update position
         this.position.x += this.velocity.x * delta;
         this.position.y += this.velocity.y * delta;
         
-        // Ground collision
-        if (this.position.y <= PHYSICS.GROUND_Y) {
+        // Platform collision detection (including floating platforms)
+        this.isGrounded = false;
+        
+        // Check collision with all platforms
+        for (const platform of stagePlatforms) {
+            const halfWidth = platform.width / 2;
+            const platformLeft = platform.x - halfWidth;
+            const platformRight = platform.x + halfWidth;
+            
+            // Check if player is within platform's horizontal bounds
+            if (this.position.x >= platformLeft && this.position.x <= platformRight) {
+                // For main ground (y=0), always land
+                if (platform.isMainGround && this.position.y <= platform.y) {
+                    this.position.y = platform.y;
+                    this.velocity.y = 0;
+                    this.isGrounded = true;
+                    this.isJumping = false;
+                    break;
+                }
+                
+                // For floating platforms, only land when falling through from above
+                if (!platform.isMainGround && this.velocity.y <= 0) {
+                    // Was above platform last frame, now at or below
+                    if (prevY >= platform.y && this.position.y <= platform.y) {
+                        this.position.y = platform.y;
+                        this.velocity.y = 0;
+                        this.isGrounded = true;
+                        this.isJumping = false;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Fallback: main ground collision (if no platforms found)
+        if (!this.isGrounded && this.position.y <= PHYSICS.GROUND_Y) {
             this.position.y = PHYSICS.GROUND_Y;
             this.velocity.y = 0;
             this.isGrounded = true;
@@ -460,8 +520,14 @@ function setupLights() {
 // Arena/Ground Creation
 // =================================
 
+// Global platforms array for collision detection
+const stagePlatforms = [];
+
 function createArena() {
     // === SIDE-VIEW PLATFORM STAGE (Smash Bros style) ===
+    
+    // Clear platforms array
+    stagePlatforms.length = 0;
     
     // Background plane (far back)
     const bgGeometry = new THREE.PlaneGeometry(40, 20);
@@ -473,21 +539,29 @@ function createArena() {
     background.position.set(0, 5, -8);
     scene.add(background);
     
-    // Main platform
-    const platformWidth = 14;
+    // === MAIN PLATFORM ===
+    const mainPlatformWidth = 14;
     const platformDepth = 4;
     const platformHeight = 0.4;
     
-    const platformGeometry = new THREE.BoxGeometry(platformWidth, platformHeight, platformDepth);
-    const platformMaterial = new THREE.MeshStandardMaterial({
+    const mainPlatformGeometry = new THREE.BoxGeometry(mainPlatformWidth, platformHeight, platformDepth);
+    const mainPlatformMaterial = new THREE.MeshStandardMaterial({
         color: 0x2a2a4a,
         metalness: 0.4,
         roughness: 0.6
     });
-    const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-    platform.position.set(0, -platformHeight / 2, 0);
-    platform.receiveShadow = true;
-    scene.add(platform);
+    const mainPlatform = new THREE.Mesh(mainPlatformGeometry, mainPlatformMaterial);
+    mainPlatform.position.set(0, -platformHeight / 2, 0);
+    mainPlatform.receiveShadow = true;
+    scene.add(mainPlatform);
+    
+    // Register main platform for collision
+    stagePlatforms.push({
+        x: 0,
+        y: 0,
+        width: mainPlatformWidth,
+        isMainGround: true
+    });
     
     // Platform edge glow (left)
     const edgeGeometry = new THREE.BoxGeometry(0.15, platformHeight + 0.1, platformDepth);
@@ -497,7 +571,7 @@ function createArena() {
         opacity: 0.8
     });
     const leftEdge = new THREE.Mesh(edgeGeometry, leftEdgeMaterial);
-    leftEdge.position.set(-platformWidth / 2, -platformHeight / 2, 0);
+    leftEdge.position.set(-mainPlatformWidth / 2, -platformHeight / 2, 0);
     scene.add(leftEdge);
     
     // Platform edge glow (right)
@@ -507,10 +581,51 @@ function createArena() {
         opacity: 0.8
     });
     const rightEdge = new THREE.Mesh(edgeGeometry, rightEdgeMaterial);
-    rightEdge.position.set(platformWidth / 2, -platformHeight / 2, 0);
+    rightEdge.position.set(mainPlatformWidth / 2, -platformHeight / 2, 0);
     scene.add(rightEdge);
     
-    // Platform top line (center indicator)
+    // === FLOATING PLATFORMS (Smash Bros style) ===
+    const floatingPlatformConfigs = [
+        { x: -4, y: 2.5, width: 3, color: 0xff3366 },   // Left high
+        { x: 4, y: 2.5, width: 3, color: 0x00ffcc },    // Right high
+        { x: 0, y: 4.5, width: 2.5, color: 0xffcc00 },  // Center top
+    ];
+    
+    floatingPlatformConfigs.forEach(config => {
+        // Platform body
+        const floatGeometry = new THREE.BoxGeometry(config.width, 0.2, 2);
+        const floatMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3a3a5a,
+            metalness: 0.5,
+            roughness: 0.4
+        });
+        const floatPlatform = new THREE.Mesh(floatGeometry, floatMaterial);
+        floatPlatform.position.set(config.x, config.y, 0);
+        floatPlatform.receiveShadow = true;
+        floatPlatform.castShadow = true;
+        scene.add(floatPlatform);
+        
+        // Glowing edge (bottom)
+        const glowGeometry = new THREE.BoxGeometry(config.width + 0.1, 0.05, 2.1);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: config.color,
+            transparent: true,
+            opacity: 0.6
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        glow.position.set(config.x, config.y - 0.12, 0);
+        scene.add(glow);
+        
+        // Register platform for collision
+        stagePlatforms.push({
+            x: config.x,
+            y: config.y + 0.1, // Top surface
+            width: config.width,
+            isMainGround: false
+        });
+    });
+    
+    // Platform top line (center indicator on main)
     const centerLineGeometry = new THREE.PlaneGeometry(0.1, platformDepth);
     const centerLineMaterial = new THREE.MeshBasicMaterial({
         color: 0xffcc00,
@@ -523,8 +638,8 @@ function createArena() {
     centerLine.position.set(0, 0.01, 0);
     scene.add(centerLine);
     
-    // Grid on platform surface
-    const gridGeometry = new THREE.PlaneGeometry(platformWidth - 0.5, platformDepth - 0.5);
+    // Grid on main platform surface
+    const gridGeometry = new THREE.PlaneGeometry(mainPlatformWidth - 0.5, platformDepth - 0.5);
     const gridMaterial = new THREE.MeshBasicMaterial({
         color: 0x333355,
         transparent: true,
@@ -546,24 +661,24 @@ function createArena() {
     
     // Left pillar
     const leftPillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
-    leftPillar.position.set(-platformWidth / 2 - 1, 1.5, -1);
+    leftPillar.position.set(-mainPlatformWidth / 2 - 1, 1.5, -1);
     leftPillar.castShadow = true;
     scene.add(leftPillar);
     
     // Right pillar
     const rightPillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
-    rightPillar.position.set(platformWidth / 2 + 1, 1.5, -1);
+    rightPillar.position.set(mainPlatformWidth / 2 + 1, 1.5, -1);
     rightPillar.castShadow = true;
     scene.add(rightPillar);
     
     // Pillar glow tops
-    const glowGeometry = new THREE.SphereGeometry(0.2, 16, 16);
-    const leftGlow = new THREE.Mesh(glowGeometry, new THREE.MeshBasicMaterial({ color: 0xff3366 }));
-    leftGlow.position.set(-platformWidth / 2 - 1, 3.2, -1);
+    const glowTopGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+    const leftGlow = new THREE.Mesh(glowTopGeometry, new THREE.MeshBasicMaterial({ color: 0xff3366 }));
+    leftGlow.position.set(-mainPlatformWidth / 2 - 1, 3.2, -1);
     scene.add(leftGlow);
     
-    const rightGlow = new THREE.Mesh(glowGeometry, new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
-    rightGlow.position.set(platformWidth / 2 + 1, 3.2, -1);
+    const rightGlow = new THREE.Mesh(glowTopGeometry, new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
+    rightGlow.position.set(mainPlatformWidth / 2 + 1, 3.2, -1);
     scene.add(rightGlow);
 }
 
@@ -1056,22 +1171,33 @@ function handleGameState(data) {
 function handleAttack(data) {
     console.log('[Game] Attack:', data);
     
-    // Show hit animations and effects
+    // Play attacker's animation (punch or kick)
+    const attacker = players.get(data.attackerId);
+    if (attacker) {
+        attacker.playAnimation(data.attackType); // 'punch' or 'kick'
+    }
+    
+    // Show hit animations and effects for targets
     data.hits.forEach(hit => {
-        const player = players.get(hit.targetId);
-        if (player) {
-            player.playAnimation('hit');
-            player.controller.health = hit.newHealth;
+        const target = players.get(hit.targetId);
+        if (target) {
+            target.playAnimation('hit');
+            target.controller.health = hit.newHealth;
             
-            // Apply knockback
-            if (hit.knockback) {
-                player.controller.velocity.x = hit.knockback.x;
-                player.controller.velocity.y = hit.knockback.y;
+            // Apply knockback - always push AWAY from attacker
+            if (hit.knockback && attacker) {
+                // Calculate direction from attacker to target
+                const dirX = target.controller.position.x - attacker.controller.position.x;
+                const knockbackDir = dirX >= 0 ? 1 : -1; // Push away from attacker
+                
+                // Apply knockback in the correct direction
+                target.controller.velocity.x = knockbackDir * Math.abs(hit.knockback.x);
+                target.controller.velocity.y = Math.abs(hit.knockback.y);
             }
             
             // Trigger visual effects
             triggerHitEffect(hit.targetId);
-            updatePlayerHUD(player);
+            updatePlayerHUD(target);
         }
     });
 }
