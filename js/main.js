@@ -206,6 +206,9 @@ class PlayerEntity {
         this.model = SkeletonUtils.clone(baseModel);
         this.model.scale.set(0.01, 0.01, 0.01);
         
+        // Rotate model to face RIGHT by default (profile view for side-scroller)
+        this.model.rotation.y = -Math.PI / 2;
+        
         // Apply color tint to materials
         this.applyColorTint(color);
         
@@ -294,9 +297,10 @@ class PlayerEntity {
         // Update model position
         this.model.position.copy(this.controller.position);
         
-        // Flip model based on facing direction
-        const targetScaleX = this.controller.facingRight ? 0.01 : -0.01;
-        this.model.scale.x = THREE.MathUtils.lerp(this.model.scale.x, targetScaleX, 0.2);
+        // Rotate model based on facing direction (profile view for side-scroller)
+        // -PI/2 = facing right, +PI/2 = facing left
+        const targetRotationY = this.controller.facingRight ? -Math.PI / 2 : Math.PI / 2;
+        this.model.rotation.y = THREE.MathUtils.lerp(this.model.rotation.y, targetRotationY, 0.2);
         
         // Update animation based on movement state (using shared AnimationController)
         const input = this.controller.input;

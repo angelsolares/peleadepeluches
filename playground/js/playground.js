@@ -167,6 +167,9 @@ async function loadCharacter() {
         model = await loadFBX(loader, `../assets/${animationFiles.walk}`);
         model.scale.set(0.01, 0.01, 0.01);
         
+        // Rotate model 90 degrees so it faces RIGHT by default (profile view for side-scroller)
+        model.rotation.y = -Math.PI / 2;
+        
         // Enable shadows
         model.traverse((child) => {
             if (child.isMesh) {
@@ -287,6 +290,13 @@ function setupControls() {
     
     // Custom FBX file loader
     const fbxFileInput = document.getElementById('fbx-file-input');
+    const fbxSelectBtn = document.getElementById('fbx-select-btn');
+    
+    // Click the hidden file input when button is clicked
+    fbxSelectBtn.addEventListener('click', () => {
+        fbxFileInput.click();
+    });
+    
     fbxFileInput.addEventListener('change', handleFBXUpload);
     
     // Keyboard controls
@@ -608,9 +618,10 @@ function animate() {
             model.position.x = positionX;
         }
         
-        // Update model facing direction
-        const targetScaleX = facingRight ? 0.01 : -0.01;
-        model.scale.x = THREE.MathUtils.lerp(model.scale.x, targetScaleX, 0.15);
+        // Update model facing direction (rotate Y axis for profile view)
+        // -PI/2 = facing right, +PI/2 = facing left
+        const targetRotationY = facingRight ? -Math.PI / 2 : Math.PI / 2;
+        model.rotation.y = THREE.MathUtils.lerp(model.rotation.y, targetRotationY, 0.15);
         
         // Update animation mixer
         animationController.update(delta);
