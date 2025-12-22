@@ -8,7 +8,7 @@
 // =================================
 
 // ⚠️ IMPORTANTE: Cambia esta URL después de desplegar en Railway
-const PRODUCTION_SERVER_URL = 'https://peleadepeluches-server-production.up.railway.app';
+const PRODUCTION_SERVER_URL = 'https://peleadepeluches-production.up.railway.app';
 
 // Detección automática del entorno
 const isLocalhost = window.location.hostname === 'localhost' || 
