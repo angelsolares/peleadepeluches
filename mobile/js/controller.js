@@ -421,7 +421,10 @@ function handleAction(action, btn) {
 
 function sendInput() {
     if (socket && socket.connected) {
+        console.log('[Controller] Sending input:', inputState);
         socket.emit('player-input', inputState);
+    } else {
+        console.log('[Controller] Cannot send input - socket not connected');
     }
 }
 
