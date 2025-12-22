@@ -308,15 +308,8 @@ function setupControls() {
     document.getElementById('btn-camera-side').addEventListener('click', () => setCameraPosition('side'));
     document.getElementById('btn-camera-back').addEventListener('click', () => setCameraPosition('back'));
     
-    // Custom FBX file loader
+    // Custom FBX file loader - using label click (no JS needed for click)
     const fbxFileInput = document.getElementById('fbx-file-input');
-    const fbxSelectBtn = document.getElementById('fbx-select-btn');
-    
-    // Click the hidden file input when button is clicked
-    fbxSelectBtn.addEventListener('click', () => {
-        fbxFileInput.click();
-    });
-    
     fbxFileInput.addEventListener('change', handleFBXUpload);
     
     // Animation Speed Controls
