@@ -206,9 +206,9 @@ class PlayerEntity {
         this.model = SkeletonUtils.clone(baseModel);
         this.model.scale.set(0.01, 0.01, 0.01);
         
-        // Rotate model 90 degrees for profile view (side-scroller style)
-        // The model's "forward" becomes screen-right after this rotation
-        this.model.rotation.y = Math.PI / 2;
+        // Rotate model -90 degrees for profile view (side-scroller style)
+        // Model faces RIGHT by default (toward +X)
+        this.model.rotation.y = -Math.PI / 2;
         
         // Apply color tint to materials
         this.applyColorTint(color);
