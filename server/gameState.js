@@ -10,9 +10,25 @@ class GameStateManager {
         this.GRAVITY = -30;
         this.MOVE_SPEED = 4;
         this.RUN_SPEED = 7;
-        this.JUMP_FORCE = 12;
+        this.JUMP_FORCE = 15;  // Synced with client - allows reaching platforms
         this.GROUND_Y = 0;
         this.ARENA_RADIUS = 4.5;
+        
+        // Stage platforms (same as client)
+        this.platforms = [
+            { x: 0, y: 0, width: 14, isMainGround: true },   // Main ground
+            { x: -4, y: 2.6, width: 4, isMainGround: false }, // Left floating
+            { x: 4, y: 2.6, width: 4, isMainGround: false },  // Right floating
+            { x: 0, y: 4.6, width: 5, isMainGround: false }   // Top floating
+        ];
+        
+        // Stage boundaries
+        this.STAGE_LEFT = -8;
+        this.STAGE_RIGHT = 8;
+        
+        // Pending attacks (for active frames system)
+        // Map<roomCode, Array<{attackerId, attackType, timestamp, processed}>>
+        this.pendingAttacks = new Map();
         
         // Game tick rate (60 FPS)
         this.TICK_RATE = 1000 / 60;
@@ -70,6 +86,11 @@ class GameStateManager {
             player.facingRight = true;
         }
         
+        // Initialize previousY for platform detection
+        if (player.previousY === undefined) {
+            player.previousY = player.position.y;
+        }
+        
         // Horizontal movement
         const currentSpeed = input.run ? this.RUN_SPEED : this.MOVE_SPEED;
         
@@ -87,15 +108,19 @@ class GameStateManager {
             }
         }
         
-        // Check if grounded
-        const isGrounded = player.position.y <= this.GROUND_Y;
+        // Store previous Y before physics update
+        const prevY = player.position.y;
+        
+        // Check if grounded on ANY platform before jump
+        let isGrounded = this.checkIfGrounded(player);
         
         // Jumping
         if (input.jump && isGrounded) {
             player.velocity.y = this.JUMP_FORCE;
+            isGrounded = false;
         }
         
-        // Apply gravity
+        // Apply gravity when not grounded
         if (!isGrounded) {
             player.velocity.y += this.GRAVITY * delta;
         }
@@ -104,20 +129,44 @@ class GameStateManager {
         player.position.x += player.velocity.x * delta;
         player.position.y += player.velocity.y * delta;
         
-        // Ground collision
-        if (player.position.y < this.GROUND_Y) {
-            player.position.y = this.GROUND_Y;
-            player.velocity.y = 0;
+        // Platform collision detection
+        isGrounded = false;
+        for (const platform of this.platforms) {
+            const halfWidth = platform.width / 2;
+            const platformLeft = platform.x - halfWidth;
+            const platformRight = platform.x + halfWidth;
+            
+            // Check if player is within platform's horizontal bounds
+            if (player.position.x >= platformLeft && player.position.x <= platformRight) {
+                // Main ground - always collide
+                if (platform.isMainGround && player.position.y <= platform.y) {
+                    player.position.y = platform.y;
+                    player.velocity.y = 0;
+                    isGrounded = true;
+                    break;
+                }
+                
+                // Floating platforms - only land when falling through from above
+                if (!platform.isMainGround && player.velocity.y <= 0) {
+                    const platformTop = platform.y;
+                    // Was above platform last frame, now at or below
+                    if (prevY >= platformTop && player.position.y <= platformTop) {
+                        player.position.y = platformTop;
+                        player.velocity.y = 0;
+                        isGrounded = true;
+                        break;
+                    }
+                }
+            }
         }
-        
-        // 2D Stage boundaries (Smash Bros style - players can fall off but have limits during normal play)
-        const STAGE_LEFT = -6;
-        const STAGE_RIGHT = 6;
         
         // Soft boundary - allow players to go slightly off stage but not walk infinitely
         // Blast zones handle actual KOs (in checkKOs)
-        player.position.x = Math.max(STAGE_LEFT - 2, Math.min(STAGE_RIGHT + 2, player.position.x));
+        player.position.x = Math.max(this.STAGE_LEFT - 2, Math.min(this.STAGE_RIGHT + 2, player.position.x));
         player.position.z = 0; // Lock Z axis for 2D gameplay
+        
+        // Store Y for next frame
+        player.previousY = player.position.y;
         
         return {
             position: { ...player.position },
@@ -131,7 +180,122 @@ class GameStateManager {
     }
     
     /**
-     * Process an attack action
+     * Check if player is standing on any platform
+     * @param {object} player - Player object
+     * @returns {boolean} Whether player is grounded
+     */
+    checkIfGrounded(player) {
+        const tolerance = 0.1; // Small tolerance for ground detection
+        
+        for (const platform of this.platforms) {
+            const halfWidth = platform.width / 2;
+            const platformLeft = platform.x - halfWidth;
+            const platformRight = platform.x + halfWidth;
+            
+            // Check if within platform bounds
+            if (player.position.x >= platformLeft && player.position.x <= platformRight) {
+                // Check if at platform height
+                if (Math.abs(player.position.y - platform.y) < tolerance) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Queue an attack for processing after active frame delay
+     * @param {string} attackerId - Attacker's socket ID
+     * @param {string} attackType - 'punch' or 'kick'
+     * @param {string} roomCode - Room code
+     * @returns {object|null} Attack info for animation
+     */
+    queueAttack(attackerId, attackType, roomCode) {
+        const room = this.lobbyManager.rooms.get(roomCode);
+        
+        if (!room || room.state !== 'playing') {
+            return null;
+        }
+        
+        const attacker = room.players.get(attackerId);
+        
+        if (!attacker) {
+            return null;
+        }
+        
+        // Attack timing properties
+        const attackTiming = {
+            punch: { activeFrameDelay: 150 },  // ms until hit check
+            kick: { activeFrameDelay: 200 }    // ms until hit check
+        };
+        
+        const timing = attackTiming[attackType] || attackTiming.punch;
+        
+        // Initialize pending attacks for this room if needed
+        if (!this.pendingAttacks.has(roomCode)) {
+            this.pendingAttacks.set(roomCode, []);
+        }
+        
+        // Add attack to queue
+        const pendingAttack = {
+            attackerId,
+            attackType,
+            timestamp: Date.now(),
+            activeTime: Date.now() + timing.activeFrameDelay,
+            processed: false,
+            attackerPosition: { ...attacker.position },
+            facingRight: attacker.facingRight
+        };
+        
+        this.pendingAttacks.get(roomCode).push(pendingAttack);
+        
+        // Return info for animation (immediate feedback)
+        return {
+            attackerId,
+            attackType,
+            attackerPosition: { ...attacker.position },
+            facingRight: attacker.facingRight
+        };
+    }
+    
+    /**
+     * Process pending attacks that have reached their active frames
+     * @param {string} roomCode - Room code
+     * @returns {array} Hit results
+     */
+    processPendingAttacks(roomCode) {
+        const pendingList = this.pendingAttacks.get(roomCode);
+        
+        if (!pendingList || pendingList.length === 0) {
+            return [];
+        }
+        
+        const now = Date.now();
+        const results = [];
+        
+        // Process attacks that have reached their active time
+        for (const attack of pendingList) {
+            if (!attack.processed && now >= attack.activeTime) {
+                attack.processed = true;
+                
+                // Process the actual hit detection
+                const hitResult = this.processAttack(attack.attackerId, attack.attackType, roomCode);
+                if (hitResult && hitResult.hits.length > 0) {
+                    results.push(hitResult);
+                }
+            }
+        }
+        
+        // Clean up processed attacks (older than 1 second)
+        const cutoff = now - 1000;
+        this.pendingAttacks.set(roomCode, pendingList.filter(a => !a.processed || a.timestamp > cutoff));
+        
+        return results;
+    }
+    
+    /**
+     * Process an attack action (actual hit detection)
      * @param {string} attackerId - Attacker's socket ID
      * @param {string} attackType - 'punch' or 'kick'
      * @param {string} roomCode - Room code
@@ -150,21 +314,23 @@ class GameStateManager {
             return null;
         }
         
-        // Attack properties (Smash Bros style)
+        // Attack properties (Smash Bros style) - With active frames timing
         const attackProps = {
             punch: { 
                 damage: 8, 
                 baseKnockback: 3, 
                 knockbackGrowth: 0.08,
-                range: 1.8,
-                hitstun: 0.3  // seconds of hitstun
+                range: 0.9,  // Reduced from 1.8 - requires being close
+                hitstun: 0.3,  // seconds of hitstun
+                activeFrameDelay: 150  // ms until hit check (when punch lands)
             },
             kick: { 
                 damage: 12, 
                 baseKnockback: 5, 
                 knockbackGrowth: 0.1,
-                range: 2.2,
-                hitstun: 0.4
+                range: 1.1,  // Reduced from 2.2 - slightly longer than punch
+                hitstun: 0.4,
+                activeFrameDelay: 200  // ms until hit check (kick is slower)
             }
         };
         
@@ -185,8 +351,9 @@ class GameStateManager {
             const dz = target.position.z - attacker.position.z;
             const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
             
-            // Check if target is in front of attacker and within range
-            const inFront = (facingDir > 0 && dx > -0.5) || (facingDir < 0 && dx < 0.5);
+            // Check if target is in front of attacker (strict - must be in facing direction)
+            // Only hit targets that are actually in the direction the attacker is facing
+            const inFront = (facingDir > 0 && dx > 0) || (facingDir < 0 && dx < 0);
             
             if (distance <= props.range && inFront) {
                 // Apply damage

@@ -194,6 +194,7 @@ io.on('connection', (socket) => {
     
     /**
      * Player attack action
+     * Queue attack for processing after active frame delay
      */
     socket.on('player-attack', (attackType, callback) => {
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
@@ -205,28 +206,17 @@ io.on('connection', (socket) => {
             return;
         }
         
-        const result = gameStateManager.processAttack(socket.id, attackType, roomCode);
+        // Queue the attack (doesn't process hit immediately)
+        const attackInfo = gameStateManager.queueAttack(socket.id, attackType, roomCode);
         
-        if (result) {
-            // Broadcast attack to room
-            io.to(roomCode).emit('attack-performed', result);
-            
-            // Check for KOs
-            const kos = gameStateManager.checkKOs(roomCode);
-            if (kos.length > 0) {
-                io.to(roomCode).emit('player-ko', kos);
-                
-                // Check for game over
-                const gameOver = gameStateManager.checkGameOver(roomCode);
-                if (gameOver) {
-                    stopGameLoop(roomCode);
-                    io.to(roomCode).emit('game-over', gameOver);
-                }
-            }
+        if (attackInfo) {
+            // Immediately broadcast attack-started for animation
+            // Hit detection will happen after activeFrameDelay in game loop
+            io.to(roomCode).emit('attack-started', attackInfo);
         }
         
         if (typeof callback === 'function') {
-            callback({ success: !!result, result });
+            callback({ success: !!attackInfo, attackInfo });
         }
     });
     
@@ -326,6 +316,13 @@ function startGameLoop(roomCode) {
         if (state) {
             // Send state to all clients in room
             io.to(roomCode).emit('game-state', state);
+            
+            // Process pending attacks (active frames system)
+            const attackResults = gameStateManager.processPendingAttacks(roomCode);
+            for (const result of attackResults) {
+                // Broadcast hit results
+                io.to(roomCode).emit('attack-hit', result);
+            }
             
             // Check for KOs
             const kos = gameStateManager.checkKOs(roomCode);

@@ -942,7 +942,8 @@ function initializeSocket() {
     socket.on('game-started', handleGameStarted);
     socket.on('player-input-update', handlePlayerInput);
     socket.on('game-state', handleGameState);
-    socket.on('attack-performed', handleAttack);
+    socket.on('attack-started', handleAttackStarted);  // Animation starts immediately
+    socket.on('attack-hit', handleAttackHit);          // Hit detection after active frames
     socket.on('player-ko', handlePlayerKO);
     socket.on('game-over', handleGameOver);
     socket.on('game-reset', handleGameReset);
@@ -1195,14 +1196,28 @@ function handleGameState(data) {
     });
 }
 
-function handleAttack(data) {
-    console.log('[Game] Attack:', data);
+/**
+ * Handle attack started - play attacker's animation immediately
+ * This is triggered as soon as player presses attack button
+ */
+function handleAttackStarted(data) {
+    console.log('[Game] Attack started:', data.attackType, 'by', data.attackerId);
     
-    // Play attacker's animation (punch or kick)
+    // Play attacker's animation (punch or kick) immediately
     const attacker = players.get(data.attackerId);
     if (attacker) {
         attacker.playAnimation(data.attackType); // 'punch' or 'kick'
     }
+}
+
+/**
+ * Handle attack hit - process damage after active frames delay
+ * This is triggered after the attack animation reaches its active frames
+ */
+function handleAttackHit(data) {
+    console.log('[Game] Attack hit:', data);
+    
+    const attacker = players.get(data.attackerId);
     
     // Show hit animations and effects for targets
     data.hits.forEach(hit => {
@@ -1576,7 +1591,8 @@ function onWindowResize() {
  */
 function checkPlayerCollisions() {
     const playerArray = Array.from(players.values());
-    const COLLISION_RADIUS = 0.6; // How close players can get before being pushed apart
+    const COLLISION_RADIUS = 1.0; // Increased from 0.6 - minimum distance between players
+    const MIN_SEPARATION = 0.8;   // Absolute minimum distance to enforce
     
     for (let i = 0; i < playerArray.length; i++) {
         for (let j = i + 1; j < playerArray.length; j++) {
@@ -1591,17 +1607,28 @@ function checkPlayerCollisions() {
             // Only collide if players are at similar height (not jumping over each other)
             const verticalOverlap = Math.abs(dy) < 1.5;
             
-            if (dist < COLLISION_RADIUS && dist > 0.01 && verticalOverlap) {
-                // Push players apart equally
-                const pushAmount = (COLLISION_RADIUS - dist) / 2;
-                const pushDir = Math.sign(dx);
+            if (dist < COLLISION_RADIUS && verticalOverlap) {
+                // Calculate how much to push apart
+                const overlap = COLLISION_RADIUS - dist;
+                const pushDir = dx === 0 ? 1 : Math.sign(dx); // Default push right if exactly overlapping
                 
-                // Apply push (only if not being knocked back)
-                if (Math.abs(p1.velocity.x) < 5) {
+                // Strong push to prevent passing through - always apply
+                const pushAmount = Math.max(overlap / 2 + 0.05, 0.1);
+                
+                // Apply push to both players (unless being knocked back hard)
+                if (Math.abs(p1.velocity.x) < 10) {
                     p1.position.x -= pushDir * pushAmount;
                 }
-                if (Math.abs(p2.velocity.x) < 5) {
+                if (Math.abs(p2.velocity.x) < 10) {
                     p2.position.x += pushDir * pushAmount;
+                }
+                
+                // Hard enforcement: if still too close, force separation
+                const newDist = Math.abs(p2.position.x - p1.position.x);
+                if (newDist < MIN_SEPARATION) {
+                    const forcePush = (MIN_SEPARATION - newDist) / 2 + 0.1;
+                    p1.position.x -= pushDir * forcePush;
+                    p2.position.x += pushDir * forcePush;
                 }
             }
         }
