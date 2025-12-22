@@ -188,6 +188,8 @@ class PlayerController {
         if (typeof state.health === 'number') this.health = state.health;
         if (typeof state.stocks === 'number') this.stocks = state.stocks;
         if (typeof state.isGrounded === 'boolean') this.isGrounded = state.isGrounded;
+        if (typeof state.facingRight === 'boolean') this.facingRight = state.facingRight;
+        if (state.input) this.input = { ...this.input, ...state.input };
     }
 }
 
@@ -315,9 +317,11 @@ class PlayerEntity {
         this.currentActionName = actionName;
     }
     
-    update(delta) {
-        // Update controller physics (for local player or interpolation)
-        this.controller.update(delta);
+    update(delta, skipPhysics = false) {
+        // Update controller physics only if not skipped (skip during online game)
+        if (!skipPhysics) {
+            this.controller.update(delta);
+        }
         
         // Update model position
         this.model.position.copy(this.controller.position);
@@ -335,29 +339,38 @@ class PlayerEntity {
     
     updateAnimation() {
         const state = this.controller.getMovementState();
+        const input = this.controller.input;
         
-        switch (state) {
-            case 'running':
-                if (this.currentActionName !== 'run') {
-                    this.playAnimation('run');
-                }
-                break;
-            case 'walking':
-                if (this.currentActionName !== 'walk') {
-                    this.playAnimation('walk');
-                }
-                if (this.actions.walk) this.actions.walk.paused = false;
-                break;
-            case 'attacking':
-                // Keep current attack animation
-                break;
-            case 'idle':
-            default:
-                if (this.currentActionName !== 'walk') {
-                    this.playAnimation('walk', 0.2);
-                }
-                if (this.actions.walk) this.actions.walk.paused = true;
-                break;
+        // Check if moving based on input (for server-controlled players)
+        const isMoving = input.left || input.right;
+        const isRunning = isMoving && input.run;
+        
+        // If attacking, keep current attack animation
+        if (state === 'attacking') {
+            return;
+        }
+        
+        // Jumping animation
+        if (!this.controller.isGrounded || this.controller.isJumping) {
+            // Could add jump animation here if available
+        }
+        
+        // Movement animations
+        if (isRunning) {
+            if (this.currentActionName !== 'run') {
+                this.playAnimation('run');
+            }
+        } else if (isMoving) {
+            if (this.currentActionName !== 'walk') {
+                this.playAnimation('walk');
+            }
+            if (this.actions.walk) this.actions.walk.paused = false;
+        } else {
+            // Idle - use walk animation paused
+            if (this.currentActionName !== 'walk') {
+                this.playAnimation('walk', 0.2);
+            }
+            if (this.actions.walk) this.actions.walk.paused = true;
         }
     }
     
@@ -988,6 +1001,13 @@ function handlePlayerInput(data) {
         // Update player input from mobile controller
         player.controller.input = { ...player.controller.input, ...data.input };
         
+        // Update facing direction based on input
+        if (data.input.left) {
+            player.controller.facingRight = false;
+        } else if (data.input.right) {
+            player.controller.facingRight = true;
+        }
+        
         // Handle attacks
         if (data.input.punch && !player.controller.isAttacking) {
             if (player.controller.punch()) {
@@ -1374,7 +1394,12 @@ function animate() {
     
     // Update all players
     players.forEach(player => {
-        player.update(delta);
+        // During online game, skip local physics - server handles it
+        // Only calculate local physics for 'local' player in lobby/testing
+        const isLocalTestPlayer = player.id === 'local';
+        const skipPhysics = gameState === 'playing' && !isLocalTestPlayer;
+        
+        player.update(delta, skipPhysics);
         
         // Update HUD periodically (every few frames for performance)
         if (gameState === 'playing') {

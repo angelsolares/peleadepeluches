@@ -65,13 +65,20 @@ class GameStateManager {
     updatePlayer(player, delta) {
         const input = player.input;
         
+        // Initialize facingRight if not set
+        if (player.facingRight === undefined) {
+            player.facingRight = true;
+        }
+        
         // Horizontal movement
         const currentSpeed = input.run ? this.RUN_SPEED : this.MOVE_SPEED;
         
         if (input.left) {
             player.velocity.x = -currentSpeed;
+            player.facingRight = false;
         } else if (input.right) {
             player.velocity.x = currentSpeed;
+            player.facingRight = true;
         } else {
             // Deceleration
             player.velocity.x *= 0.8;
@@ -119,7 +126,9 @@ class GameStateManager {
             velocity: { ...player.velocity },
             health: player.health,
             stocks: player.stocks,
-            isGrounded: isGrounded
+            isGrounded: isGrounded,
+            facingRight: player.facingRight,
+            input: { ...player.input }
         };
     }
     

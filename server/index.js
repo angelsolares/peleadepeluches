@@ -185,10 +185,10 @@ io.on('connection', (socket) => {
             const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
             const room = lobbyManager.rooms.get(roomCode);
             
-            // Only forward during active game
-            if (room && room.state === 'playing') {
-                // Send input to host for immediate visual feedback
-                socket.to(room.hostId).emit('player-input-update', result);
+            // Forward to host for visual feedback (both lobby and playing)
+            if (room && room.hostId) {
+                // Use io.to() instead of socket.to() to send to specific socket
+                io.to(room.hostId).emit('player-input-update', result);
             }
         }
     });
