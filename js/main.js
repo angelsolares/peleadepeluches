@@ -975,9 +975,24 @@ function handleGameStarted(data) {
     // Clear existing HUDs
     playerHudsContainer.innerHTML = '';
     
-    // Add all players from server
+    // Add all players from server (or update existing ones)
     data.players.forEach(playerData => {
-        addPlayer(playerData);
+        let player = players.get(playerData.id);
+        
+        if (!player) {
+            // Player doesn't exist, create it
+            player = addPlayer(playerData);
+        } else {
+            // Player exists, just create HUD for them
+            createPlayerHUD(player);
+        }
+        
+        // Reset player state for new game
+        if (player) {
+            player.controller.health = 0;
+            player.controller.stocks = 3;
+            updatePlayerHUD(player);
+        }
     });
     
     // Hide room overlay

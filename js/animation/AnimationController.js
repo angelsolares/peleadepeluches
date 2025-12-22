@@ -126,10 +126,16 @@ export class AnimationController {
                 this.isAttacking = false;
                 
                 // Return to idle or walk based on previous state
-                const returnState = this.previousActionName === AnimationState.WALK || 
-                                   this.previousActionName === AnimationState.RUN
+                // Use 'walk' as fallback if 'idle' doesn't exist
+                let returnState = this.previousActionName === AnimationState.WALK || 
+                                  this.previousActionName === AnimationState.RUN
                     ? this.previousActionName 
                     : AnimationState.IDLE;
+                
+                // If idle doesn't exist, use walk as default idle
+                if (returnState === AnimationState.IDLE && !this.actions[AnimationState.IDLE]) {
+                    returnState = AnimationState.WALK;
+                }
                 
                 this.play(returnState, ANIMATION_CONFIG.fadeDuration.toIdle);
             }
