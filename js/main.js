@@ -204,8 +204,8 @@ class PlayerEntity {
         
         // Clone the model
         this.model = SkeletonUtils.clone(baseModel);
-        // Scale
-        this.model.scale.set(0.01, 0.01, 0.01);
+        // Scale (negative Z to face right by default)
+        this.model.scale.set(0.01, 0.01, -0.01);
         
         // Rotate model 90° to show profile view
         this.model.rotation.y = -Math.PI / 2;
@@ -300,8 +300,8 @@ class PlayerEntity {
         
         // Update model facing direction using scale.z flip
         // After -90° rotation, scale.z controls left/right facing
-        // Positive = facing right, negative = facing left
-        const targetScaleZ = this.controller.facingRight ? 0.01 : -0.01;
+        // Negative = facing right, positive = facing left
+        const targetScaleZ = this.controller.facingRight ? -0.01 : 0.01;
         this.model.scale.z = THREE.MathUtils.lerp(this.model.scale.z, targetScaleZ, 0.2);
         
         // Update animation based on movement state (using shared AnimationController)
