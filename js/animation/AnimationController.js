@@ -14,7 +14,7 @@ export const ANIMATION_CONFIG = {
     files: {
         walk: 'Meshy_AI_Animation_Walking_withSkin.fbx',
         run: 'Meshy_AI_Animation_Running_withSkin.fbx',
-        punch: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
+        punch: 'Meshy_AI_Animation_Left_Uppercut_from_Guard_withSkin.fbx',
         kick: 'Meshy_AI_Animation_Boxing_Guard_Right_Straight_Kick_withSkin.fbx',
         hit: 'Meshy_AI_Animation_Hit_Reaction_1_withSkin.fbx',
         fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
