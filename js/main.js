@@ -805,7 +805,7 @@ function showRoomCode(code) {
                 <h2>CÓDIGO DE SALA</h2>
                 <div class="room-code">${code}</div>
                 <p>Escanea o ingresa este código en tu celular</p>
-                <p class="url">http://${window.location.hostname}:8080/mobile/</p>
+                <p class="url">${window.location.origin}/mobile/</p>
                 <button id="start-game-btn" disabled>INICIAR JUEGO</button>
                 <p class="waiting-text">Esperando jugadores...</p>
             </div>
