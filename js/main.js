@@ -204,10 +204,10 @@ class PlayerEntity {
         
         // Clone the model
         this.model = SkeletonUtils.clone(baseModel);
-        this.model.scale.set(0.01, 0.01, 0.01);
+        // Scale with negative X to face right by default (mirrored)
+        this.model.scale.set(-0.01, 0.01, 0.01);
         
         // Rotate model -90 degrees for profile view (side-scroller style)
-        // Model faces RIGHT by default (toward +X)
         this.model.rotation.y = -Math.PI / 2;
         
         // Apply color tint to materials
@@ -299,8 +299,8 @@ class PlayerEntity {
         this.model.position.copy(this.controller.position);
         
         // Update model facing direction using scale.x flip (keeps animation direction correct)
-        // Positive scale = facing right, negative scale = facing left (mirrored)
-        const targetScaleX = this.controller.facingRight ? 0.01 : -0.01;
+        // Negative scale = facing right (mirrored), positive scale = facing left
+        const targetScaleX = this.controller.facingRight ? -0.01 : 0.01;
         this.model.scale.x = THREE.MathUtils.lerp(this.model.scale.x, targetScaleX, 0.2);
         
         // Update animation based on movement state (using shared AnimationController)
