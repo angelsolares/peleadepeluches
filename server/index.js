@@ -179,15 +179,20 @@ io.on('connection', (socket) => {
      * Player input update (from mobile controller)
      */
     socket.on('player-input', (input) => {
+        console.log(`[Socket] player-input received from ${socket.id}:`, JSON.stringify(input));
+        
         const result = lobbyManager.updatePlayerInput(socket.id, input);
         
         if (result) {
             const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
             const room = lobbyManager.rooms.get(roomCode);
             
+            console.log(`[Socket] Room ${roomCode} state: ${room?.state}, hostId: ${room?.hostId}`);
+            
             // Forward to host for visual feedback (both lobby and playing)
             if (room && room.hostId) {
                 // Use io.to() instead of socket.to() to send to specific socket
+                console.log(`[Socket] Forwarding input to host: ${room.hostId}`);
                 io.to(room.hostId).emit('player-input-update', result);
             }
         }
