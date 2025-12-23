@@ -1277,11 +1277,32 @@ function createCharacterSelector() {
                 margin-bottom: 15px;
                 padding-bottom: 15px;
                 border-bottom: 1px solid rgba(0, 255, 204, 0.2);
+                max-height: 280px;
+                overflow-y: auto;
+            }
+            .character-selector::-webkit-scrollbar {
+                width: 8px;
+            }
+            .character-selector::-webkit-scrollbar-track {
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 4px;
+            }
+            .character-selector::-webkit-scrollbar-thumb {
+                background: linear-gradient(180deg, #00ffcc, #ffcc00);
+                border-radius: 4px;
+            }
+            .character-selector::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(180deg, #00ffcc, #ff3366);
             }
             .character-selector h3 {
                 color: #ffcc00;
                 font-size: 0.8rem;
                 margin-bottom: 10px;
+                position: sticky;
+                top: 0;
+                background: rgba(10, 10, 21, 0.95);
+                padding: 5px 0;
+                z-index: 1;
             }
             .character-options {
                 display: grid;
