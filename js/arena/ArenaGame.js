@@ -2122,6 +2122,10 @@ class ArenaGame {
                 // Skip collision if either is being carried
                 if (playerArray[i].isBeingCarried || playerArray[j].isBeingCarried) continue;
                 
+                // Skip collision if either is being thrown (flying through the air)
+                if (playerArray[i].isBeingThrown || playerArray[j].isBeingThrown) continue;
+                if (playerArray[i].isFlying || playerArray[j].isFlying) continue;
+                
                 const dx = p2.position.x - p1.position.x;
                 const dz = p2.position.z - p1.position.z;
                 const dist = Math.sqrt(dx * dx + dz * dz);

@@ -39,8 +39,8 @@ const ARENA_CONFIG = {
     // Knockback
     PUNCH_KNOCKBACK: 3,
     KICK_KNOCKBACK: 5,
-    THROW_KNOCKBACK: 25,       // High knockback for ring outs
-    THROW_HEIGHT: 12,          // Higher launch for clearing ropes
+    THROW_KNOCKBACK: 10,       // Reduced 60% (was 25) - still good for ring outs near edge
+    THROW_HEIGHT: 8,           // Reduced height to match shorter distance
     
     // Timing
     ATTACK_COOLDOWN: 500,      // ms
