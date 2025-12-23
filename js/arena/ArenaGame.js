@@ -692,6 +692,79 @@ class ArenaGame {
         } catch (e) {
             console.warn('[Arena] BGMManager not loaded:', e);
         }
+        
+        // Create mute button
+        this.createMuteButton();
+    }
+    
+    /**
+     * Create mute button for sound control
+     */
+    createMuteButton() {
+        // Check if button already exists
+        if (document.getElementById('mute-btn')) return;
+        
+        const muteBtn = document.createElement('button');
+        muteBtn.id = 'mute-btn';
+        muteBtn.innerHTML = '🔊';
+        muteBtn.title = 'Mutear/Desmutear sonido';
+        muteBtn.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px solid #00ffcc;
+            background: rgba(10, 10, 21, 0.9);
+            color: #00ffcc;
+            font-size: 24px;
+            cursor: pointer;
+            z-index: 1000;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+        
+        let isMuted = false;
+        const self = this;
+        
+        muteBtn.addEventListener('click', () => {
+            isMuted = !isMuted;
+            
+            // Toggle SFX
+            if (self.sfxManager) {
+                self.sfxManager.setEnabled(!isMuted);
+            }
+            
+            // Toggle BGM
+            if (self.bgmManager) {
+                if (isMuted) {
+                    self.bgmManager.setVolume(0);
+                } else {
+                    self.bgmManager.setVolume(1);
+                }
+            }
+            
+            // Update button appearance
+            muteBtn.innerHTML = isMuted ? '🔇' : '🔊';
+            muteBtn.style.borderColor = isMuted ? '#ff3366' : '#00ffcc';
+            muteBtn.style.color = isMuted ? '#ff3366' : '#00ffcc';
+        });
+        
+        // Hover effect
+        muteBtn.addEventListener('mouseenter', () => {
+            muteBtn.style.transform = 'scale(1.1)';
+            muteBtn.style.boxShadow = '0 0 15px rgba(0, 255, 204, 0.5)';
+        });
+        
+        muteBtn.addEventListener('mouseleave', () => {
+            muteBtn.style.transform = 'scale(1)';
+            muteBtn.style.boxShadow = 'none';
+        });
+        
+        document.body.appendChild(muteBtn);
     }
     
     async loadCharacterWithAnimations(characterId = 'edgar') {

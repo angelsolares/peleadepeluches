@@ -783,6 +783,9 @@ async function init() {
     
     // Load and initialize BGM Manager
     await loadBGMManager();
+    
+    // Create mute button
+    createMuteButton();
 
     // Add lights
     setupLights();
@@ -929,6 +932,75 @@ async function loadBGMManager() {
     } catch (error) {
         console.warn('[Game] BGMManager failed to load:', error);
     }
+}
+
+/**
+ * Create mute button for sound control
+ */
+function createMuteButton() {
+    // Check if button already exists
+    if (document.getElementById('mute-btn')) return;
+    
+    const muteBtn = document.createElement('button');
+    muteBtn.id = 'mute-btn';
+    muteBtn.innerHTML = '🔊';
+    muteBtn.title = 'Mutear/Desmutear sonido';
+    muteBtn.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        border: 2px solid #00ffcc;
+        background: rgba(10, 10, 21, 0.9);
+        color: #00ffcc;
+        font-size: 24px;
+        cursor: pointer;
+        z-index: 1000;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    let isMuted = false;
+    
+    muteBtn.addEventListener('click', () => {
+        isMuted = !isMuted;
+        
+        // Toggle SFX
+        if (sfxManager) {
+            sfxManager.setEnabled(!isMuted);
+        }
+        
+        // Toggle BGM
+        if (bgmManager) {
+            if (isMuted) {
+                bgmManager.setVolume(0);
+            } else {
+                bgmManager.setVolume(1);
+            }
+        }
+        
+        // Update button appearance
+        muteBtn.innerHTML = isMuted ? '🔇' : '🔊';
+        muteBtn.style.borderColor = isMuted ? '#ff3366' : '#00ffcc';
+        muteBtn.style.color = isMuted ? '#ff3366' : '#00ffcc';
+    });
+    
+    // Hover effect
+    muteBtn.addEventListener('mouseenter', () => {
+        muteBtn.style.transform = 'scale(1.1)';
+        muteBtn.style.boxShadow = '0 0 15px rgba(0, 255, 204, 0.5)';
+    });
+    
+    muteBtn.addEventListener('mouseleave', () => {
+        muteBtn.style.transform = 'scale(1)';
+        muteBtn.style.boxShadow = 'none';
+    });
+    
+    document.body.appendChild(muteBtn);
 }
 
 // =================================
