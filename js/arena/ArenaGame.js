@@ -1457,10 +1457,12 @@ class ArenaGame {
      * Handle player elimination
      */
     handleArenaElimination(data) {
-        console.log('[Arena] Elimination:', data);
+        console.log('[Arena] Elimination event received:', data);
         const player = this.players.get(data.playerId);
         
         if (player) {
+            console.log(`[Arena] Marking ${data.playerName} as eliminated`);
+            
             // Mark as eliminated
             player.controller.isEliminated = true;
             
@@ -1501,6 +1503,13 @@ class ArenaGame {
             }
             
             // Check for winner after a short delay
+            console.log('[Arena] Will check for winner in 2.5 seconds...');
+            setTimeout(() => {
+                this.checkForWinner();
+            }, 2500);
+        } else {
+            console.log(`[Arena] Player ${data.playerId} not found in local players map!`);
+            // Still check for winner - the player might have been removed
             setTimeout(() => {
                 this.checkForWinner();
             }, 2500);
@@ -1511,10 +1520,21 @@ class ArenaGame {
      * Check if there's only one player left alive
      */
     checkForWinner() {
+        // Don't check if game is already finished
+        if (this.gameState === 'finished') {
+            console.log('[Arena] Game already finished, skipping winner check');
+            return;
+        }
+        
         let alivePlayers = [];
+        let totalPlayers = 0;
         
         this.players.forEach((player, playerId) => {
-            if (!player.controller.isEliminated) {
+            totalPlayers++;
+            const isEliminated = player.controller?.isEliminated || false;
+            console.log(`[Arena] Player ${player.name}: eliminated=${isEliminated}`);
+            
+            if (!isEliminated) {
                 alivePlayers.push({
                     id: playerId,
                     name: player.name,
@@ -1523,13 +1543,15 @@ class ArenaGame {
             }
         });
         
-        console.log(`[Arena] Alive players: ${alivePlayers.length}`);
+        console.log(`[Arena] Winner check: ${alivePlayers.length} alive out of ${totalPlayers} total`);
         
         // If only one player remains, they win!
-        if (alivePlayers.length === 1) {
+        if (alivePlayers.length === 1 && totalPlayers > 1) {
             const winner = alivePlayers[0];
-            console.log(`[Arena] WINNER: ${winner.name}`);
+            console.log(`[Arena] WINNER DETECTED: ${winner.name}`);
             this.showVictoryScreen(winner);
+        } else if (alivePlayers.length === 0 && totalPlayers > 0) {
+            console.log('[Arena] No alive players - draw?');
         }
     }
     

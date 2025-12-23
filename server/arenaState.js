@@ -856,6 +856,20 @@ class ArenaStateManager {
         
         console.log(`[Arena] Player ${playerState.name} (${playerId}) ELIMINATED!`);
         
+        // Check for round end BEFORE returning
+        const alivePlayers = [];
+        arenaState.players.forEach((ps, id) => {
+            if (!ps.isEliminated) alivePlayers.push(id);
+        });
+        
+        console.log(`[Arena] Alive players remaining: ${alivePlayers.length}`);
+        
+        if (alivePlayers.length <= 1) {
+            arenaState.roundState = 'finished';
+            arenaState.lastWinner = alivePlayers[0] || null;
+            console.log(`[Arena] ROUND FINISHED! Winner: ${arenaState.lastWinner || 'None'}`);
+        }
+        
         // Return elimination info for broadcasting
         return {
             playerId,
@@ -863,19 +877,6 @@ class ArenaStateManager {
             playerNumber: playerState.number,
             position: arenaState.eliminationOrder.length
         };
-        
-        // Check for round end
-        const alivePlayers = [];
-        arenaState.players.forEach((ps, id) => {
-            if (!ps.isEliminated) alivePlayers.push(id);
-        });
-        
-        if (alivePlayers.length <= 1) {
-            arenaState.roundState = 'finished';
-            arenaState.lastWinner = alivePlayers[0] || null;
-        }
-        
-        console.log(`[Arena] Player ${playerState.name} eliminated`);
     }
     
     /**
