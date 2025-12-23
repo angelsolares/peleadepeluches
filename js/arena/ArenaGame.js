@@ -78,7 +78,10 @@ const ANIMATION_FILES = {
     block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
     taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
     grab: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx',
-    throw: 'Meshy_AI_Animation_Throw_withSkin.fbx'
+    throw: 'Meshy_AI_Animation_Throw_withSkin.fbx',
+    // Additional animations for escape sequence
+    uppercut: 'Meshy_AI_Animation_Left_Uppercut_from_Guard_withSkin.fbx',
+    knockdown: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
 };
 
 const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff'];
@@ -1142,8 +1145,21 @@ class ArenaGame {
             // Play grab animation on grabber (held pose)
             grabber.playAnimation('grab');
             
-            // Play hit animation on victim (being grabbed)
+            // Play hit animation on victim in LOOP (being carried)
             victim.playAnimation('hit');
+            // Make the victim's hit animation loop
+            if (victim.animController && victim.animController.mixer) {
+                const hitAction = victim.animController.mixer.clipAction(
+                    victim.animController.animations['hit']
+                );
+                if (hitAction) {
+                    hitAction.setLoop(THREE.LoopRepeat);
+                    hitAction.timeScale = 0.5; // Slow struggle animation
+                }
+            }
+            
+            // Mark victim for special "carried" positioning
+            victim.isBeingCarried = true;
             
             // Show status indicators for both players
             if (this.hud) {
@@ -1198,7 +1214,7 @@ class ArenaGame {
     }
     
     /**
-     * Update grabbed player position to follow the grabber
+     * Update grabbed player position to follow the grabber (wrestling carry position)
      */
     updateGrabbedPlayerPositions() {
         this.players.forEach((player) => {
@@ -1206,15 +1222,23 @@ class ArenaGame {
                 const victim = player.grabbedEntity;
                 const grabber = player;
                 
-                // Position the victim in front of the grabber (closer)
-                const offset = 0.6; // Reduced from 1.2 for closer grab
+                // Position the victim above and behind the grabber (wrestling carry)
+                const horizontalOffset = 0.3; // How far in front/back
+                const heightOffset = 1.2; // How high (above shoulders)
                 const angle = grabber.controller.facingAngle || 0;
-                victim.controller.position.x = grabber.controller.position.x + Math.sin(angle) * offset;
-                victim.controller.position.z = grabber.controller.position.z + Math.cos(angle) * offset;
+                
+                // Position: slightly behind grabber, raised up
+                victim.controller.position.x = grabber.controller.position.x - Math.sin(angle) * horizontalOffset;
+                victim.controller.position.z = grabber.controller.position.z - Math.cos(angle) * horizontalOffset;
+                victim.controller.position.y = grabber.controller.position.y + heightOffset;
+                
                 victim.model.position.copy(victim.controller.position);
                 
-                // Make victim face opposite direction
-                victim.model.rotation.y = angle + Math.PI;
+                // Rotate victim to be horizontal (on their back, face up)
+                // Rotate 90 degrees on X axis to lay them flat
+                victim.model.rotation.x = -Math.PI / 2; // Lay flat on back
+                victim.model.rotation.y = angle; // Face same direction as grabber
+                victim.model.rotation.z = 0;
             }
         });
     }
@@ -1231,6 +1255,12 @@ class ArenaGame {
             grabber.grabbedEntity = null; // Clear entity reference
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
+            victim.isBeingCarried = false;
+            
+            // Reset victim's rotation to normal (was laying flat)
+            victim.model.rotation.x = 0;
+            victim.model.rotation.z = 0;
+            victim.controller.position.y = grabber.controller.position.y; // Back to ground level
             
             // Apply visual knockback on victim
             if (victim.controller) {
@@ -1330,19 +1360,58 @@ class ArenaGame {
             grabber.grabbedEntity = null;
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
+            victim.isBeingCarried = false;
             
-            // Play animations
-            grabber.playAnimation('hit'); // Grabber gets pushed back
-            victim.playAnimation('idle');
+            // Reset victim's rotation to normal (was laying flat)
+            victim.model.rotation.x = 0;
+            victim.model.rotation.z = 0;
+            victim.controller.position.y = grabber.controller.position.y; // Back to ground level
+            victim.model.position.copy(victim.controller.position);
+            
+            // Play UPPERCUT animation on escaping player (fast!)
+            if (victim.animController) {
+                // Use punch animation which is the uppercut
+                victim.playAnimation('punch');
+                // Speed up the animation
+                const punchAction = victim.animController.mixer?.clipAction(
+                    victim.animController.animations['punch']
+                );
+                if (punchAction) {
+                    punchAction.timeScale = 2.0; // Double speed for dramatic effect
+                }
+            }
+            
+            // Play KNOCKDOWN animation on grabber (fast!)
+            if (grabber.animController) {
+                grabber.playAnimation('fall');
+                // Speed up the animation
+                const fallAction = grabber.animController.mixer?.clipAction(
+                    grabber.animController.animations['fall']
+                );
+                if (fallAction) {
+                    fallAction.timeScale = 1.5; // Faster fall
+                }
+            }
             
             // Show status
             if (this.hud) {
-                this.hud.showStatus(data.targetId, '¡ESCAPÓ!');
+                this.hud.showStatus(data.targetId, '¡ESCAPÓ CON GOLPE!');
+                this.hud.showStatus(data.grabberId, '¡DERRIBADO!');
             }
             
-            // Play sound
+            // Screen shake for dramatic effect
+            this.shakeScreen(0.4, 300);
+            
+            // Create VFX
+            if (this.vfxManager) {
+                const pos = grabber.model.position.clone();
+                this.vfxManager.createHitSpark?.(pos);
+                this.vfxManager.createImpactRing?.(pos);
+            }
+            
+            // Play punch sound
             if (this.sfxManager) {
-                this.sfxManager.playBlock?.();
+                this.sfxManager.playPunch?.();
             }
         }
     }

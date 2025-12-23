@@ -625,38 +625,52 @@ class ArenaStateManager {
      * Process an escape from grab attempt
      */
     processEscape(socketId, roomCode) {
+        console.log(`[Arena] processEscape called for ${socketId} in room ${roomCode}`);
+        
         const arenaState = this.arenaStates.get(roomCode);
-        if (!arenaState) return { success: false, error: 'No arena state' };
+        if (!arenaState) {
+            console.log('[Arena] No arena state found');
+            return { success: false, error: 'No arena state' };
+        }
         
         const target = arenaState.players.get(socketId);
-        if (!target) return { success: false, error: 'Player not found' };
+        if (!target) {
+            console.log('[Arena] Player not found');
+            return { success: false, error: 'Player not found' };
+        }
+        
+        console.log(`[Arena] Target state: isGrabbed=${target.isGrabbed}, grabbedBy=${target.grabbedBy}`);
         
         // Check if player is actually grabbed
         if (!target.isGrabbed || !target.grabbedBy) {
+            console.log('[Arena] Player not grabbed');
             return { success: false, error: 'Not grabbed' };
         }
         
         const grabberId = target.grabbedBy;
+        console.log(`[Arena] Releasing grab from ${grabberId}`);
         
         // Release the grab
         this.releaseGrab(arenaState, grabberId);
         
-        // Apply small knockback to both players (push apart)
+        // Apply knockback and damage to grabber (they got hit by escape punch)
         const grabber = arenaState.players.get(grabberId);
         if (grabber) {
             const angle = grabber.facingAngle || 0;
-            // Push grabber backwards
-            grabber.velocity.x -= Math.sin(angle) * 3;
-            grabber.velocity.z -= Math.cos(angle) * 3;
+            // Push grabber backwards hard
+            grabber.velocity.x -= Math.sin(angle) * 8;
+            grabber.velocity.z -= Math.cos(angle) * 8;
             grabber.isStunned = true;
-            grabber.stunEndTime = Date.now() + 300; // Brief stun
+            grabber.stunEndTime = Date.now() + 1000; // Longer stun from escape hit
+            // Apply some damage from the escape punch
+            grabber.health = Math.max(0, grabber.health - 10);
         }
         
-        // Push target away
-        target.velocity.x += Math.sin(Math.PI) * 2;
-        target.velocity.z += Math.cos(Math.PI) * 2;
+        // Target recovers in place
+        target.velocity.x = 0;
+        target.velocity.z = 0;
         
-        console.log(`[Arena] Player ${target.name} escaped from grab!`);
+        console.log(`[Arena] Player ${target.name} escaped from grab successfully!`);
         
         return { 
             success: true, 

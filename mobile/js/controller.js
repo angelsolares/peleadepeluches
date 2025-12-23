@@ -162,6 +162,7 @@ function connectToServer() {
     socket.on('arena-grab', handleArenaGrabEvent);
     socket.on('arena-throw', handleArenaThrowEvent);
     socket.on('arena-grab-released', handleArenaGrabReleased);
+    socket.on('arena-grab-escape', handleArenaGrabEscapeEvent);
 }
 
 function updateConnectionStatus(status, text) {
@@ -597,6 +598,25 @@ function handleArenaGrabReleased(data) {
     if (data.targetId === socket.id) {
         isGrabbed = false;
         hideEscapeUI();
+    }
+}
+
+/**
+ * Handle when someone escapes from a grab (server broadcast)
+ */
+function handleArenaGrabEscapeEvent(data) {
+    console.log('[Arena] Grab escape event:', data);
+    // If we were the one who escaped
+    if (data.targetId === socket.id) {
+        isGrabbed = false;
+        hideEscapeUI();
+        triggerHaptic();
+    }
+    // If we were the grabber and they escaped
+    if (data.grabberId === socket.id) {
+        isGrabbing = false;
+        updateGrabButtonState();
+        triggerHaptic(true); // Strong vibration - they escaped!
     }
 }
 
@@ -1048,9 +1068,13 @@ function hideEscapeUI() {
  * Handle escape button press
  */
 function handleEscapePress() {
-    if (!isGrabbed) return;
+    if (!isGrabbed) {
+        console.log('[Escape] Not grabbed, ignoring');
+        return;
+    }
     
     escapeProgress += (100 / escapeThreshold);
+    console.log('[Escape] Progress:', escapeProgress);
     
     // Update progress bar
     const fill = document.getElementById('escape-fill');
@@ -1063,12 +1087,19 @@ function handleEscapePress() {
     
     // Check if escaped
     if (escapeProgress >= 100) {
-        console.log('[Escape] Escaped from grab!');
+        console.log('[Escape] Attempting to escape from grab!');
         socket.emit('arena-escape', (response) => {
-            console.log('[Escape] Response:', response);
-            if (response.success) {
+            console.log('[Escape] Server response:', response);
+            if (response && response.success) {
+                console.log('[Escape] Successfully escaped!');
                 isGrabbed = false;
                 hideEscapeUI();
+            } else {
+                console.log('[Escape] Failed to escape:', response?.error);
+                // Reset progress and let them try again
+                escapeProgress = 50; // Don't reset fully, they were close
+                const fill = document.getElementById('escape-fill');
+                if (fill) fill.style.width = '50%';
             }
         });
     }
@@ -1081,7 +1112,14 @@ function resetState() {
     selectedCharacter = null;
     takenCharacters = {};
     gameMode = 'smash';
+    isGrabbing = false;
+    isGrabbed = false;
+    escapeProgress = 0;
     Object.keys(inputState).forEach(key => inputState[key] = false);
+    
+    // Hide escape UI if visible
+    hideEscapeUI();
+    updateGrabButtonState();
     
     elements.roomCodeInput.value = '';
     elements.joinError.textContent = '';
