@@ -1442,21 +1442,22 @@ async function handleGameStarted(data) {
         localPlayer = null;
     }
     
+    // Remove ALL existing players to recreate them with correct character models
+    // This is necessary because players join before selecting characters
+    for (const [playerId, player] of players) {
+        if (playerId !== 'local') {
+            removePlayer(playerId);
+        }
+    }
+    
     // Clear existing HUDs
     playerHudsContainer.innerHTML = '';
     
-    // Add all players from server (or update existing ones)
+    // Add all players from server with their selected characters
     // Use for...of to properly await async calls
     for (const playerData of data.players) {
-        let player = players.get(playerData.id);
-        
-        if (!player) {
-            // Player doesn't exist, create it with their selected character
-            player = await addPlayer(playerData);
-        } else {
-            // Player exists, just create HUD for them
-            createPlayerHUD(player);
-        }
+        console.log(`[Game] Creating player ${playerData.name} with character: ${playerData.character}`);
+        const player = await addPlayer(playerData);
         
         // Reset player state for new game
         if (player) {
