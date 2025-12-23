@@ -70,7 +70,24 @@
             <div class="player-info">
                 <div class="player-avatar" id="player-avatar">P1</div>
                 <h3 id="player-display-name">Jugador</h3>
-                <p class="player-status" id="player-status">Esperando...</p>
+                <p class="player-status" id="player-status">Selecciona tu personaje</p>
+            </div>
+            
+            <!-- Character Selection -->
+            <div class="character-selection">
+                <h4>🎭 Elige tu Personaje</h4>
+                <div class="character-options" id="character-options">
+                    <button class="char-option" data-character="edgar">
+                        <span class="char-emoji">👦</span>
+                        <span class="char-name">Edgar</span>
+                        <span class="char-status"></span>
+                    </button>
+                    <button class="char-option" data-character="isabella">
+                        <span class="char-emoji">👧</span>
+                        <span class="char-name">Isabella</span>
+                        <span class="char-status"></span>
+                    </button>
+                </div>
             </div>
             
             <div class="players-list">
@@ -78,7 +95,7 @@
                 <ul id="players-list"></ul>
             </div>
             
-            <button id="ready-btn" class="btn-ready">
+            <button id="ready-btn" class="btn-ready" disabled>
                 <span class="btn-text">¡LISTO!</span>
             </button>
         </div>

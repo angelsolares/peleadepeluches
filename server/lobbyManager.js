@@ -201,8 +201,50 @@ class LobbyManager {
                 name: p.name,
                 number: p.number,
                 color: p.color,
-                ready: p.ready
+                ready: p.ready,
+                character: p.character || null
             }))
+        };
+    }
+    
+    /**
+     * Select character for a player
+     * @param {string} socketId - Player's socket ID
+     * @param {string} characterId - Character to select (e.g., 'edgar', 'isabella')
+     * @returns {object} Result
+     */
+    selectCharacter(socketId, characterId) {
+        const room = this.getRoomBySocketId(socketId);
+        
+        if (!room) {
+            return { success: false, error: 'Not in a room' };
+        }
+        
+        const player = room.players.get(socketId);
+        
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        // Check if character is already taken by another player
+        for (const [id, p] of room.players) {
+            if (id !== socketId && p.character === characterId) {
+                return { success: false, error: 'Character already taken' };
+            }
+        }
+        
+        // If player had a previous character, clear it first
+        const previousCharacter = player.character;
+        
+        // Assign new character
+        player.character = characterId;
+        
+        console.log(`[Lobby] Player ${player.name} selected character ${characterId} (was: ${previousCharacter || 'none'})`);
+        
+        return {
+            success: true,
+            player: player,
+            previousCharacter: previousCharacter
         };
     }
     
@@ -299,7 +341,8 @@ class LobbyManager {
                 color: p.color,
                 position: p.position,
                 health: p.health,
-                stocks: p.stocks
+                stocks: p.stocks,
+                character: p.character || 'edgar' // Default to edgar if no character selected
             }))
         };
     }

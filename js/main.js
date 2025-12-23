@@ -518,8 +518,11 @@ const CHARACTER_MODELS = {
     }
 };
 
-// Currently selected character
+// Currently selected character (for local/host)
 let selectedCharacter = 'edgar';
+
+// Cache of loaded character models (for multiplayer with different characters)
+const characterModelCache = {};
 
 // Player colors
 const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff'];
@@ -804,6 +807,9 @@ async function loadCharacterWithAnimations(characterId = null) {
         console.log(`=== MODELO CARGADO: ${characterConfig.name} ===`);
         loadedCount++;
         
+        // Store in cache
+        characterModelCache[charId] = baseModel;
+        
         // Load all animations
         console.log('=== CARGANDO ANIMACIONES ===');
         for (const [actionName, fileName] of Object.entries(ANIMATION_FILES)) {
@@ -849,6 +855,34 @@ async function loadCharacterWithAnimations(characterId = null) {
         console.error('Error loading character:', error);
         loadingText.textContent = 'Error al cargar el modelo';
     }
+}
+
+/**
+ * Load a character model (async, for players with different characters)
+ */
+async function loadCharacterModel(characterId) {
+    // Check cache first
+    if (characterModelCache[characterId]) {
+        return characterModelCache[characterId];
+    }
+    
+    const characterConfig = CHARACTER_MODELS[characterId];
+    if (!characterConfig) {
+        console.error(`Character ${characterId} not found!`);
+        return baseModel; // Fallback to base model
+    }
+    
+    console.log(`[Character] Loading model for ${characterId}...`);
+    
+    const loader = new FBXLoader();
+    const model = await loadFBX(loader, `assets/${characterConfig.file}`);
+    
+    // Store in cache
+    characterModelCache[characterId] = model;
+    
+    console.log(`[Character] Model ${characterId} loaded and cached`);
+    
+    return model;
 }
 
 function loadFBX(loader, path) {
@@ -1079,23 +1113,33 @@ function createCharacterSelector() {
     }
 }
 
-function addPlayer(playerData) {
+async function addPlayer(playerData) {
     if (players.has(playerData.id)) {
         console.log(`[Game] Player ${playerData.id} already exists`);
         return players.get(playerData.id);
     }
     
-    console.log(`[Game] Adding player: ${playerData.name} (${playerData.id})`);
+    const characterId = playerData.character || 'edgar';
+    console.log(`[Game] Adding player: ${playerData.name} (${playerData.id}) with character: ${characterId}`);
+    
+    // Get the correct model for this player's character
+    let playerModel = characterModelCache[characterId];
+    
+    // If model not in cache, load it
+    if (!playerModel) {
+        playerModel = await loadCharacterModel(characterId);
+    }
     
     const player = new PlayerEntity(
         playerData.id,
         playerData.number,
         playerData.color || PLAYER_COLORS[(playerData.number - 1) % PLAYER_COLORS.length],
-        baseModel,
+        playerModel,
         baseAnimations
     );
     
     player.name = playerData.name || `Player ${playerData.number}`;
+    player.characterId = characterId;
     
     // Set initial position
     let xPos = 0;
@@ -1362,9 +1406,9 @@ function startGame() {
 // Socket Event Handlers
 // =================================
 
-function handlePlayerJoined(data) {
+async function handlePlayerJoined(data) {
     console.log('[Game] Player joined:', data.player);
-    addPlayer(data.player);
+    await addPlayer(data.player);
     updateRoomOverlay(data.room.playerCount);
 }
 
@@ -1378,7 +1422,7 @@ function handleReadyChanged(data) {
     console.log('[Game] Ready changed:', data);
 }
 
-function handleGameStarted(data) {
+async function handleGameStarted(data) {
     console.log('[Game] Game started!', data);
     gameState = 'playing';
     
@@ -1392,12 +1436,13 @@ function handleGameStarted(data) {
     playerHudsContainer.innerHTML = '';
     
     // Add all players from server (or update existing ones)
-    data.players.forEach(playerData => {
+    // Use for...of to properly await async calls
+    for (const playerData of data.players) {
         let player = players.get(playerData.id);
         
         if (!player) {
-            // Player doesn't exist, create it
-            player = addPlayer(playerData);
+            // Player doesn't exist, create it with their selected character
+            player = await addPlayer(playerData);
         } else {
             // Player exists, just create HUD for them
             createPlayerHUD(player);
@@ -1409,7 +1454,7 @@ function handleGameStarted(data) {
             player.controller.stocks = 3;
             updatePlayerHUD(player);
         }
-    });
+    }
     
     // Hide room overlay
     const overlay = document.getElementById('room-code-overlay');

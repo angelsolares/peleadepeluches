@@ -73,6 +73,16 @@ let playerData = null;
 let roomCode = null;
 let isReady = false;
 let isConnected = false;
+let selectedCharacter = null;
+
+// Available characters
+const CHARACTERS = {
+    edgar: { name: 'Edgar', emoji: '👦' },
+    isabella: { name: 'Isabella', emoji: '👧' }
+};
+
+// Track which characters are taken by other players
+let takenCharacters = {};
 
 // Input state
 const inputState = {
@@ -125,6 +135,11 @@ function connectToServer() {
     socket.on('game-over', handleGameOver);
     socket.on('game-reset', handleGameReset);
     socket.on('room-closed', handleRoomClosed);
+    
+    // Character selection events
+    socket.on('character-selected', handleCharacterSelected);
+    socket.on('character-deselected', handleCharacterDeselected);
+    socket.on('character-selection-update', handleCharacterSelectionUpdate);
 }
 
 function updateConnectionStatus(status, text) {
@@ -200,29 +215,144 @@ function updateLobbyUI(room) {
         elements.playerAvatar.textContent = `P${playerData.number}`;
         elements.playerAvatar.style.background = `linear-gradient(135deg, ${playerData.color}, var(--accent))`;
         elements.playerDisplayName.textContent = playerData.name;
-        elements.playerStatus.textContent = isReady ? '¡Listo!' : 'Esperando...';
+        
+        // Update status based on character selection
+        if (selectedCharacter) {
+            elements.playerStatus.textContent = isReady ? '¡Listo!' : `${CHARACTERS[selectedCharacter].emoji} ${CHARACTERS[selectedCharacter].name}`;
+        } else {
+            elements.playerStatus.textContent = 'Selecciona tu personaje';
+        }
     }
     
-    // Update players list
-    elements.playersList.innerHTML = room.players.map(p => `
-        <li class="${p.ready ? 'ready' : ''}" style="border-left-color: ${p.color}">
-            <span class="player-number" style="color: ${p.color}">P${p.number}</span>
-            <span class="player-name">${p.name}</span>
-            <span class="ready-status">${p.ready ? '✓ Listo' : ''}</span>
-        </li>
-    `).join('');
+    // Build taken characters map from room players
+    takenCharacters = {};
+    room.players.forEach(p => {
+        if (p.character && p.id !== socket.id) {
+            takenCharacters[p.character] = p.name;
+        }
+    });
+    
+    // Update character selection UI
+    updateCharacterSelectionUI();
+    
+    // Update players list with character info
+    elements.playersList.innerHTML = room.players.map(p => {
+        const charEmoji = p.character ? CHARACTERS[p.character]?.emoji : '❓';
+        return `
+            <li class="${p.ready ? 'ready' : ''}" style="border-left-color: ${p.color}">
+                <span class="player-number" style="color: ${p.color}">P${p.number}</span>
+                <span class="player-name">${charEmoji} ${p.name}</span>
+                <span class="ready-status">${p.ready ? '✓ Listo' : ''}</span>
+            </li>
+        `;
+    }).join('');
 }
 
 function toggleReady() {
+    // Can't be ready without selecting a character
+    if (!selectedCharacter) {
+        alert('¡Primero selecciona un personaje!');
+        return;
+    }
+    
     isReady = !isReady;
     
     elements.readyBtn.classList.toggle('active', isReady);
     elements.readyBtn.querySelector('.btn-text').textContent = isReady ? '¡ESPERANDO!' : '¡LISTO!';
-    elements.playerStatus.textContent = isReady ? '¡Listo!' : 'Esperando...';
+    
+    if (selectedCharacter) {
+        elements.playerStatus.textContent = isReady ? '¡Listo!' : `${CHARACTERS[selectedCharacter].emoji} ${CHARACTERS[selectedCharacter].name}`;
+    }
     
     socket.emit('player-ready', isReady);
     
     triggerHaptic();
+}
+
+// =================================
+// Character Selection
+// =================================
+
+function selectCharacter(characterId) {
+    // Check if character is taken
+    if (takenCharacters[characterId]) {
+        return;
+    }
+    
+    // If already selected this character, do nothing
+    if (selectedCharacter === characterId) {
+        return;
+    }
+    
+    // Emit selection to server
+    socket.emit('select-character', characterId, (response) => {
+        if (response.success) {
+            selectedCharacter = characterId;
+            updateCharacterSelectionUI();
+            
+            // Enable ready button
+            elements.readyBtn.disabled = false;
+            
+            // Update player status
+            elements.playerStatus.textContent = `${CHARACTERS[characterId].emoji} ${CHARACTERS[characterId].name}`;
+            
+            triggerHaptic();
+        } else {
+            alert(response.error || 'No se pudo seleccionar el personaje');
+        }
+    });
+}
+
+function updateCharacterSelectionUI() {
+    const charOptions = document.querySelectorAll('.char-option');
+    
+    charOptions.forEach(btn => {
+        const charId = btn.dataset.character;
+        const statusEl = btn.querySelector('.char-status');
+        
+        // Reset classes
+        btn.classList.remove('selected', 'taken');
+        
+        // Check if this is my selection
+        if (selectedCharacter === charId) {
+            btn.classList.add('selected');
+            statusEl.textContent = '✓ Tu selección';
+        }
+        // Check if taken by someone else
+        else if (takenCharacters[charId]) {
+            btn.classList.add('taken');
+            statusEl.textContent = `${takenCharacters[charId]}`;
+        } else {
+            statusEl.textContent = '';
+        }
+    });
+}
+
+function handleCharacterSelected(data) {
+    console.log('[Character] Selected:', data);
+    if (data.playerId !== socket.id) {
+        takenCharacters[data.character] = data.playerName;
+        updateCharacterSelectionUI();
+    }
+}
+
+function handleCharacterDeselected(data) {
+    console.log('[Character] Deselected:', data);
+    delete takenCharacters[data.character];
+    updateCharacterSelectionUI();
+}
+
+function handleCharacterSelectionUpdate(data) {
+    console.log('[Character] Update:', data);
+    takenCharacters = {};
+    
+    data.selections.forEach(sel => {
+        if (sel.playerId !== socket.id) {
+            takenCharacters[sel.character] = sel.playerName;
+        }
+    });
+    
+    updateCharacterSelectionUI();
 }
 
 function leaveRoom() {
@@ -498,13 +628,19 @@ function resetState() {
     playerData = null;
     roomCode = null;
     isReady = false;
+    selectedCharacter = null;
+    takenCharacters = {};
     Object.keys(inputState).forEach(key => inputState[key] = false);
     
     elements.roomCodeInput.value = '';
     elements.joinError.textContent = '';
     elements.gameOverOverlay.classList.add('hidden');
     elements.readyBtn.classList.remove('active');
+    elements.readyBtn.disabled = true;
     elements.readyBtn.querySelector('.btn-text').textContent = '¡LISTO!';
+    
+    // Reset character selection UI
+    updateCharacterSelectionUI();
 }
 
 // =================================
@@ -535,6 +671,14 @@ function setupEventListeners() {
     // Lobby screen
     elements.readyBtn.addEventListener('click', toggleReady);
     elements.leaveBtn.addEventListener('click', leaveRoom);
+    
+    // Character selection
+    const charOptions = document.querySelectorAll('.char-option');
+    charOptions.forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectCharacter(btn.dataset.character);
+        });
+    });
     
     // Controller screen
     elements.menuBtn.addEventListener('click', () => {

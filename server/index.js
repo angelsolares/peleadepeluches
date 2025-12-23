@@ -176,6 +176,30 @@ io.on('connection', (socket) => {
     });
     
     /**
+     * Select character (mobile player)
+     */
+    socket.on('select-character', (characterId, callback) => {
+        const result = lobbyManager.selectCharacter(socket.id, characterId);
+        
+        if (result.success) {
+            const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+            
+            // Notify all players in room about the character selection
+            io.to(roomCode).emit('character-selected', {
+                playerId: socket.id,
+                playerName: result.player.name,
+                character: characterId
+            });
+            
+            console.log(`[Socket] Player ${result.player.name} selected ${characterId} in room ${roomCode}`);
+        }
+        
+        if (typeof callback === 'function') {
+            callback(result);
+        }
+    });
+    
+    /**
      * Player input update (from mobile controller)
      */
     socket.on('player-input', (input) => {
