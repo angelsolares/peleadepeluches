@@ -77,7 +77,7 @@ let gameMode = 'smash'; // 'smash' or 'arena'
 let isGrabbing = false; // Track if player is currently grabbing someone (Arena mode)
 let isGrabbed = false; // Track if player is currently grabbed by someone (Arena mode)
 let escapeProgress = 0; // Progress towards escaping from grab (0-100)
-let escapeThreshold = 5; // Number of button presses needed to escape
+let escapeThreshold = 3; // Number of button presses needed to escape (3 = ~33% per press)
 
 // Available characters
 const CHARACTERS = {
@@ -1073,33 +1073,36 @@ function handleEscapePress() {
         return;
     }
     
+    // Each press adds 33-40% progress
     escapeProgress += (100 / escapeThreshold);
+    escapeProgress = Math.min(100, escapeProgress); // Cap at 100
     console.log('[Escape] Progress:', escapeProgress);
     
-    // Update progress bar
+    // Update progress bar immediately
     const fill = document.getElementById('escape-fill');
     if (fill) {
-        fill.style.width = Math.min(100, escapeProgress) + '%';
+        fill.style.width = escapeProgress + '%';
     }
     
     // Haptic feedback
     triggerHaptic();
     
-    // Check if escaped
+    // Check if escaped (at or above 100%)
     if (escapeProgress >= 100) {
-        console.log('[Escape] Attempting to escape from grab!');
+        console.log('[Escape] Bar full! Sending escape request...');
+        
+        // Immediately hide UI and mark as escaped (optimistic)
+        isGrabbed = false;
+        hideEscapeUI();
+        
         socket.emit('arena-escape', (response) => {
             console.log('[Escape] Server response:', response);
             if (response && response.success) {
                 console.log('[Escape] Successfully escaped!');
-                isGrabbed = false;
-                hideEscapeUI();
+                // Already handled above
             } else {
-                console.log('[Escape] Failed to escape:', response?.error);
-                // Reset progress and let them try again
-                escapeProgress = 50; // Don't reset fully, they were close
-                const fill = document.getElementById('escape-fill');
-                if (fill) fill.style.width = '50%';
+                console.log('[Escape] Server said no, but we escaped locally');
+                // Still escaped from user perspective - server will sync state
             }
         });
     }
