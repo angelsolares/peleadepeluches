@@ -192,6 +192,27 @@ class ArenaPlayerEntity {
             case 'throw': this.animController.play('throw'); break;
             default: this.animController.play(actionName);
         }
+        
+        // Apply speed multipliers for Arena mode (faster action)
+        if (this.animController && this.animController.mixer) {
+            const ARENA_SPEEDS = {
+                'walk': 2.0,
+                'run': 1.5,
+                'throw': 2.0,
+                'grab': 1.5,
+                'punch': 2.0,
+                'kick': 2.0
+            };
+            
+            if (ARENA_SPEEDS[actionName]) {
+                const action = this.animController.mixer.clipAction(
+                    this.animController.animations[actionName]
+                );
+                if (action) {
+                    action.timeScale = ARENA_SPEEDS[actionName];
+                }
+            }
+        }
     }
     
     update(delta) {
@@ -1096,37 +1117,59 @@ class ArenaGame {
     
     handleArenaAttackHit(data) {
         console.log('[Arena] Attack hit:', data);
-        const target = this.players.get(data.targetId);
         const attacker = this.players.get(data.attackerId);
         
-        if (target) {
-            // Play hit animation
-            target.playAnimation('hit');
-            
-            // Apply damage to controller
-            target.controller.health = data.targetHealth;
-            
-            // Show VFX
-            if (this.vfxManager) {
-                const hitPosition = target.model.position.clone();
-                hitPosition.y += 1;
-                this.vfxManager.createHitSparks(hitPosition, 0xff3366, data.damage / 10);
-                this.vfxManager.createDamageNumber(hitPosition, data.damage, data.blocked ? 0x00bfff : 0xff3366);
-            }
-            
-            // Play hit sound
-            if (this.sfxManager) {
-                if (data.blocked) {
-                    this.sfxManager.playBlock?.();
-                } else {
-                    this.sfxManager.playHit?.(data.damage, false);
+        // Process all hits in the attack result
+        if (data.hits && Array.isArray(data.hits)) {
+            for (const hit of data.hits) {
+                const target = this.players.get(hit.targetId);
+                
+                if (target && !target.controller.isEliminated) {
+                    // Play hit/hurt animation (speed x2 for arena)
+                    if (target.animController) {
+                        target.playAnimation('hit');
+                        const hitAction = target.animController.mixer?.clipAction(
+                            target.animController.animations['hit']
+                        );
+                        if (hitAction) {
+                            hitAction.timeScale = 2.0; // Speed up hurt animation
+                        }
+                    }
+                    
+                    // Apply damage to controller
+                    target.controller.health = hit.newHealth;
+                    
+                    // Show VFX
+                    if (this.vfxManager && target.model) {
+                        const hitPosition = target.model.position.clone();
+                        hitPosition.y += 1;
+                        this.vfxManager.createHitSparks?.(hitPosition, 0xff3366, hit.damage / 10);
+                        this.vfxManager.createDamageNumber?.(hitPosition, hit.damage, hit.blocked ? 0x00bfff : 0xff3366);
+                    }
+                    
+                    // Play hit sound
+                    if (this.sfxManager) {
+                        if (hit.blocked) {
+                            this.sfxManager.playBlock?.();
+                        } else {
+                            this.sfxManager.playHit?.(hit.damage, false);
+                        }
+                    }
+                    
+                    // Update HUD
+                    if (this.hud) {
+                        this.hud.updatePlayer(target);
+                        this.hud.showDamage(hit.targetId, hit.damage, hit.blocked);
+                    }
+                    
+                    // Return to idle after hit animation completes
+                    setTimeout(() => {
+                        if (target && !target.controller.isEliminated && 
+                            !target.controller.isGrabbed && !target.isBeingThrown) {
+                            target.playAnimation('idle');
+                        }
+                    }, 400); // Short delay for hit animation at 2x speed
                 }
-            }
-            
-            // Update HUD
-            if (this.hud) {
-                this.hud.updatePlayer(target);
-                this.hud.showDamage(data.targetId, data.damage, data.blocked);
             }
         }
     }
@@ -1262,25 +1305,43 @@ class ArenaGame {
             victim.isBeingThrown = true;
             victim.throwStartTime = Date.now();
             
-            // Reset victim's rotation
+            // Reset victim's rotation from carried position
             victim.model.rotation.x = 0;
             victim.model.rotation.z = 0;
             
-            // Play throw animation
+            // Play throw animation on grabber (speed x2)
             grabber.playAnimation('throw');
-            victim.playAnimation('fall');
+            if (grabber.animController) {
+                const throwAction = grabber.animController.mixer?.clipAction(
+                    grabber.animController.animations['throw']
+                );
+                if (throwAction) {
+                    throwAction.timeScale = 2.0;
+                }
+            }
             
-            // Add spinning effect to thrown victim
+            // Play fall animation on victim (ragdoll effect)
+            victim.playAnimation('fall');
+            if (victim.animController) {
+                const fallAction = victim.animController.mixer?.clipAction(
+                    victim.animController.animations['fall']
+                );
+                if (fallAction) {
+                    fallAction.timeScale = 1.5;
+                }
+            }
+            
+            // Add spinning effect to thrown victim (ragdoll)
             victim.throwSpin = {
                 active: true,
-                speed: 15, // Rotations per second
-                axis: 'x' // Spin forward/backward
+                speed: 12, // Rotations per second
+                axis: 'x'
             };
             
             // Create dramatic VFX
             if (this.vfxManager && victim.model) {
                 const pos = victim.model.position.clone();
-                this.vfxManager.createHitSpark?.(pos);
+                this.vfxManager.createHitSparks?.(pos, 0xff6600, 2);
                 this.vfxManager.createImpactRing?.(pos);
                 this.vfxManager.createDamageNumber?.(pos, data.damage || 25, 0xff6600);
             }
@@ -1298,6 +1359,13 @@ class ArenaGame {
             
             // Screen shake for dramatic effect
             this.shakeScreen(0.5, 300);
+            
+            // Grabber returns to idle after throw animation
+            setTimeout(() => {
+                if (grabber && !grabber.controller.isEliminated) {
+                    grabber.playAnimation('idle');
+                }
+            }, 500);
         }
     }
     
@@ -1527,10 +1595,8 @@ class ArenaGame {
             victim.model.position.copy(victim.controller.position);
             
             // Play UPPERCUT animation on escaping player (fast!)
+            victim.playAnimation('punch');
             if (victim.animController) {
-                // Use punch animation which is the uppercut
-                victim.playAnimation('punch');
-                // Speed up the animation
                 const punchAction = victim.animController.mixer?.clipAction(
                     victim.animController.animations['punch']
                 );
@@ -1540,9 +1606,8 @@ class ArenaGame {
             }
             
             // Play KNOCKDOWN animation on grabber (fast!)
+            grabber.playAnimation('fall');
             if (grabber.animController) {
-                grabber.playAnimation('fall');
-                // Speed up the animation
                 const fallAction = grabber.animController.mixer?.clipAction(
                     grabber.animController.animations['fall']
                 );
@@ -1563,9 +1628,19 @@ class ArenaGame {
             // Create VFX
             if (this.vfxManager) {
                 const pos = grabber.model.position.clone();
-                this.vfxManager.createHitSpark?.(pos);
+                this.vfxManager.createHitSparks?.(pos, 0xff3366, 2);
                 this.vfxManager.createImpactRing?.(pos);
             }
+            
+            // Return both players to idle after animations
+            setTimeout(() => {
+                if (victim && !victim.controller.isEliminated) {
+                    victim.playAnimation('idle');
+                }
+                if (grabber && !grabber.controller.isEliminated) {
+                    grabber.playAnimation('idle');
+                }
+            }, 800); // After escape animations complete
             
             // Play punch sound
             if (this.sfxManager) {

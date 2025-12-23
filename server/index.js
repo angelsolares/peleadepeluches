@@ -384,6 +384,16 @@ io.on('connection', (socket) => {
         
         if (throwInfo) {
             io.to(roomCode).emit('arena-throw', throwInfo);
+            
+            // Check if throw killed the target
+            if (throwInfo.eliminated) {
+                io.to(roomCode).emit('arena-elimination', {
+                    playerId: throwInfo.targetId,
+                    playerName: throwInfo.targetName || 'Player',
+                    reason: 'knockout',
+                    eliminatedBy: socket.id
+                });
+            }
         }
         
         if (typeof callback === 'function') {

@@ -699,6 +699,7 @@ class ArenaStateManager {
         return {
             grabberId: socketId,  // Use grabberId for consistency with client
             targetId: target.id,
+            targetName: target.name,
             damage: ARENA_CONFIG.THROW_DAMAGE,
             direction: throwAngle,
             newHealth: target.health,
