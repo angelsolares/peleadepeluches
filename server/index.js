@@ -178,8 +178,12 @@ io.on('connection', (socket) => {
     /**
      * Select character (mobile player)
      */
-    socket.on('select-character', (characterId, callback) => {
-        const result = lobbyManager.selectCharacter(socket.id, characterId);
+    socket.on('select-character', (data, callback) => {
+        // Support both old format (string) and new format (object with characterId and characterName)
+        const characterId = typeof data === 'string' ? data : data.characterId;
+        const characterName = typeof data === 'object' ? data.characterName : null;
+        
+        const result = lobbyManager.selectCharacter(socket.id, characterId, characterName);
         
         if (result.success) {
             const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);

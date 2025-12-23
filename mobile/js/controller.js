@@ -292,8 +292,9 @@ function selectCharacter(characterId) {
         return;
     }
     
-    // Emit selection to server
-    socket.emit('select-character', characterId, (response) => {
+    // Emit selection to server with character name
+    const characterName = CHARACTERS[characterId]?.name || characterId;
+    socket.emit('select-character', { characterId, characterName }, (response) => {
         if (response.success) {
             selectedCharacter = characterId;
             updateCharacterSelectionUI();

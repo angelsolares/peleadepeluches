@@ -213,7 +213,7 @@ class LobbyManager {
      * @param {string} characterId - Character to select (e.g., 'edgar', 'isabella')
      * @returns {object} Result
      */
-    selectCharacter(socketId, characterId) {
+    selectCharacter(socketId, characterId, characterName = null) {
         const room = this.getRoomBySocketId(socketId);
         
         if (!room) {
@@ -238,6 +238,11 @@ class LobbyManager {
         
         // Assign new character
         player.character = characterId;
+        
+        // Update player name to match character name
+        if (characterName) {
+            player.name = characterName;
+        }
         
         console.log(`[Lobby] Player ${player.name} selected character ${characterId} (was: ${previousCharacter || 'none'})`);
         
