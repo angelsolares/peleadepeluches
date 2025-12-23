@@ -330,13 +330,25 @@ class PlayerEntity {
                     child.material = child.material.clone();
                 }
                 
-                // Apply emissive color for subtle tint
+                // Apply emissive color for subtle tint and FIX TRANSPARENCY
                 const materials = Array.isArray(child.material) ? child.material : [child.material];
                 materials.forEach(mat => {
+                    // Disable transparency to fix see-through issue
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                    mat.alphaTest = 0;
+                    mat.depthWrite = true;
+                    mat.depthTest = true;
+                    mat.side = THREE.FrontSide;
+                    
+                    // Apply emissive color for subtle tint
                     if (mat.emissive) {
                         mat.emissive = tintColor;
                         mat.emissiveIntensity = 0.1;
                     }
+                    
+                    // Force material update
+                    mat.needsUpdate = true;
                 });
             }
             
