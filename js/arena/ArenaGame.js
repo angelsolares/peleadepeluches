@@ -1461,6 +1461,9 @@ class ArenaGame {
         const player = this.players.get(data.playerId);
         
         if (player) {
+            // Mark as eliminated
+            player.controller.isEliminated = true;
+            
             // Show elimination announcement
             const reason = data.reason === 'ringout' ? '¡RING OUT!' : '¡K.O.!';
             this.showEliminationAnnouncement(data.playerName, reason);
@@ -1496,7 +1499,214 @@ class ArenaGame {
                     }, i * 100);
                 }
             }
+            
+            // Check for winner after a short delay
+            setTimeout(() => {
+                this.checkForWinner();
+            }, 2500);
         }
+    }
+    
+    /**
+     * Check if there's only one player left alive
+     */
+    checkForWinner() {
+        let alivePlayers = [];
+        
+        this.players.forEach((player, playerId) => {
+            if (!player.controller.isEliminated) {
+                alivePlayers.push({
+                    id: playerId,
+                    name: player.name,
+                    player: player
+                });
+            }
+        });
+        
+        console.log(`[Arena] Alive players: ${alivePlayers.length}`);
+        
+        // If only one player remains, they win!
+        if (alivePlayers.length === 1) {
+            const winner = alivePlayers[0];
+            console.log(`[Arena] WINNER: ${winner.name}`);
+            this.showVictoryScreen(winner);
+        }
+    }
+    
+    /**
+     * Show victory screen for the winner
+     */
+    showVictoryScreen(winner) {
+        // Play victory animation
+        if (winner.player && winner.player.playAnimation) {
+            winner.player.playAnimation('taunt');
+        }
+        
+        // Create victory overlay
+        const victoryOverlay = document.createElement('div');
+        victoryOverlay.id = 'victory-overlay';
+        victoryOverlay.innerHTML = `
+            <div class="victory-content">
+                <div class="victory-crown">👑</div>
+                <div class="victory-title">¡VICTORIA!</div>
+                <div class="winner-name">${winner.name}</div>
+                <div class="winner-label">CAMPEÓN DE LA ARENA</div>
+                <div class="confetti-container">
+                    ${Array(20).fill().map(() => `<div class="confetti"></div>`).join('')}
+                </div>
+            </div>
+        `;
+        
+        victoryOverlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10000;
+            animation: victoryFadeIn 0.5s ease-out;
+        `;
+        
+        // Add styles
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes victoryFadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+            
+            @keyframes victoryCrown {
+                0%, 100% { transform: translateY(0) rotate(0deg); }
+                25% { transform: translateY(-20px) rotate(-10deg); }
+                50% { transform: translateY(-30px) rotate(0deg); }
+                75% { transform: translateY(-20px) rotate(10deg); }
+            }
+            
+            @keyframes victoryPulse {
+                0%, 100% { transform: scale(1); text-shadow: 0 0 30px rgba(255, 215, 0, 0.5); }
+                50% { transform: scale(1.1); text-shadow: 0 0 60px rgba(255, 215, 0, 0.8); }
+            }
+            
+            @keyframes confettiFall {
+                0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
+                100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+            }
+            
+            .victory-content {
+                text-align: center;
+                font-family: 'Orbitron', sans-serif;
+            }
+            
+            .victory-crown {
+                font-size: 100px;
+                animation: victoryCrown 2s ease-in-out infinite;
+                margin-bottom: 20px;
+            }
+            
+            .victory-title {
+                font-size: 4rem;
+                font-weight: 900;
+                background: linear-gradient(135deg, #ffd700, #ff8c00, #ffd700);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                animation: victoryPulse 1.5s ease-in-out infinite;
+                margin-bottom: 20px;
+            }
+            
+            .winner-name {
+                font-size: 3rem;
+                font-weight: 700;
+                color: #00ffcc;
+                text-shadow: 0 0 30px rgba(0, 255, 204, 0.7);
+                margin-bottom: 10px;
+            }
+            
+            .winner-label {
+                font-size: 1.2rem;
+                color: #ff3366;
+                letter-spacing: 5px;
+                text-transform: uppercase;
+            }
+            
+            .confetti-container {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                overflow: hidden;
+            }
+            
+            .confetti {
+                position: absolute;
+                width: 15px;
+                height: 15px;
+                top: -20px;
+                animation: confettiFall 3s linear infinite;
+            }
+            
+            .confetti:nth-child(odd) { background: #ffd700; }
+            .confetti:nth-child(even) { background: #00ffcc; }
+            .confetti:nth-child(3n) { background: #ff3366; }
+            .confetti:nth-child(4n) { background: #9966ff; }
+            
+            ${Array(20).fill().map((_, i) => `
+                .confetti:nth-child(${i + 1}) {
+                    left: ${Math.random() * 100}%;
+                    animation-delay: ${Math.random() * 3}s;
+                    animation-duration: ${2 + Math.random() * 2}s;
+                    transform: rotate(${Math.random() * 360}deg);
+                }
+            `).join('')}
+        `;
+        
+        document.head.appendChild(style);
+        document.body.appendChild(victoryOverlay);
+        
+        // Play victory sound
+        if (this.sfxManager) {
+            this.sfxManager.playVictory?.();
+        }
+        
+        // Zoom camera on winner
+        this.focusCameraOnWinner(winner.player);
+        
+        // Game is over
+        this.gameState = 'finished';
+        
+        console.log('[Arena] Victory screen shown for:', winner.name);
+    }
+    
+    /**
+     * Focus camera on the winner
+     */
+    focusCameraOnWinner(winner) {
+        if (!winner || !winner.controller) return;
+        
+        const pos = winner.controller.position;
+        const targetX = pos.x;
+        const targetZ = pos.z + 3;
+        const targetY = 5;
+        
+        // Smooth camera transition to winner
+        const animateCamera = () => {
+            if (this.gameState !== 'finished') return;
+            
+            this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetX, 0.03);
+            this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetY, 0.03);
+            this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetZ, 0.03);
+            this.camera.lookAt(pos.x, pos.y + 1, pos.z);
+            
+            requestAnimationFrame(animateCamera);
+        };
+        
+        animateCamera();
     }
     
     /**
@@ -2038,22 +2248,27 @@ class ArenaGame {
     updateCamera() {
         if (this.players.size === 0) return;
         
-        // Camera configuration for Arena
+        // Camera configuration for Arena - DYNAMIC based on player count
         const ARENA_CAMERA = {
-            MIN_HEIGHT: 10,    // Closer minimum height
-            MAX_HEIGHT: 22,    // Closer maximum height
-            PADDING: 2,        // Less padding for tighter framing
-            POSITION_LERP: 0.06,
-            ZOOM_LERP: 0.04,
+            MIN_HEIGHT: 6,     // Very close for 1-2 players
+            MAX_HEIGHT: 20,    // Further for many players
+            PADDING: 3,        // Padding around players
+            POSITION_LERP: 0.08,
+            ZOOM_LERP: 0.05,
             ANGLE: ARENA_CONFIG.CAMERA_ANGLE,
-            FOV: 50            // Wider FOV for better view
+            FOV: 50
         };
         
-        // Calculate bounding box of all players
+        // Only consider ALIVE players for camera framing
         let minX = Infinity, maxX = -Infinity;
         let minZ = Infinity, maxZ = -Infinity;
+        let alivePlayers = 0;
         
         this.players.forEach(player => {
+            // Skip eliminated players
+            if (player.controller.isEliminated) return;
+            
+            alivePlayers++;
             const px = player.controller.position.x;
             const pz = player.controller.position.z;
             
@@ -2063,11 +2278,17 @@ class ArenaGame {
             maxZ = Math.max(maxZ, pz);
         });
         
+        // If no alive players, don't update camera
+        if (alivePlayers === 0) return;
+        
+        // Dynamic padding based on alive player count
+        const dynamicPadding = ARENA_CAMERA.PADDING + (alivePlayers * 0.5);
+        
         // Add padding to bounds
-        minX -= ARENA_CAMERA.PADDING;
-        maxX += ARENA_CAMERA.PADDING;
-        minZ -= ARENA_CAMERA.PADDING;
-        maxZ += ARENA_CAMERA.PADDING;
+        minX -= dynamicPadding;
+        maxX += dynamicPadding;
+        minZ -= dynamicPadding;
+        maxZ += dynamicPadding;
         
         // Calculate center of bounding box
         const centerX = (minX + maxX) / 2;
@@ -2080,14 +2301,16 @@ class ArenaGame {
         
         // Calculate required height based on spread and FOV
         const fovRad = THREE.MathUtils.degToRad(ARENA_CAMERA.FOV);
-        const aspectRatio = window.innerWidth / window.innerHeight;
         
         // Distance needed to fit the spread (considering the camera angle)
         const viewDistance = (maxSpread / 2) / Math.tan(fovRad / 2);
         let targetHeight = viewDistance * Math.cos(ARENA_CAMERA.ANGLE);
         
-        // Clamp height to min/max
-        targetHeight = THREE.MathUtils.clamp(targetHeight, ARENA_CAMERA.MIN_HEIGHT, ARENA_CAMERA.MAX_HEIGHT);
+        // Dynamic min height based on alive players (closer when fewer players)
+        const dynamicMinHeight = Math.max(ARENA_CAMERA.MIN_HEIGHT, 4 + (alivePlayers * 1.5));
+        
+        // Clamp height to dynamic min/max
+        targetHeight = THREE.MathUtils.clamp(targetHeight, dynamicMinHeight, ARENA_CAMERA.MAX_HEIGHT);
         
         // Calculate camera offset based on angle
         const horizontalOffset = targetHeight * Math.tan(ARENA_CAMERA.ANGLE);
