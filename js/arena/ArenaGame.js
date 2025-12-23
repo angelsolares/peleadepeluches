@@ -1423,11 +1423,11 @@ class ArenaGame {
                 victim.animController.mixer.stopAllAction();
             }
             
-            // Mark for ragdoll physics (no animation, just rotation)
+            // Mark as flying (no spin rotation - just fly straight)
             victim.isFlying = true;
             victim.throwSpin = {
-                active: true,
-                speed: 8, // Slower tumble rotation
+                active: false, // No spinning - just fly and land
+                speed: 0,
                 axis: 'x'
             };
             
@@ -2239,18 +2239,10 @@ class ArenaGame {
     updateThrownPlayer(player, delta) {
         // Handle flying state (no animation, just tumbling)
         if (player.isFlying || player.isBeingThrown) {
-            // Log position for debugging
             const pos = player.controller.position;
-            console.log(`[Throw Debug] Player ${player.name} pos: X=${pos.x.toFixed(2)}, Y=${pos.y.toFixed(2)}, Z=${pos.z.toFixed(2)}`);
-            
-            // Apply tumbling rotation while in air
-            if (player.throwSpin && player.throwSpin.active) {
-                player.model.rotation.x += player.throwSpin.speed * delta;
-            }
             
             // Check if player landed (Y position back to ground level)
             const groundLevel = ARENA_CONFIG.RING_HEIGHT || 0.5;
-            console.log(`[Throw Debug] Ground level: ${groundLevel}, Player Y: ${pos.y.toFixed(2)}`);
             
             if (player.controller.position.y <= groundLevel + 0.2) {
                 console.log(`[Throw Debug] Player ${player.name} LANDED!`);
