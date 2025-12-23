@@ -1664,13 +1664,17 @@ class ArenaGame {
         const victim = this.players.get(data.targetId);
         
         if (grabber && victim) {
-            // Release grab state
+            // Release grab state FIRST
             grabber.controller.isGrabbing = false;
             grabber.controller.grabbedPlayer = null;
             grabber.grabbedEntity = null;
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
             victim.isBeingCarried = false;
+            
+            // Mark as escaping to prevent other animations from interrupting
+            victim.isEscaping = true;
+            grabber.isBeingHit = true;
             
             // Reset victim's rotation to normal (was laying flat)
             victim.model.rotation.x = 0;
@@ -1679,6 +1683,7 @@ class ArenaGame {
             victim.model.position.copy(victim.controller.position);
             
             // Victim (escaping player) plays uppercut animation
+            console.log('[Arena] Victim playing punch animation');
             victim.playAnimation('punch');
             if (victim.animController) {
                 const punchAction = victim.animController.mixer?.clipAction(
@@ -1689,7 +1694,8 @@ class ArenaGame {
                 }
             }
             
-            // Grabber receives HURT (not fall) - they got punched!
+            // Grabber receives HURT - they got punched!
+            console.log('[Arena] Grabber playing hit animation');
             grabber.playAnimation('hit');
             if (grabber.animController) {
                 const hitAction = grabber.animController.mixer?.clipAction(
@@ -1704,7 +1710,6 @@ class ArenaGame {
             if (this.hud) {
                 this.hud.showStatus(data.targetId, '¡ESCAPÓ!');
                 this.hud.showStatus(data.grabberId, '¡GOLPEADO!');
-                // Show damage on grabber
                 this.hud.showDamage(data.grabberId, 10, false);
             }
             
@@ -1719,20 +1724,28 @@ class ArenaGame {
                 this.vfxManager.createDamageNumber?.(pos, 10, 0xff3366);
             }
             
-            // Return both players to idle after animations
-            setTimeout(() => {
-                if (victim && !victim.controller.isEliminated) {
-                    victim.playAnimation('idle');
-                }
-                if (grabber && !grabber.controller.isEliminated) {
-                    grabber.playAnimation('idle');
-                }
-            }, 600); // After escape animations complete
-            
             // Play punch sound
             if (this.sfxManager) {
                 this.sfxManager.playHit?.(10, false);
             }
+            
+            // Return VICTIM to idle after punch animation (short)
+            setTimeout(() => {
+                console.log('[Arena] Returning victim to idle');
+                victim.isEscaping = false;
+                if (victim && !victim.controller.isEliminated && !victim.controller.isStunned) {
+                    victim.playAnimation('idle');
+                }
+            }, 400); // Punch animation is fast
+            
+            // Return GRABBER to idle after hit animation (slightly longer)
+            setTimeout(() => {
+                console.log('[Arena] Returning grabber to idle');
+                grabber.isBeingHit = false;
+                if (grabber && !grabber.controller.isEliminated && !grabber.controller.isStunned) {
+                    grabber.playAnimation('idle');
+                }
+            }, 700); // Hit animation takes a bit longer
         }
     }
     
