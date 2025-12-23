@@ -945,9 +945,11 @@ function animate() {
                        !animationController.isBlocking && 
                        !animationController.isTaunting;
         
-        // Base rotation is -90° (profile), idle rotation is -45° (showing more face)
-        const profileRotation = -Math.PI / 2;  // 90° - full profile
-        const idleRotation = -Math.PI / 4;     // 45° - showing face toward camera (3/4 view)
+        // Rotation values:
+        // -PI/2 (-90°) = profile view (for walking)
+        // -PI/6 (-30°) = 3/4 view showing more face (for idle)
+        const profileRotation = -Math.PI / 2;  // -90° full profile for walking
+        const idleRotation = -Math.PI / 6;     // -30° 3/4 view showing face
         const targetRotation = isIdle ? idleRotation : profileRotation;
         
         // Smooth interpolation for rotation
