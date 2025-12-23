@@ -85,9 +85,10 @@ class ArenaStateManager {
         };
         
         // Initialize player arena states with different positions
+        const totalPlayers = room.players.size;
         let playerIndex = 0;
         room.players.forEach((player, socketId) => {
-            const playerState = this.createPlayerArenaState(player, playerIndex);
+            const playerState = this.createPlayerArenaState(player, playerIndex, totalPlayers);
             arenaState.players.set(socketId, playerState);
             playerIndex++;
         });
@@ -101,9 +102,9 @@ class ArenaStateManager {
      * @param {object} player - Player data
      * @param {number} index - Player index for initial positioning
      */
-    createPlayerArenaState(player, index = 0) {
-        // Calculate initial position around the ring
-        const angle = (index / 4) * Math.PI * 2;
+    createPlayerArenaState(player, index = 0, totalPlayers = 8) {
+        // Calculate initial position around the ring (evenly distributed)
+        const angle = (index / totalPlayers) * Math.PI * 2;
         const radius = ARENA_CONFIG.RING_SIZE / 3; // About 6 units from center
         const initialX = Math.cos(angle) * radius;
         const initialZ = Math.sin(angle) * radius;
@@ -887,8 +888,9 @@ class ArenaStateManager {
             playerState.grabbing = null;
             playerState.velocity = { x: 0, y: 0, z: 0 };
             
-            // Position around the ring
-            const angle = (index / 4) * Math.PI * 2;
+            // Position around the ring (evenly distributed based on total players)
+            const totalPlayers = arenaState.players.size;
+            const angle = (index / totalPlayers) * Math.PI * 2;
             const radius = ARENA_CONFIG.RING_SIZE / 3;
             playerState.position = {
                 x: Math.cos(angle) * radius,

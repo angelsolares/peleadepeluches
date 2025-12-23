@@ -48,7 +48,7 @@ class LobbyManager {
             players: new Map(),
             state: 'lobby', // 'lobby', 'playing', 'finished'
             gameMode: gameMode, // 'smash' or 'arena'
-            maxPlayers: 4,
+            maxPlayers: 8, // Support up to 8 players in Arena mode
             createdAt: Date.now()
         };
         
