@@ -64,6 +64,7 @@ class PlayerController {
         this.isGrounded = true;
         this.isJumping = false;
         this.isAttacking = false;
+        this.isBlocking = false;
         this.facingRight = true;
         
         // Game state
@@ -77,7 +78,8 @@ class PlayerController {
             jump: false,
             punch: false,
             kick: false,
-            run: false
+            run: false,
+            block: false
         };
         
         // Attack cooldown
@@ -956,6 +958,10 @@ function initializeSocket() {
     socket.on('player-ko', handlePlayerKO);
     socket.on('game-over', handleGameOver);
     socket.on('game-reset', handleGameReset);
+    
+    // Block and taunt events
+    socket.on('player-block-state', handlePlayerBlockState);
+    socket.on('player-taunting', handlePlayerTaunt);
 }
 
 function showRoomCode(code) {
@@ -1249,8 +1255,82 @@ function handleAttackHit(data) {
             // Trigger visual effects
             triggerHitEffect(hit.targetId);
             updatePlayerHUD(target);
+            
+            // Show "BLOCKED!" indicator if attack was blocked
+            if (hit.blocked) {
+                showBlockedIndicator(target);
+            }
         }
     });
+}
+
+/**
+ * Handle player block state change
+ */
+function handlePlayerBlockState(data) {
+    const player = players.get(data.playerId);
+    if (player) {
+        player.controller.isBlocking = data.isBlocking;
+        if (data.isBlocking) {
+            player.playAnimation('block');
+        }
+        // If not blocking, animation will naturally return to idle
+    }
+}
+
+/**
+ * Handle player taunt (Hip Hop Dance!)
+ */
+function handlePlayerTaunt(data) {
+    const player = players.get(data.playerId);
+    if (player) {
+        player.playAnimation('taunt');
+    }
+}
+
+/**
+ * Show "BLOCKED!" text indicator above player
+ */
+function showBlockedIndicator(player) {
+    // Create floating text
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = '#00FFFF';
+    ctx.font = 'bold 32px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('BLOCKED!', 128, 40);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ 
+        map: texture, 
+        transparent: true,
+        depthTest: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(2, 0.5, 1);
+    sprite.position.copy(player.model.position);
+    sprite.position.y += 2.5;
+    scene.add(sprite);
+    
+    // Animate and remove
+    let elapsed = 0;
+    const animate = () => {
+        elapsed += 0.016;
+        sprite.position.y += 0.02;
+        sprite.material.opacity = 1 - (elapsed / 0.8);
+        
+        if (elapsed < 0.8) {
+            requestAnimationFrame(animate);
+        } else {
+            scene.remove(sprite);
+            sprite.material.dispose();
+            texture.dispose();
+        }
+    };
+    animate();
 }
 
 function handlePlayerKO(kos) {
@@ -1395,7 +1475,7 @@ function setupKeyboardControls() {
     window.addEventListener('keydown', (event) => {
         if (!localPlayer) return;
         
-        const gameKeys = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' ', 'j', 'k', 'shift'];
+        const gameKeys = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', ' ', 'j', 'k', 'l', 't', 'shift'];
         if (gameKeys.includes(event.key.toLowerCase())) {
             event.preventDefault();
         }
@@ -1438,6 +1518,26 @@ function setupKeyboardControls() {
                     }
                 }
                 break;
+            case 'l':
+                // Block - hold to maintain block stance
+                if (!localPlayer.animController.isAttacking) {
+                    input.block = true;
+                    localPlayer.controller.isBlocking = true;
+                    localPlayer.playAnimation('block');
+                    if (socket && socket.connected) {
+                        socket.emit('player-block', true);
+                    }
+                }
+                break;
+            case 't':
+                // Taunt - Hip Hop Dance!
+                if (!localPlayer.animController.isAttacking && !localPlayer.controller.isBlocking) {
+                    localPlayer.playAnimation('taunt');
+                    if (socket && socket.connected) {
+                        socket.emit('player-taunt');
+                    }
+                }
+                break;
         }
     });
     
@@ -1462,6 +1562,14 @@ function setupKeyboardControls() {
                 break;
             case 'shift':
                 input.run = false;
+                break;
+            case 'l':
+                // Release block
+                input.block = false;
+                localPlayer.controller.isBlocking = false;
+                if (socket && socket.connected) {
+                    socket.emit('player-block', false);
+                }
                 break;
         }
     });

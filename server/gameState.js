@@ -356,32 +356,41 @@ class GameStateManager {
             const inFront = (facingDir > 0 && dx > 0) || (facingDir < 0 && dx < 0);
             
             if (distance <= props.range && inFront) {
-                // Apply damage
-                target.health += props.damage;
+                // Check if target is blocking
+                const isBlocking = target.isBlocking === true;
+                
+                // Reduced damage and knockback when blocking
+                const damageMultiplier_block = isBlocking ? 0.25 : 1.0;  // 75% damage reduction when blocking
+                const knockbackMultiplier = isBlocking ? 0.2 : 1.0;      // 80% knockback reduction when blocking
+                
+                // Apply damage (reduced if blocking)
+                const actualDamage = Math.floor(props.damage * damageMultiplier_block);
+                target.health += actualDamage;
                 
                 // Smash Bros knockback formula:
                 // knockback = baseKnockback + (damage * knockbackGrowth * damageMultiplier)
                 const damageMultiplier = 1 + (target.health / 50);
-                const knockbackPower = props.baseKnockback + 
-                    (target.health * props.knockbackGrowth * damageMultiplier);
+                const knockbackPower = (props.baseKnockback + 
+                    (target.health * props.knockbackGrowth * damageMultiplier)) * knockbackMultiplier;
                 
                 // Direction of knockback
                 const knockbackAngle = Math.atan2(dy + 0.5, dx); // Slight upward angle
                 const knockbackDirX = dx === 0 ? facingDir : Math.sign(dx);
                 
-                // Apply knockback
+                // Apply knockback (much reduced if blocking)
                 target.velocity.x = knockbackDirX * knockbackPower * Math.cos(knockbackAngle) * 1.5;
-                target.velocity.y = knockbackPower * 0.8; // Always knock up a bit
+                target.velocity.y = isBlocking ? 0 : knockbackPower * 0.8; // No vertical knockback when blocking
                 
                 hits.push({
                     targetId: targetId,
-                    damage: props.damage,
+                    damage: actualDamage,
                     newHealth: target.health,
                     knockback: {
                         x: target.velocity.x,
                         y: target.velocity.y
                     },
-                    hitstun: props.hitstun
+                    hitstun: isBlocking ? props.hitstun * 0.3 : props.hitstun, // Less hitstun when blocking
+                    blocked: isBlocking
                 });
             }
         }
@@ -515,6 +524,22 @@ class GameStateManager {
             success: true,
             room: this.lobbyManager.getRoomInfo(roomCode)
         };
+    }
+    
+    /**
+     * Set player blocking state
+     * @param {string} playerId - Player's socket ID
+     * @param {string} roomCode - Room code
+     * @param {boolean} isBlocking - Whether player is blocking
+     */
+    setPlayerBlocking(playerId, roomCode, isBlocking) {
+        const room = this.lobbyManager.rooms.get(roomCode);
+        if (!room) return;
+        
+        const player = room.players.get(playerId);
+        if (player) {
+            player.isBlocking = isBlocking;
+        }
     }
 }
 

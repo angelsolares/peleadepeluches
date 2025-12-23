@@ -220,6 +220,36 @@ io.on('connection', (socket) => {
         }
     });
     
+    /**
+     * Player block state change
+     */
+    socket.on('player-block', (isBlocking) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        // Update player's blocking state on server
+        gameStateManager.setPlayerBlocking(socket.id, roomCode, isBlocking);
+        
+        // Broadcast block state to all clients in room
+        io.to(roomCode).emit('player-block-state', {
+            playerId: socket.id,
+            isBlocking: isBlocking
+        });
+    });
+    
+    /**
+     * Player taunt action (Hip Hop Dance!)
+     */
+    socket.on('player-taunt', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        // Broadcast taunt to all clients
+        io.to(roomCode).emit('player-taunting', {
+            playerId: socket.id
+        });
+    });
+    
     // ========== COMMON EVENTS ==========
     
     /**

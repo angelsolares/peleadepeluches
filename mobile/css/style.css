@@ -522,31 +522,68 @@ body {
     letter-spacing: 1px;
 }
 
-/* Action Buttons */
+/* Action Buttons - 4 button diamond layout like Xbox/Nintendo */
 .action-buttons {
     flex: 1;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(3, 70px);
+    grid-template-rows: repeat(3, 70px);
+    gap: 5px;
     align-items: center;
-    gap: 20px;
+    justify-content: center;
 }
 
 .action-btn {
-    width: 100px;
-    height: 100px;
+    width: 70px;
+    height: 70px;
     border-radius: 50%;
-    border: 4px solid;
+    border: 3px solid;
     background: var(--panel);
     cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 2px;
     transition: all 0.1s ease;
 }
 
+/* Y button - top (Yellow - Taunt/Dance) */
+.btn-y {
+    grid-column: 2;
+    grid-row: 1;
+    border-color: #FFD700;
+    color: #FFD700;
+}
+
+.btn-y:active,
+.btn-y.pressed {
+    background: #FFD700;
+    color: var(--dark);
+    transform: scale(0.95);
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+}
+
+/* X button - left (Blue - Block) */
+.btn-x {
+    grid-column: 1;
+    grid-row: 2;
+    border-color: #00BFFF;
+    color: #00BFFF;
+}
+
+.btn-x:active,
+.btn-x.pressed {
+    background: #00BFFF;
+    color: var(--dark);
+    transform: scale(0.95);
+    box-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
+}
+
+/* A button - right (Pink/Red - Punch) */
 .btn-a {
+    grid-column: 3;
+    grid-row: 2;
     border-color: var(--primary);
     color: var(--primary);
 }
@@ -559,17 +596,20 @@ body {
     box-shadow: var(--glow-pink);
 }
 
+/* B button - bottom (Green - Kick) */
 .btn-b {
-    border-color: var(--accent);
-    color: var(--accent);
+    grid-column: 2;
+    grid-row: 3;
+    border-color: #00FF88;
+    color: #00FF88;
 }
 
 .btn-b:active,
 .btn-b.pressed {
-    background: var(--accent);
+    background: #00FF88;
     color: var(--dark);
     transform: scale(0.95);
-    box-shadow: var(--glow-yellow);
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
 }
 
 .btn-label {
@@ -686,13 +726,23 @@ body {
         height: 50px;
     }
     
+    .action-buttons {
+        grid-template-columns: repeat(3, 55px);
+        grid-template-rows: repeat(3, 55px);
+        gap: 3px;
+    }
+    
     .action-btn {
-        width: 80px;
-        height: 80px;
+        width: 55px;
+        height: 55px;
     }
     
     .btn-label {
-        font-size: 1.4rem;
+        font-size: 1.2rem;
+    }
+    
+    .btn-action {
+        font-size: 0.5rem;
     }
 }
 

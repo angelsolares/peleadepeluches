@@ -17,12 +17,14 @@ export const ANIMATION_CONFIG = {
         punch: 'Meshy_AI_Animation_Left_Uppercut_from_Guard_withSkin.fbx',
         kick: 'Meshy_AI_Animation_Boxing_Guard_Right_Straight_Kick_withSkin.fbx',
         hit: 'Meshy_AI_Animation_Hit_Reaction_1_withSkin.fbx',
-        fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+        fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
+        block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
+        taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx'
     },
     
     // Animation types
-    looping: ['walk', 'run', 'idle'],
-    oneShot: ['punch', 'kick', 'hit', 'fall'],
+    looping: ['walk', 'run', 'idle', 'block'],  // Block loops while held
+    oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt'],
     
     // Default fade durations
     fadeDuration: {
@@ -36,7 +38,9 @@ export const ANIMATION_CONFIG = {
         punch: 0.4,  // Faster recovery
         kick: 0.35,  // Faster recovery
         hit: 0.3,
-        fall: 1.0
+        fall: 1.0,
+        block: 0.1,  // Can release block quickly
+        taunt: 2.0   // Taunt takes time, risky!
     },
     
     // Default animation speeds (multiplier)
@@ -46,7 +50,9 @@ export const ANIMATION_CONFIG = {
         punch: 2.0,  // Faster punch
         kick: 1.8,   // Faster kick
         hit: 1.5,    // Faster hit reaction
-        fall: 1.2    // Slightly faster fall
+        fall: 1.2,   // Slightly faster fall
+        block: 1.0,  // Normal block speed
+        taunt: 1.0   // Normal dance speed
     }
 };
 
@@ -58,6 +64,8 @@ export const AnimationState = {
     PUNCH: 'punch',
     KICK: 'kick',
     HIT: 'hit',
+    BLOCK: 'block',
+    TAUNT: 'taunt',
     FALL: 'fall',
     JUMP: 'jump'
 };

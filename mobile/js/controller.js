@@ -79,7 +79,8 @@ const inputState = {
     left: false,
     right: false,
     jump: false,
-    run: false
+    run: false,
+    block: false
 };
 
 // =================================
@@ -357,8 +358,8 @@ function setupControllerInput() {
         btn.addEventListener('mouseleave', () => handleInputEnd(inputType, btn));
     });
     
-    // Action buttons
-    const actionButtons = document.querySelectorAll('.action-btn');
+    // Action buttons (punch, kick, taunt)
+    const actionButtons = document.querySelectorAll('.action-btn[data-action]');
     
     actionButtons.forEach(btn => {
         const action = btn.dataset.action;
@@ -376,6 +377,33 @@ function setupControllerInput() {
         // Mouse events
         btn.addEventListener('mousedown', () => handleAction(action, btn));
         btn.addEventListener('mouseup', () => btn.classList.remove('pressed'));
+    });
+    
+    // Block button (hold to maintain)
+    const blockButtons = document.querySelectorAll('.action-btn[data-input]');
+    
+    blockButtons.forEach(btn => {
+        const inputType = btn.dataset.input;
+        
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleBlockStart(inputType, btn);
+        }, { passive: false });
+        
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            handleBlockEnd(inputType, btn);
+        }, { passive: false });
+        
+        btn.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            handleBlockEnd(inputType, btn);
+        }, { passive: false });
+        
+        // Mouse events
+        btn.addEventListener('mousedown', () => handleBlockStart(inputType, btn));
+        btn.addEventListener('mouseup', () => handleBlockEnd(inputType, btn));
+        btn.addEventListener('mouseleave', () => handleBlockEnd(inputType, btn));
     });
 }
 
@@ -401,9 +429,14 @@ function handleInputEnd(inputType, btn) {
 function handleAction(action, btn) {
     btn.classList.add('pressed');
     
-    socket.emit('player-attack', action, (response) => {
-        console.log('[Attack]', action, response);
-    });
+    // Taunt uses a different event
+    if (action === 'taunt') {
+        socket.emit('player-taunt');
+    } else {
+        socket.emit('player-attack', action, (response) => {
+            console.log('[Attack]', action, response);
+        });
+    }
     
     // Send input update with action flag
     const inputWithAction = { ...inputState };
@@ -417,6 +450,25 @@ function handleAction(action, btn) {
     }, 100);
     
     triggerHaptic();
+}
+
+function handleBlockStart(inputType, btn) {
+    btn.classList.add('pressed');
+    inputState[inputType] = true;
+    
+    // Emit block state to server
+    socket.emit('player-block', true);
+    sendInput();
+    triggerHaptic();
+}
+
+function handleBlockEnd(inputType, btn) {
+    btn.classList.remove('pressed');
+    inputState[inputType] = false;
+    
+    // Emit block release to server
+    socket.emit('player-block', false);
+    sendInput();
 }
 
 function sendInput() {
