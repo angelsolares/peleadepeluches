@@ -387,13 +387,12 @@ class PlayerEntity {
                 break;
             case 'punch':
                 this.animController.playPunch();
-                // VFX: Attack trail and glow
+                // VFX: Attack trail
                 if (vfxManager) {
                     const attackPos = this.controller.position.clone();
                     attackPos.y += 1.2;
                     const direction = this.controller.facingRight ? 1 : -1;
                     vfxManager.createAttackTrail(attackPos, 'punch', direction, playerColor);
-                    vfxManager.createChargeGlow(this.model, playerColor);
                 }
                 // SFX: Punch whoosh
                 if (sfxManager) {
@@ -402,13 +401,12 @@ class PlayerEntity {
                 break;
             case 'kick':
                 this.animController.playKick();
-                // VFX: Attack trail and glow
+                // VFX: Attack trail
                 if (vfxManager) {
                     const attackPos = this.controller.position.clone();
                     attackPos.y += 0.8;
                     const direction = this.controller.facingRight ? 1 : -1;
                     vfxManager.createAttackTrail(attackPos, 'kick', direction, playerColor);
-                    vfxManager.createChargeGlow(this.model, playerColor);
                 }
                 // SFX: Kick whoosh
                 if (sfxManager) {
