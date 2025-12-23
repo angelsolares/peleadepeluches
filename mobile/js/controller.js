@@ -84,7 +84,9 @@ const CHARACTERS = {
     katy: { name: 'Katy', emoji: '👱‍♀️' },
     mariana: { name: 'Mariana', emoji: '👩‍🦱' },
     sol: { name: 'Sol', emoji: '🌞' },
-    yadira: { name: 'Yadira', emoji: '💃' }
+    yadira: { name: 'Yadira', emoji: '💃' },
+    angel: { name: 'Angel', emoji: '😇' },
+    lidia: { name: 'Lidia', emoji: '👩‍🦰' }
 };
 
 // Track which characters are taken by other players

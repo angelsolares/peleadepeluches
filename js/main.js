@@ -633,6 +633,16 @@ const CHARACTER_MODELS = {
         name: 'Yadira',
         file: 'Yadira.fbx',
         thumbnail: '💃'
+    },
+    angel: {
+        name: 'Angel',
+        file: 'Angel.fbx',
+        thumbnail: '😇'
+    },
+    lidia: {
+        name: 'Lidia',
+        file: 'Lidia.fbx',
+        thumbnail: '👩‍🦰'
     }
 };
 
