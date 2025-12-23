@@ -200,6 +200,37 @@ io.on('connection', (socket) => {
     });
     
     /**
+     * Host selects character (from main screen)
+     */
+    socket.on('host-select-character', (characterId) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        
+        if (!roomCode) {
+            console.log('[Socket] Host not in a room');
+            return;
+        }
+        
+        const room = lobbyManager.rooms.get(roomCode);
+        
+        if (!room || room.hostId !== socket.id) {
+            console.log('[Socket] Not the host');
+            return;
+        }
+        
+        // Store host's character selection in the room
+        room.hostCharacter = characterId;
+        console.log(`[Socket] Host selected character: ${characterId} in room ${roomCode}`);
+        
+        // Notify all players about host's character selection
+        io.to(roomCode).emit('character-selected', {
+            playerId: socket.id,
+            playerName: 'Host',
+            character: characterId,
+            isHost: true
+        });
+    });
+    
+    /**
      * Player input update (from mobile controller)
      */
     socket.on('player-input', (input) => {

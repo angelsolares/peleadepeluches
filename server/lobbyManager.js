@@ -317,24 +317,44 @@ class LobbyManager {
         
         room.state = 'playing';
         
-        // Initialize player positions
+        // Get all mobile players
         const playerArray = Array.from(room.players.values());
+        
+        // Add host as a player (Player 1, always first)
+        const hostPlayer = {
+            id: room.hostId,
+            name: 'Host',
+            number: 1,
+            color: '#ff6b6b',
+            character: room.hostCharacter || 'edgar',
+            health: 0,
+            stocks: 3,
+            isHost: true
+        };
+        
+        // Renumber mobile players starting from 2
         playerArray.forEach((player, index) => {
+            player.number = index + 2;
+        });
+        
+        // Combine host + mobile players
+        const allPlayers = [hostPlayer, ...playerArray];
+        
+        // Initialize player positions
+        allPlayers.forEach((player, index) => {
             player.position = {
-                x: (index - (playerArray.length - 1) / 2) * 3,
+                x: (index - (allPlayers.length - 1) / 2) * 3,
                 y: 0,
                 z: 0
             };
-            player.health = 0;
-            player.stocks = 3;
         });
         
-        console.log(`[Lobby] Game started in room ${roomCode} with ${room.players.size} players`);
+        console.log(`[Lobby] Game started in room ${roomCode} with ${allPlayers.length} players (1 host + ${room.players.size} mobile)`);
         
         return {
             success: true,
             room: this.getRoomInfo(roomCode),
-            players: playerArray.map(p => ({
+            players: allPlayers.map(p => ({
                 id: p.id,
                 name: p.name,
                 number: p.number,
@@ -342,7 +362,8 @@ class LobbyManager {
                 position: p.position,
                 health: p.health,
                 stocks: p.stocks,
-                character: p.character || 'edgar' // Default to edgar if no character selected
+                character: p.character || 'edgar',
+                isHost: p.isHost || false
             }))
         };
     }
