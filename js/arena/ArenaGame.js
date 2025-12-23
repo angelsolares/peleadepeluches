@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationController.js';
 import ArenaPlayerController from './ArenaPlayerController.js';
@@ -98,11 +99,42 @@ class ArenaPlayerEntity {
         // Apply color tint
         this.applyColorTint(color);
         
+        // Create floating name label
+        this.nameLabel = this.createNameLabel(color);
+        this.model.add(this.nameLabel);
+        
         // Animation controller
         this.animController = new AnimationController(this.model, baseAnimations);
         
         // Arena-specific controller (360 movement)
         this.controller = new ArenaPlayerController(id, number, color);
+    }
+    
+    /**
+     * Create floating name label above player
+     */
+    createNameLabel(color) {
+        const div = document.createElement('div');
+        div.className = 'arena-player-name-label';
+        div.textContent = this.name;
+        div.style.color = color;
+        
+        const label = new CSS2DObject(div);
+        // Position above player's head (in model's local space, scaled by 0.01)
+        label.position.set(0, 200, 0);
+        label.center.set(0.5, 0);
+        
+        return label;
+    }
+    
+    /**
+     * Update the name label text
+     */
+    setName(name) {
+        this.name = name;
+        if (this.nameLabel && this.nameLabel.element) {
+            this.nameLabel.element.textContent = name;
+        }
     }
     
     applyColorTint(color) {
@@ -190,6 +222,15 @@ class ArenaPlayerEntity {
     
     dispose() {
         this.animController.dispose();
+        
+        // Remove name label
+        if (this.nameLabel) {
+            this.model.remove(this.nameLabel);
+            if (this.nameLabel.element && this.nameLabel.element.parentNode) {
+                this.nameLabel.element.parentNode.removeChild(this.nameLabel.element);
+            }
+        }
+        
         this.model.traverse((child) => {
             if (child.geometry) child.geometry.dispose();
             if (child.material) {
@@ -209,6 +250,7 @@ class ArenaGame {
         this.scene = null;
         this.camera = null;
         this.renderer = null;
+        this.labelRenderer = null; // CSS2DRenderer for floating name labels
         this.clock = new THREE.Clock();
         
         // Players
@@ -219,6 +261,7 @@ class ArenaGame {
         this.baseModel = null;
         this.baseAnimations = {};
         this.characterModelCache = {};
+        this.selectedCharacter = 'edgar'; // Default character
         
         // Networking
         this.socket = null;
@@ -268,6 +311,17 @@ class ArenaGame {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
+        // Setup CSS2D renderer for floating name labels
+        this.labelRenderer = new CSS2DRenderer();
+        this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        this.labelRenderer.domElement.style.position = 'absolute';
+        this.labelRenderer.domElement.style.top = '0px';
+        this.labelRenderer.domElement.style.pointerEvents = 'none';
+        document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
+        
+        // Add styles for floating player names
+        this.addPlayerNameStyles();
+        
         // Setup lighting
         this.setupLights();
         
@@ -307,6 +361,36 @@ class ArenaGame {
             distance * Math.sin(angle)
         );
         this.camera.lookAt(0, 0, 0);
+    }
+    
+    /**
+     * Add CSS styles for floating player names in Arena mode
+     */
+    addPlayerNameStyles() {
+        const style = document.createElement('style');
+        style.textContent = `
+            .arena-player-name-label {
+                color: white;
+                font-family: 'Orbitron', 'Segoe UI', sans-serif;
+                font-size: 12px;
+                font-weight: bold;
+                text-shadow: 
+                    2px 2px 4px rgba(0, 0, 0, 0.9),
+                    -1px -1px 2px rgba(0, 0, 0, 0.6),
+                    0 0 8px currentColor;
+                padding: 3px 10px;
+                background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.5) 100%);
+                border-radius: 10px;
+                border: 2px solid currentColor;
+                white-space: nowrap;
+                transform: translateX(-50%);
+                pointer-events: none;
+                user-select: none;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+        `;
+        document.head.appendChild(style);
     }
     
     setupLights() {
@@ -638,6 +722,10 @@ class ArenaGame {
             this.baseAnimations
         );
         
+        // Set name based on selected character
+        const characterName = CHARACTER_MODELS[this.selectedCharacter]?.name || 'Player 1';
+        this.localPlayer.setName(characterName);
+        
         // Start at center of ring
         this.localPlayer.controller.position.set(0, ARENA_CONFIG.RING_HEIGHT, 0);
         this.scene.add(this.localPlayer.model);
@@ -764,12 +852,17 @@ class ArenaGame {
             this.isHost = true;
             
             // Create room with arena mode
+            console.log('[Socket] Emitting create-room with arena mode...');
             this.socket.emit('create-room', { gameMode: 'arena' }, (response) => {
-                if (response.success) {
+                console.log('[Socket] create-room response:', response);
+                if (response && response.success) {
                     this.roomCode = response.roomCode;
                     console.log(`[Socket] Arena room created: ${this.roomCode}`);
                     this.updateAnimationDisplay(`Sala: ${this.roomCode} - Esperando jugadores...`);
                     this.showRoomCode(this.roomCode);
+                } else {
+                    console.error('[Socket] Failed to create room:', response);
+                    this.updateAnimationDisplay('Error al crear sala');
                 }
             });
         });
@@ -784,6 +877,14 @@ class ArenaGame {
         this.socket.on('game-started', (data) => this.handleGameStarted(data));
         this.socket.on('player-input-update', (data) => this.handlePlayerInput(data));
         this.socket.on('game-state', (data) => this.handleGameState(data));
+        
+        // Arena-specific events
+        this.socket.on('arena-state', (data) => this.handleArenaState(data));
+        this.socket.on('arena-attack-started', (data) => this.handleArenaAttackStarted(data));
+        this.socket.on('arena-attack-hit', (data) => this.handleArenaAttackHit(data));
+        this.socket.on('arena-grab', (data) => this.handleArenaGrab(data));
+        this.socket.on('arena-throw', (data) => this.handleArenaThrow(data));
+        this.socket.on('arena-game-over', (data) => this.handleArenaGameOver(data));
     }
     
     showRoomCode(code) {
@@ -917,6 +1018,186 @@ class ArenaGame {
         });
     }
     
+    // Arena-specific event handlers
+    handleArenaState(data) {
+        // Update all players from server state
+        data.players?.forEach(state => {
+            const player = this.players.get(state.id);
+            if (player) {
+                // Apply position and state from server
+                player.controller.applyServerState(state);
+                
+                // Debug: Log first player position every 60 frames
+                if (state.id === data.players[0].id && Math.random() < 0.03) {
+                    console.log('[Arena] P1 pos:', state.position);
+                }
+                
+                // Update HUD
+                if (this.hud) {
+                    this.hud.updatePlayer(player);
+                }
+            }
+        });
+    }
+    
+    handleArenaAttackStarted(data) {
+        console.log('[Arena] Attack started:', data);
+        const player = this.players.get(data.attackerId);
+        if (player) {
+            // Play attack animation
+            player.playAnimation(data.attackType);
+            
+            // Play sound effect
+            if (this.sfxManager) {
+                if (data.attackType === 'punch') {
+                    this.sfxManager.playPunchSwing?.();
+                } else if (data.attackType === 'kick') {
+                    this.sfxManager.playKickSwing?.();
+                }
+            }
+        }
+    }
+    
+    handleArenaAttackHit(data) {
+        console.log('[Arena] Attack hit:', data);
+        const target = this.players.get(data.targetId);
+        const attacker = this.players.get(data.attackerId);
+        
+        if (target) {
+            // Play hit animation
+            target.playAnimation('hit');
+            
+            // Apply damage to controller
+            target.controller.health = data.targetHealth;
+            
+            // Show VFX
+            if (this.vfxManager) {
+                const hitPosition = target.model.position.clone();
+                hitPosition.y += 1;
+                this.vfxManager.createHitSparks(hitPosition, 0xff3366, data.damage / 10);
+                this.vfxManager.createDamageNumber(hitPosition, data.damage, data.blocked ? 0x00bfff : 0xff3366);
+            }
+            
+            // Play hit sound
+            if (this.sfxManager) {
+                if (data.blocked) {
+                    this.sfxManager.playBlock?.();
+                } else {
+                    this.sfxManager.playHit?.(data.damage, false);
+                }
+            }
+            
+            // Update HUD
+            if (this.hud) {
+                this.hud.updatePlayer(target);
+                this.hud.showDamage(data.targetId, data.damage, data.blocked);
+            }
+        }
+    }
+    
+    handleArenaGrab(data) {
+        console.log('[Arena] Grab:', data);
+        const grabber = this.players.get(data.grabberId);
+        const victim = this.players.get(data.targetId);
+        
+        if (grabber && victim) {
+            grabber.controller.isGrabbing = true;
+            grabber.controller.grabbedPlayer = victim.controller;
+            victim.controller.isGrabbed = true;
+            victim.controller.grabbedBy = grabber.controller;
+            
+            // Play grab animation on grabber
+            if (grabber.animController) {
+                grabber.animController.play('punch'); // Use punch animation for grab
+            }
+            
+            // Position the victim near the grabber
+            if (victim.model && grabber.model) {
+                const offset = 1.2;
+                const angle = grabber.controller.facingAngle || 0;
+                victim.model.position.x = grabber.model.position.x + Math.sin(angle) * offset;
+                victim.model.position.z = grabber.model.position.z + Math.cos(angle) * offset;
+            }
+            
+            // Show status indicators
+            if (this.hud) {
+                this.hud.showStatus(data.targetId, '¡AGARRADO!');
+            }
+            
+            // Play grab sound
+            if (this.sfxManager) {
+                this.sfxManager.playHit?.(5, false);
+            }
+        }
+    }
+    
+    handleArenaThrow(data) {
+        console.log('[Arena] Throw:', data);
+        const grabber = this.players.get(data.grabberId);
+        const victim = this.players.get(data.targetId);
+        
+        if (grabber && victim) {
+            // Release grab state
+            grabber.controller.isGrabbing = false;
+            grabber.controller.grabbedPlayer = null;
+            victim.controller.isGrabbed = false;
+            victim.controller.grabbedBy = null;
+            
+            // Apply visual knockback on victim
+            if (victim.controller) {
+                // The server handles the actual velocity, but we can add visual feedback
+                victim.controller.isStunned = true;
+            }
+            
+            // Play throw animation
+            if (grabber.animController) {
+                grabber.animController.play('kick'); // Use kick animation for throw
+            }
+            if (victim.animController) {
+                victim.animController.play('hit');
+            }
+            
+            // Create VFX
+            if (this.vfxManager && victim.model) {
+                const pos = victim.model.position.clone();
+                this.vfxManager.createHitSpark?.(pos);
+                this.vfxManager.createImpactRing?.(pos);
+                this.vfxManager.createDamageNumber?.(pos, data.damage || 25, 0xff6600);
+            }
+            
+            // Play throw sound
+            if (this.sfxManager) {
+                this.sfxManager.playHit?.(25, true);
+            }
+            
+            // Show status
+            if (this.hud) {
+                this.hud.showStatus(data.targetId, '¡LANZADO!');
+                this.hud.updatePlayer(victim);
+            }
+            
+            // Screen shake for dramatic effect
+            this.shakeScreen(0.3, 200);
+        }
+    }
+    
+    handleArenaGameOver(data) {
+        console.log('[Arena] Game Over:', data);
+        this.gameState = 'finished';
+        
+        // Show winner announcement
+        if (data.winner) {
+            this.showRoundAnnouncement(`¡${data.winner.name} GANA!`);
+        } else {
+            this.showRoundAnnouncement('¡EMPATE!');
+        }
+        
+        // Play victory music
+        if (this.bgmManager) {
+            this.bgmManager.playVictory?.();
+        }
+    }
+    
     async addPlayer(playerData, index = 0) {
         if (this.players.has(playerData.id)) return;
         
@@ -938,7 +1219,7 @@ class ArenaGame {
             this.baseAnimations
         );
         
-        player.name = playerData.name || `Player ${playerData.number}`;
+        player.setName(playerData.name || `Player ${playerData.number}`);
         
         // Position players around the ring
         const angle = (index / 4) * Math.PI * 2;
@@ -1004,6 +1285,9 @@ class ArenaGame {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+        if (this.labelRenderer) {
+            this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
     }
     
     checkPlayerCollisions() {
@@ -1109,6 +1393,11 @@ class ArenaGame {
         this.updateCamera();
         
         this.renderer.render(this.scene, this.camera);
+        
+        // Render floating name labels
+        if (this.labelRenderer) {
+            this.labelRenderer.render(this.scene, this.camera);
+        }
     }
     
     updateCamera() {

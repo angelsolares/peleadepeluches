@@ -81,6 +81,8 @@ io.on('connection', (socket) => {
      * @param {function} callback - Callback function
      */
     socket.on('create-room', (dataOrCallback, callback) => {
+        console.log('[Socket] create-room called with:', typeof dataOrCallback, typeof callback);
+        
         // Handle both old format (just callback) and new format (data + callback)
         let gameMode = 'smash';
         let actualCallback = callback;
@@ -88,20 +90,27 @@ io.on('connection', (socket) => {
         if (typeof dataOrCallback === 'function') {
             // Old format: create-room with just callback
             actualCallback = dataOrCallback;
+            console.log('[Socket] Using old format (callback only)');
         } else if (dataOrCallback && typeof dataOrCallback === 'object') {
             // New format: create-room with data object
             gameMode = dataOrCallback.gameMode || 'smash';
+            console.log('[Socket] Using new format with gameMode:', gameMode);
         }
         
         const result = lobbyManager.createRoom(socket.id, gameMode);
+        console.log('[Socket] createRoom result:', result);
         
         if (result.success) {
             socket.join(result.roomCode);
             console.log(`[Socket] Room ${result.roomCode} created with mode: ${gameMode}`);
         }
         
+        console.log('[Socket] Calling callback:', typeof actualCallback);
         if (typeof actualCallback === 'function') {
             actualCallback(result);
+            console.log('[Socket] Callback called with result');
+        } else {
+            console.log('[Socket] No callback to call!');
         }
     });
     

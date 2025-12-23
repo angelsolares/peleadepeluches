@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from './config.js';
 import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animation/AnimationController.js';
 import ModeSelector, { GAME_MODES } from './modes/ModeSelector.js';
@@ -311,6 +312,10 @@ class PlayerEntity {
         // Apply color tint to materials
         this.applyColorTint(color);
         
+        // Create floating name label
+        this.nameLabel = this.createNameLabel(color);
+        this.model.add(this.nameLabel);
+        
         // Create shared AnimationController (handles mixer, actions, and transitions)
         this.animController = new AnimationController(this.model, baseAnimations);
         
@@ -330,6 +335,34 @@ class PlayerEntity {
         
         // Controller for physics/input
         this.controller = new PlayerController(id, number, color);
+    }
+    
+    /**
+     * Create floating name label above player
+     */
+    createNameLabel(color) {
+        const div = document.createElement('div');
+        div.className = 'player-name-label';
+        div.textContent = this.name;
+        div.style.color = color;
+        
+        const label = new CSS2DObject(div);
+        // Position above player's head (in model's local space, scaled by 0.01)
+        // Model is scaled to 0.01, so 200 in local = 2 in world (above head)
+        label.position.set(0, 200, 0);
+        label.center.set(0.5, 0);
+        
+        return label;
+    }
+    
+    /**
+     * Update the name label text
+     */
+    setName(name) {
+        this.name = name;
+        if (this.nameLabel && this.nameLabel.element) {
+            this.nameLabel.element.textContent = name;
+        }
     }
     
     applyColorTint(color) {
@@ -538,6 +571,15 @@ class PlayerEntity {
     
     dispose() {
         this.animController.dispose();
+        
+        // Remove name label
+        if (this.nameLabel) {
+            this.model.remove(this.nameLabel);
+            if (this.nameLabel.element && this.nameLabel.element.parentNode) {
+                this.nameLabel.element.parentNode.removeChild(this.nameLabel.element);
+            }
+        }
+        
         this.model.traverse((child) => {
             if (child.geometry) child.geometry.dispose();
             if (child.material) {
@@ -553,6 +595,7 @@ class PlayerEntity {
 // =================================
 
 let scene, camera, renderer;
+let labelRenderer = null; // CSS2DRenderer for floating name labels
 let clock = new THREE.Clock();
 
 // VFX Manager instance
@@ -719,6 +762,17 @@ async function init() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+    // Setup CSS2D renderer for floating name labels
+    labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0px';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    document.getElementById('game-container').appendChild(labelRenderer.domElement);
+    
+    // Add styles for floating player names
+    addPlayerNameStyles();
+
     // No OrbitControls - camera follows players automatically (side-view)
 
     // Load and initialize VFX Manager
@@ -750,6 +804,49 @@ async function init() {
     
     // Start render loop
     animate();
+}
+
+/**
+ * Add CSS styles for floating player names
+ */
+function addPlayerNameStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .player-name-label {
+            color: white;
+            font-family: 'Orbitron', 'Segoe UI', sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            text-shadow: 
+                2px 2px 4px rgba(0, 0, 0, 0.8),
+                -1px -1px 2px rgba(0, 0, 0, 0.5),
+                0 0 10px currentColor;
+            padding: 4px 12px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%);
+            border-radius: 12px;
+            border: 2px solid currentColor;
+            white-space: nowrap;
+            transform: translateX(-50%);
+            pointer-events: none;
+            user-select: none;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .player-name-label::before {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 6px solid currentColor;
+        }
+    `;
+    document.head.appendChild(style);
 }
 
 /**
@@ -1176,6 +1273,12 @@ function createLocalPlayer() {
     // Create a test local player
     localPlayer = new PlayerEntity('local', 1, PLAYER_COLORS[0], baseModel, baseAnimations);
     localPlayer.controller.position.set(0, 0, 0);
+    
+    // Set name based on selected character
+    const characterName = CHARACTER_MODELS[selectedCharacter]?.name || 'Player 1';
+    localPlayer.setName(characterName);
+    localPlayer.characterId = selectedCharacter;
+    
     scene.add(localPlayer.model);
     players.set('local', localPlayer);
 }
@@ -1412,7 +1515,7 @@ async function addPlayer(playerData) {
         baseAnimations
     );
     
-    player.name = playerData.name || `Player ${playerData.number}`;
+    player.setName(playerData.name || `Player ${playerData.number}`);
     player.characterId = characterId;
     
     // Set initial position
@@ -2659,6 +2762,9 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (labelRenderer) {
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
 }
 
 // =================================
@@ -2757,6 +2863,11 @@ function animate() {
     updateSideViewCamera();
     
     renderer.render(scene, camera);
+    
+    // Render floating name labels
+    if (labelRenderer) {
+        labelRenderer.render(scene, camera);
+    }
 }
 
 /**

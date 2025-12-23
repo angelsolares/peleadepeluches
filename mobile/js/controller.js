@@ -74,6 +74,7 @@ let isReady = false;
 let isConnected = false;
 let selectedCharacter = 'edgar'; // Default character
 let gameMode = 'smash'; // 'smash' or 'arena'
+let isGrabbing = false; // Track if player is currently grabbing someone (Arena mode)
 
 // Available characters
 const CHARACTERS = {
@@ -155,6 +156,9 @@ function connectToServer() {
     // Arena mode events
     socket.on('arena-state', handleArenaState);
     socket.on('arena-game-over', handleGameOver);
+    socket.on('arena-grab', handleArenaGrabEvent);
+    socket.on('arena-throw', handleArenaThrowEvent);
+    socket.on('arena-grab-released', handleArenaGrabReleased);
 }
 
 function updateConnectionStatus(status, text) {
@@ -528,6 +532,59 @@ function handleArenaState(data) {
             elements.playerDamage.textContent = 'X';
             elements.playerDamage.style.color = 'var(--primary)';
         }
+        
+        // Update grab state from server
+        if (myState.isGrabbing !== undefined) {
+            if (isGrabbing !== myState.isGrabbing) {
+                isGrabbing = myState.isGrabbing;
+                updateGrabButtonState();
+            }
+        }
+    }
+}
+
+/**
+ * Handle when someone grabs (server broadcast)
+ */
+function handleArenaGrabEvent(data) {
+    console.log('[Arena] Grab event:', data);
+    // If we are the grabber, update our state
+    if (data.grabberId === socket.id) {
+        isGrabbing = true;
+        updateGrabButtonState();
+        triggerHaptic();
+    }
+    // If we are the target, vibrate
+    if (data.targetId === socket.id) {
+        triggerHaptic(true);
+    }
+}
+
+/**
+ * Handle when someone is thrown (server broadcast)
+ */
+function handleArenaThrowEvent(data) {
+    console.log('[Arena] Throw event:', data);
+    // If we were grabbing, we're no longer grabbing
+    if (data.grabberId === socket.id) {
+        isGrabbing = false;
+        updateGrabButtonState();
+        triggerHaptic();
+    }
+    // If we were thrown, vibrate strongly
+    if (data.targetId === socket.id) {
+        triggerHaptic(true);
+    }
+}
+
+/**
+ * Handle when grab is released without throw
+ */
+function handleArenaGrabReleased(data) {
+    console.log('[Arena] Grab released:', data);
+    if (data.grabberId === socket.id || data.targetId === socket.id) {
+        isGrabbing = false;
+        updateGrabButtonState();
     }
 }
 
@@ -578,32 +635,42 @@ function handleRoomClosed(data) {
 // =================================
 
 function setupControllerInput() {
-    // D-Pad buttons
+    // D-Pad buttons - read inputType dynamically from dataset for game mode switching
     const dpadButtons = document.querySelectorAll('.dpad-btn');
     
     dpadButtons.forEach(btn => {
-        const inputType = btn.dataset.input;
-        
-        // Touch events
+        // Touch events - read inputType at event time for dynamic mode switching
         btn.addEventListener('touchstart', (e) => {
             e.preventDefault();
+            const inputType = btn.dataset.input; // Read at event time
             handleInputStart(inputType, btn);
         }, { passive: false });
         
         btn.addEventListener('touchend', (e) => {
             e.preventDefault();
+            const inputType = btn.dataset.input; // Read at event time
             handleInputEnd(inputType, btn);
         }, { passive: false });
         
         btn.addEventListener('touchcancel', (e) => {
             e.preventDefault();
+            const inputType = btn.dataset.input; // Read at event time
             handleInputEnd(inputType, btn);
         }, { passive: false });
         
-        // Mouse events (for testing on desktop)
-        btn.addEventListener('mousedown', () => handleInputStart(inputType, btn));
-        btn.addEventListener('mouseup', () => handleInputEnd(inputType, btn));
-        btn.addEventListener('mouseleave', () => handleInputEnd(inputType, btn));
+        // Mouse events (for testing on desktop) - also read dynamically
+        btn.addEventListener('mousedown', () => {
+            const inputType = btn.dataset.input;
+            handleInputStart(inputType, btn);
+        });
+        btn.addEventListener('mouseup', () => {
+            const inputType = btn.dataset.input;
+            handleInputEnd(inputType, btn);
+        });
+        btn.addEventListener('mouseleave', () => {
+            const inputType = btn.dataset.input;
+            handleInputEnd(inputType, btn);
+        });
     });
     
     // Action buttons (punch, kick, taunt)
@@ -656,6 +723,7 @@ function setupControllerInput() {
 }
 
 function handleInputStart(inputType, btn) {
+    console.log('[Input] Start:', inputType, 'gameMode:', gameMode);
     if (!inputType || inputState[inputType]) return;
     
     inputState[inputType] = true;
@@ -683,9 +751,32 @@ function handleAction(action, btn) {
         if (action === 'taunt') {
             socket.emit('player-taunt');
         } else if (action === 'grab') {
-            socket.emit('arena-grab', (response) => {
-                console.log('[Arena Grab]', response);
-            });
+            if (isGrabbing) {
+                // If already grabbing, try to throw
+                // Calculate throw direction from current input
+                let direction = null;
+                if (inputState.left) direction = -Math.PI / 2;
+                else if (inputState.right) direction = Math.PI / 2;
+                else if (inputState.up) direction = 0;
+                else if (inputState.down) direction = Math.PI;
+                
+                socket.emit('arena-throw', direction, (response) => {
+                    console.log('[Arena Throw]', response);
+                    if (response.success) {
+                        isGrabbing = false;
+                        updateGrabButtonState();
+                    }
+                });
+            } else {
+                // Try to grab
+                socket.emit('arena-grab', (response) => {
+                    console.log('[Arena Grab]', response);
+                    if (response.success) {
+                        isGrabbing = true;
+                        updateGrabButtonState();
+                    }
+                });
+            }
         } else {
             socket.emit('arena-attack', action, (response) => {
                 console.log('[Arena Attack]', action, response);
@@ -775,6 +866,32 @@ function updateStocks(count) {
 function triggerHaptic(strong = false) {
     if ('vibrate' in navigator) {
         navigator.vibrate(strong ? [50, 30, 50] : 10);
+    }
+}
+
+/**
+ * Update grab button visual state based on isGrabbing
+ */
+function updateGrabButtonState() {
+    const grabButton = document.querySelector('.action-btn[data-action="grab"]');
+    if (!grabButton) return;
+    
+    const labelSpan = grabButton.querySelector('.btn-action');
+    
+    if (isGrabbing) {
+        // Change to "LANZAR" (throw) mode
+        grabButton.classList.add('grabbing');
+        grabButton.style.borderColor = '#ff6600';
+        grabButton.style.color = '#ff6600';
+        grabButton.style.animation = 'pulse 0.5s infinite';
+        if (labelSpan) labelSpan.textContent = 'LANZAR';
+    } else {
+        // Back to normal "AGARRAR" (grab) mode
+        grabButton.classList.remove('grabbing');
+        grabButton.style.borderColor = '#9966ff';
+        grabButton.style.color = '#9966ff';
+        grabButton.style.animation = 'none';
+        if (labelSpan) labelSpan.textContent = 'AGARRAR';
     }
 }
 

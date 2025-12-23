@@ -4,17 +4,17 @@
  * Handles health, stamina, combat, grabs, and ring-out detection
  */
 
-// Arena-specific configuration
+// Arena-specific configuration (MUST match client ArenaGame.js)
 const ARENA_CONFIG = {
-    // Ring dimensions
-    RING_SIZE: 12,
+    // Ring dimensions - MUST MATCH CLIENT
+    RING_SIZE: 18,         // Width/depth of the ring (synced with client)
     RING_HEIGHT: 0.5,
-    RING_OUT_ZONE: 2,
+    RING_OUT_ZONE: 3,      // Distance outside ring before considered "out" (synced with client)
     
     // Physics
     GRAVITY: -30,
-    MOVE_SPEED: 5,
-    RUN_SPEED: 8,
+    MOVE_SPEED: 6,         // Synced with client
+    RUN_SPEED: 10,         // Synced with client
     FRICTION: 0.85,
     
     // Health & Stamina
@@ -38,18 +38,18 @@ const ARENA_CONFIG = {
     // Knockback
     PUNCH_KNOCKBACK: 3,
     KICK_KNOCKBACK: 5,
-    THROW_KNOCKBACK: 10,
+    THROW_KNOCKBACK: 15,       // Increased for more dramatic throws
     
     // Timing
     ATTACK_COOLDOWN: 500,      // ms
     ACTIVE_FRAME_DELAY: 150,   // ms before hit detection
-    GRAB_DURATION: 2000,       // ms
+    GRAB_DURATION: 3000,       // ms - time to hold before auto-release
     STUN_DURATION: 500,        // ms
     
     // Attack ranges (radius)
     PUNCH_RANGE: 1.2,
     KICK_RANGE: 1.5,
-    GRAB_RANGE: 1.0,
+    GRAB_RANGE: 1.8,           // Increased for easier grabs
 };
 
 class ArenaStateManager {
@@ -83,9 +83,12 @@ class ArenaStateManager {
             lastWinner: null
         };
         
-        // Initialize player arena states
+        // Initialize player arena states with different positions
+        let playerIndex = 0;
         room.players.forEach((player, socketId) => {
-            arenaState.players.set(socketId, this.createPlayerArenaState(player));
+            const playerState = this.createPlayerArenaState(player, playerIndex);
+            arenaState.players.set(socketId, playerState);
+            playerIndex++;
         });
         
         this.arenaStates.set(roomCode, arenaState);
@@ -94,16 +97,24 @@ class ArenaStateManager {
     
     /**
      * Create initial arena state for a player
+     * @param {object} player - Player data
+     * @param {number} index - Player index for initial positioning
      */
-    createPlayerArenaState(player) {
+    createPlayerArenaState(player, index = 0) {
+        // Calculate initial position around the ring
+        const angle = (index / 4) * Math.PI * 2;
+        const radius = ARENA_CONFIG.RING_SIZE / 3; // About 6 units from center
+        const initialX = Math.cos(angle) * radius;
+        const initialZ = Math.sin(angle) * radius;
+        
         return {
             id: player.id,
             name: player.name,
             number: player.number,
             color: player.color,
             
-            // Position (3D)
-            position: { x: 0, y: ARENA_CONFIG.RING_HEIGHT, z: 0 },
+            // Position (3D) - positioned around the ring
+            position: { x: initialX, y: ARENA_CONFIG.RING_HEIGHT, z: initialZ },
             velocity: { x: 0, y: 0, z: 0 },
             facingAngle: 0,
             
@@ -166,7 +177,13 @@ class ArenaStateManager {
             if (!roomPlayer) return;
             
             // Update from room input
+            const prevInput = { ...playerState.input };
             playerState.input = { ...roomPlayer.input };
+            
+            // Debug: Log input changes
+            if (JSON.stringify(prevInput) !== JSON.stringify(playerState.input)) {
+                console.log(`[Arena] Player ${playerState.number} input changed:`, playerState.input);
+            }
             
             // Update timers
             if (playerState.isStunned && now >= playerState.stunEndTime) {
@@ -217,6 +234,11 @@ class ArenaStateManager {
             if (playerState.input.up) dirZ -= 1;
             if (playerState.input.down) dirZ += 1;
             
+            // Debug: Log input if any direction is pressed
+            if (dirX !== 0 || dirZ !== 0) {
+                console.log(`[Arena] Player ${playerState.number} moving: dirX=${dirX}, dirZ=${dirZ}, input=${JSON.stringify(playerState.input)}`);
+            }
+            
             // Normalize diagonal
             const length = Math.sqrt(dirX * dirX + dirZ * dirZ);
             if (length > 0) {
@@ -262,24 +284,37 @@ class ArenaStateManager {
      * Check and handle ring boundary collisions
      */
     checkRingBoundaries(arenaState, playerState) {
-        const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.5;
-        const maxBound = ARENA_CONFIG.RING_SIZE / 2 + ARENA_CONFIG.RING_OUT_ZONE;
+        const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.8; // Rope boundary (matches client)
+        const ringBounce = 0.3; // Bounce back force when hitting ropes
+        let hitRope = false;
         
-        // Check if outside ring (ring-out)
-        if (Math.abs(playerState.position.x) > ringHalf + 0.1 || 
-            Math.abs(playerState.position.z) > ringHalf + 0.1) {
-            
-            // Apply ring-out damage
-            playerState.health -= ARENA_CONFIG.RING_OUT_DAMAGE * (1/60);
-            
-            if (playerState.health <= 0) {
-                this.eliminatePlayer(arenaState, playerState.id);
-            }
+        // Check X boundaries - bounce off ropes
+        if (playerState.position.x > ringHalf) {
+            playerState.position.x = ringHalf;
+            playerState.velocity.x *= -ringBounce;
+            hitRope = true;
+        } else if (playerState.position.x < -ringHalf) {
+            playerState.position.x = -ringHalf;
+            playerState.velocity.x *= -ringBounce;
+            hitRope = true;
         }
         
-        // Clamp to max bounds
-        playerState.position.x = Math.max(-maxBound, Math.min(maxBound, playerState.position.x));
-        playerState.position.z = Math.max(-maxBound, Math.min(maxBound, playerState.position.z));
+        // Check Z boundaries - bounce off ropes
+        if (playerState.position.z > ringHalf) {
+            playerState.position.z = ringHalf;
+            playerState.velocity.z *= -ringBounce;
+            hitRope = true;
+        } else if (playerState.position.z < -ringHalf) {
+            playerState.position.z = -ringHalf;
+            playerState.velocity.z *= -ringBounce;
+            hitRope = true;
+        }
+        
+        // Set near edge flag for visual warnings
+        const edgeDistance = 1.5;
+        playerState.isNearEdge = 
+            Math.abs(playerState.position.x) > ringHalf - edgeDistance ||
+            Math.abs(playerState.position.z) > ringHalf - edgeDistance;
     }
     
     /**
@@ -558,7 +593,7 @@ class ArenaStateManager {
         }
         
         return {
-            throwerId: socketId,
+            grabberId: socketId,  // Use grabberId for consistency with client
             targetId: target.id,
             damage: ARENA_CONFIG.THROW_DAMAGE,
             direction: throwAngle,
