@@ -23,8 +23,9 @@ export const ANIMATION_CONFIG = {
     },
     
     // Animation types
-    looping: ['walk', 'run', 'idle', 'block'],  // Block loops while held
+    looping: ['walk', 'run', 'idle'],
     oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt'],
+    held: ['block'],  // Animations that play once and hold on last frame while button is held
     
     // Default fade durations
     fadeDuration: {
@@ -92,6 +93,7 @@ export class AnimationController {
         
         // State flags
         this.isAttacking = false;
+        this.isBlocking = false;
         this.isPaused = false;
         
         // Callbacks
@@ -126,6 +128,10 @@ export class AnimationController {
         } else if (ANIMATION_CONFIG.oneShot.includes(name)) {
             action.setLoop(THREE.LoopOnce);
             action.clampWhenFinished = true;
+        } else if (ANIMATION_CONFIG.held && ANIMATION_CONFIG.held.includes(name)) {
+            // Held animations play once and freeze on last frame
+            action.setLoop(THREE.LoopOnce);
+            action.clampWhenFinished = true;
         }
         
         // Apply default speed multiplier
@@ -144,7 +150,7 @@ export class AnimationController {
             
             console.log(`[AnimationController] Animation finished: ${finishedName}`);
             
-            // Check if this was a one-shot animation
+            // Check if this was a one-shot animation (not held animations like block)
             if (ANIMATION_CONFIG.oneShot.includes(finishedName)) {
                 this.isAttacking = false;
                 
@@ -303,12 +309,41 @@ export class AnimationController {
     }
     
     /**
+     * Play block animation (holds on last frame)
+     */
+    playBlock() {
+        if (this.isAttacking) return false;
+        this.isBlocking = true;
+        return this.play(AnimationState.BLOCK, ANIMATION_CONFIG.fadeDuration.toAttack);
+    }
+    
+    /**
+     * Release block and return to idle
+     */
+    releaseBlock() {
+        if (!this.isBlocking) return false;
+        this.isBlocking = false;
+        
+        // Return to idle
+        this.playIdle();
+        return true;
+    }
+    
+    /**
+     * Play taunt/dance animation
+     */
+    playTaunt() {
+        if (this.isAttacking || this.isBlocking) return false;
+        return this.play(AnimationState.TAUNT, ANIMATION_CONFIG.fadeDuration.toAttack);
+    }
+    
+    /**
      * Update animation based on movement state
      * @param {Object} state - { isMoving, isRunning, isGrounded, isJumping }
      */
     updateFromMovementState(state) {
-        // Don't change animation during attack
-        if (this.isAttacking) return;
+        // Don't change animation during attack or block
+        if (this.isAttacking || this.isBlocking) return;
         
         const { isMoving, isRunning, isGrounded, isJumping } = state;
         
@@ -355,6 +390,7 @@ export class AnimationController {
         this.currentAction = null;
         this.currentActionName = AnimationState.IDLE;
         this.isAttacking = false;
+        this.isBlocking = false;
     }
     
     /**

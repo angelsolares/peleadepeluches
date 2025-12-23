@@ -373,6 +373,12 @@ class PlayerEntity {
             case 'fall':
                 this.animController.playFall();
                 break;
+            case 'block':
+                this.animController.playBlock();
+                break;
+            case 'taunt':
+                this.animController.playTaunt();
+                break;
             default:
                 this.animController.play(actionName);
         }
@@ -1275,8 +1281,10 @@ function handlePlayerBlockState(data) {
         player.controller.isBlocking = data.isBlocking;
         if (data.isBlocking) {
             player.playAnimation('block');
+        } else {
+            // Release block and return to idle
+            player.animController.releaseBlock();
         }
-        // If not blocking, animation will naturally return to idle
     }
 }
 
@@ -1569,6 +1577,7 @@ function setupKeyboardControls() {
                 // Release block
                 input.block = false;
                 localPlayer.controller.isBlocking = false;
+                localPlayer.animController.releaseBlock();
                 if (socket && socket.connected) {
                     socket.emit('player-block', false);
                 }
