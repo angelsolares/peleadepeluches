@@ -1381,6 +1381,10 @@ class ArenaGame {
         const victim = this.players.get(data.targetId);
         
         if (grabber && victim) {
+            // IMPORTANT: Keep victim at current visual position (where they were being carried)
+            // This prevents the "teleport behind" issue
+            const currentVisualPos = victim.model.position.clone();
+            
             // Release grab state
             grabber.controller.isGrabbing = false;
             grabber.controller.grabbedPlayer = null;
@@ -1389,11 +1393,16 @@ class ArenaGame {
             victim.controller.grabbedBy = null;
             victim.isBeingCarried = false;
             
+            // Set victim position to where they were visually (carried position)
+            victim.controller.position.x = currentVisualPos.x;
+            victim.controller.position.y = currentVisualPos.y;
+            victim.controller.position.z = currentVisualPos.z;
+            
             // Mark victim as being thrown for visual effects
             victim.isBeingThrown = true;
             victim.throwStartTime = Date.now();
             
-            // Reset victim's rotation from carried position
+            // Reset victim's rotation from carried position (but keep position!)
             victim.model.rotation.x = 0;
             victim.model.rotation.z = 0;
             

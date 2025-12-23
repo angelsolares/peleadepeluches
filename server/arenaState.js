@@ -708,6 +708,16 @@ class ArenaStateManager {
         target.health = Math.max(0, target.health - ARENA_CONFIG.THROW_DAMAGE);
         
         const throwAngle = direction || attacker.facingAngle;
+        
+        // IMPORTANT: Set target position to carried position BEFORE applying velocity
+        // This prevents "teleport behind" - throw starts from where victim was being carried
+        const carryOffset = 0.3;
+        const carryHeight = 1.2;
+        target.position.x = attacker.position.x - Math.sin(throwAngle) * carryOffset;
+        target.position.z = attacker.position.z - Math.cos(throwAngle) * carryOffset;
+        target.position.y = attacker.position.y + carryHeight;
+        
+        // Now apply throw velocity FROM the carried position
         target.velocity.x = Math.sin(throwAngle) * ARENA_CONFIG.THROW_KNOCKBACK;
         target.velocity.z = Math.cos(throwAngle) * ARENA_CONFIG.THROW_KNOCKBACK;
         target.velocity.y = ARENA_CONFIG.THROW_HEIGHT; // Launch upward for arc
