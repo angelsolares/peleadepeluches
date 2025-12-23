@@ -198,8 +198,17 @@ class ArenaPlayerEntity {
         // Update model position
         this.model.position.copy(this.controller.position);
         
-        // Update model rotation to face movement direction
-        if (this.controller.movementDirection.length() > 0.1) {
+        // Update model rotation based on facing angle (always, not just when moving)
+        // This ensures rotation updates even when grabbing/grabbed
+        if (this.controller.facingAngle !== undefined) {
+            const targetAngle = this.controller.facingAngle;
+            this.model.rotation.y = THREE.MathUtils.lerp(
+                this.model.rotation.y,
+                targetAngle,
+                0.15
+            );
+        } else if (this.controller.movementDirection.length() > 0.1) {
+            // Fallback to movement direction
             const targetAngle = Math.atan2(
                 this.controller.movementDirection.x,
                 this.controller.movementDirection.z
@@ -1108,21 +1117,15 @@ class ArenaGame {
         if (grabber && victim) {
             grabber.controller.isGrabbing = true;
             grabber.controller.grabbedPlayer = victim.controller;
+            grabber.grabbedEntity = victim; // Store the entity reference for position updates
             victim.controller.isGrabbed = true;
             victim.controller.grabbedBy = grabber.controller;
             
             // Play grab animation on grabber (held pose)
-            if (grabber.animController) {
-                grabber.playAnimation('grab');
-            }
+            grabber.playAnimation('grab');
             
-            // Position the victim near the grabber
-            if (victim.model && grabber.model) {
-                const offset = 1.2;
-                const angle = grabber.controller.facingAngle || 0;
-                victim.model.position.x = grabber.model.position.x + Math.sin(angle) * offset;
-                victim.model.position.z = grabber.model.position.z + Math.cos(angle) * offset;
-            }
+            // Play hit animation on victim (being grabbed)
+            victim.playAnimation('hit');
             
             // Show status indicators
             if (this.hud) {
@@ -1136,6 +1139,28 @@ class ArenaGame {
         }
     }
     
+    /**
+     * Update grabbed player position to follow the grabber
+     */
+    updateGrabbedPlayerPositions() {
+        this.players.forEach((player) => {
+            if (player.controller.isGrabbing && player.grabbedEntity) {
+                const victim = player.grabbedEntity;
+                const grabber = player;
+                
+                // Position the victim in front of the grabber
+                const offset = 1.2;
+                const angle = grabber.controller.facingAngle || 0;
+                victim.controller.position.x = grabber.controller.position.x + Math.sin(angle) * offset;
+                victim.controller.position.z = grabber.controller.position.z + Math.cos(angle) * offset;
+                victim.model.position.copy(victim.controller.position);
+                
+                // Make victim face opposite direction
+                victim.model.rotation.y = angle + Math.PI;
+            }
+        });
+    }
+    
     handleArenaThrow(data) {
         console.log('[Arena] Throw:', data);
         const grabber = this.players.get(data.grabberId);
@@ -1145,6 +1170,7 @@ class ArenaGame {
             // Release grab state
             grabber.controller.isGrabbing = false;
             grabber.controller.grabbedPlayer = null;
+            grabber.grabbedEntity = null; // Clear entity reference
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
             
@@ -1155,12 +1181,8 @@ class ArenaGame {
             }
             
             // Play throw animation
-            if (grabber) {
-                grabber.playAnimation('throw');
-            }
-            if (victim) {
-                victim.playAnimation('fall'); // Victim gets thrown/falls
-            }
+            grabber.playAnimation('throw');
+            victim.playAnimation('fall'); // Victim gets thrown/falls
             
             // Create VFX
             if (this.vfxManager && victim.model) {
@@ -1385,6 +1407,9 @@ class ArenaGame {
             }
         });
         
+        // Update grabbed player positions (make them follow their grabber)
+        this.updateGrabbedPlayerPositions();
+        
         // Check collisions
         this.checkPlayerCollisions();
         this.checkRingBoundaries();
@@ -1416,13 +1441,13 @@ class ArenaGame {
         
         // Camera configuration for Arena
         const ARENA_CAMERA = {
-            MIN_HEIGHT: 15,
-            MAX_HEIGHT: 35,
-            PADDING: 4,
+            MIN_HEIGHT: 10,    // Closer minimum height
+            MAX_HEIGHT: 22,    // Closer maximum height
+            PADDING: 2,        // Less padding for tighter framing
             POSITION_LERP: 0.06,
             ZOOM_LERP: 0.04,
             ANGLE: ARENA_CONFIG.CAMERA_ANGLE,
-            FOV: 45
+            FOV: 50            // Wider FOV for better view
         };
         
         // Calculate bounding box of all players
