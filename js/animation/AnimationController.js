@@ -31,12 +31,22 @@ export const ANIMATION_CONFIG = {
         toAttack: 0.1
     },
     
-    // Attack cooldowns (seconds)
+    // Attack cooldowns (seconds) - reduced due to faster animations
     attackCooldown: {
-        punch: 0.8,
-        kick: 0.7,
-        hit: 0.5,
-        fall: 1.5
+        punch: 0.4,  // Faster recovery
+        kick: 0.35,  // Faster recovery
+        hit: 0.3,
+        fall: 1.0
+    },
+    
+    // Default animation speeds (multiplier)
+    defaultSpeeds: {
+        walk: 1.0,
+        run: 1.0,
+        punch: 2.0,  // Faster punch
+        kick: 1.8,   // Faster kick
+        hit: 1.5,    // Faster hit reaction
+        fall: 1.2    // Slightly faster fall
     }
 };
 
@@ -108,6 +118,11 @@ export class AnimationController {
         } else if (ANIMATION_CONFIG.oneShot.includes(name)) {
             action.setLoop(THREE.LoopOnce);
             action.clampWhenFinished = true;
+        }
+        
+        // Apply default speed multiplier
+        if (ANIMATION_CONFIG.defaultSpeeds[name]) {
+            action.timeScale = ANIMATION_CONFIG.defaultSpeeds[name];
         }
     }
     

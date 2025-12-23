@@ -224,10 +224,10 @@ class GameStateManager {
             return null;
         }
         
-        // Attack timing properties
+        // Attack timing properties (reduced for faster animations)
         const attackTiming = {
-            punch: { activeFrameDelay: 150 },  // ms until hit check
-            kick: { activeFrameDelay: 200 }    // ms until hit check
+            punch: { activeFrameDelay: 75 },   // ms until hit check (2x faster anim)
+            kick: { activeFrameDelay: 110 }    // ms until hit check (1.8x faster anim)
         };
         
         const timing = attackTiming[attackType] || attackTiming.punch;
@@ -321,16 +321,16 @@ class GameStateManager {
                 baseKnockback: 3, 
                 knockbackGrowth: 0.08,
                 range: 0.9,  // Reduced from 1.8 - requires being close
-                hitstun: 0.3,  // seconds of hitstun
-                activeFrameDelay: 150  // ms until hit check (when punch lands)
+                hitstun: 0.2,  // seconds of hitstun (reduced for faster gameplay)
+                activeFrameDelay: 75  // ms until hit check (2x faster animation)
             },
             kick: { 
                 damage: 12, 
                 baseKnockback: 5, 
                 knockbackGrowth: 0.1,
                 range: 1.1,  // Reduced from 2.2 - slightly longer than punch
-                hitstun: 0.4,
-                activeFrameDelay: 200  // ms until hit check (kick is slower)
+                hitstun: 0.25,  // seconds of hitstun (reduced for faster gameplay)
+                activeFrameDelay: 110  // ms until hit check (1.8x faster animation)
             }
         };
         
