@@ -3,6 +3,14 @@
  * Handles touch input and WebSocket communication
  */
 
+import BGMManager from './BGMManager.js';
+
+// =================================
+// BGM Manager
+// =================================
+
+let bgmManager = null;
+
 // =================================
 // Configuration
 // =================================
@@ -182,6 +190,11 @@ function joinRoom() {
         return;
     }
     
+    // Initialize BGM on first user interaction (required by browsers)
+    if (!bgmManager) {
+        bgmManager = new BGMManager('../');
+    }
+    
     elements.joinBtn.disabled = true;
     showError('');
     
@@ -194,6 +207,11 @@ function joinRoom() {
             
             updateLobbyUI(response.room);
             showScreen('lobby');
+            
+            // BGM: Play character select music
+            if (bgmManager) {
+                bgmManager.playCharacterSelect();
+            }
         } else {
             showError(response.error || 'Error al unirse');
         }
@@ -394,6 +412,11 @@ function handleGameStarted(data) {
     
     updateStocks(3);
     triggerHaptic();
+    
+    // BGM: Play battle music
+    if (bgmManager) {
+        bgmManager.playBattle();
+    }
 }
 
 function handleGameState(data) {
@@ -420,12 +443,22 @@ function handlePlayerKO(kos) {
         if (ko.playerId === socket.id) {
             updateStocks(ko.stocksRemaining);
             triggerHaptic(true); // Strong haptic for KO
+            
+            // BGM: Play knockout sound
+            if (bgmManager) {
+                bgmManager.playKnockout();
+            }
         }
     });
 }
 
 function handleGameOver(data) {
     console.log('[Game] Game over!', data);
+    
+    // BGM: Play victory fanfare
+    if (bgmManager) {
+        bgmManager.playVictory();
+    }
     
     elements.gameOverOverlay.classList.remove('hidden');
     
@@ -448,6 +481,11 @@ function handleGameReset(data) {
     isReady = false;
     updateLobbyUI(data.room);
     showScreen('lobby');
+    
+    // BGM: Back to character select music
+    if (bgmManager) {
+        bgmManager.playCharacterSelect();
+    }
 }
 
 function handleRoomClosed(data) {
