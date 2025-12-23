@@ -424,12 +424,11 @@ class PlayerEntity {
                        !this.animController.isBlocking && 
                        !this.animController.isTaunting;
         
-        // Rotation values:
+        // With negative scale.z flip, rotating MORE negative shows the face
         // -PI/2 (-90°) = profile view (for walking)
-        // -PI/6 (-30°) = 3/4 view showing more face (for idle)
-        // 0° = facing camera
-        const profileRotation = -Math.PI / 2;  // -90° full profile for walking
-        const idleRotation = -Math.PI / 6;     // -30° 3/4 view showing face
+        // -PI*0.65 (-117°) = 3/4 view showing more face (for idle)
+        const profileRotation = -Math.PI / 2;      // -90° full profile for walking
+        const idleRotation = -Math.PI * 0.65;      // -117° 3/4 view showing face
         const targetRotation = isIdle ? idleRotation : profileRotation;
         
         // Smooth interpolation for rotation
