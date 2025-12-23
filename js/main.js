@@ -10,6 +10,9 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL, CONFIG } from './config.js';
 import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animation/AnimationController.js';
 
+// VFX Manager will be loaded dynamically
+let VFXManager = null;
+
 // =================================
 // Configuration
 // =================================
@@ -364,6 +367,11 @@ class PlayerEntity {
      * Play animation by name using shared AnimationController
      */
     playAnimation(actionName) {
+        // Get player color for VFX
+        const colorIndex = this.controller.playerNumber - 1;
+        const colors = [0xff3366, 0x00ffcc, 0xffcc00, 0x9966ff];
+        const playerColor = colors[colorIndex] || 0xFF6600;
+        
         switch (actionName) {
             case 'idle':
                 this.animController.playIdle();
@@ -376,9 +384,25 @@ class PlayerEntity {
                 break;
             case 'punch':
                 this.animController.playPunch();
+                // VFX: Attack trail and glow
+                if (vfxManager) {
+                    const attackPos = this.controller.position.clone();
+                    attackPos.y += 1.2;
+                    const direction = this.controller.facingRight ? 1 : -1;
+                    vfxManager.createAttackTrail(attackPos, 'punch', direction, playerColor);
+                    vfxManager.createChargeGlow(this.model, playerColor);
+                }
                 break;
             case 'kick':
                 this.animController.playKick();
+                // VFX: Attack trail and glow
+                if (vfxManager) {
+                    const attackPos = this.controller.position.clone();
+                    attackPos.y += 0.8;
+                    const direction = this.controller.facingRight ? 1 : -1;
+                    vfxManager.createAttackTrail(attackPos, 'kick', direction, playerColor);
+                    vfxManager.createChargeGlow(this.model, playerColor);
+                }
                 break;
             case 'hit':
                 this.animController.playHit();
@@ -398,6 +422,10 @@ class PlayerEntity {
     }
     
     update(delta, skipPhysics = false) {
+        // Track previous state for VFX triggers
+        const wasInAir = !this.controller.isGrounded;
+        const prevVelocityY = this.controller.velocity.y;
+        
         // Update controller physics only if not skipped (skip during online game)
         if (!skipPhysics) {
             this.controller.update(delta);
@@ -416,6 +444,24 @@ class PlayerEntity {
         const input = this.controller.input;
         const isMoving = input.left || input.right;
         const isRunning = isMoving && input.run;
+        
+        // VFX: Landing impact when hitting ground
+        if (vfxManager && wasInAir && this.controller.isGrounded && prevVelocityY < -5) {
+            const landPosition = this.controller.position.clone();
+            const fallSpeed = Math.abs(prevVelocityY);
+            const intensity = Math.min(1.5, fallSpeed / 15);
+            vfxManager.createLandingImpact(landPosition, intensity);
+        }
+        
+        // VFX: Dust cloud when running (throttled)
+        if (vfxManager && isRunning && this.controller.isGrounded) {
+            if (!this._lastDustTime || performance.now() - this._lastDustTime > 150) {
+                const dustPosition = this.controller.position.clone();
+                const direction = this.controller.facingRight ? 1 : -1;
+                vfxManager.createDustCloud(dustPosition, direction);
+                this._lastDustTime = performance.now();
+            }
+        }
         
         // IDLE ROTATION: When idle, rotate character slightly toward camera to show face
         // When moving, return to profile view for proper walk/run animation
@@ -475,6 +521,9 @@ class PlayerEntity {
 
 let scene, camera, renderer;
 let clock = new THREE.Clock();
+
+// VFX Manager instance
+let vfxManager = null;
 
 // Base model and animations
 let baseModel = null;
@@ -569,6 +618,9 @@ async function init() {
 
     // No OrbitControls - camera follows players automatically (side-view)
 
+    // Load and initialize VFX Manager
+    await loadVFXManager();
+
     // Add lights
     setupLights();
     
@@ -589,6 +641,32 @@ async function init() {
     
     // Start render loop
     animate();
+}
+
+/**
+ * Load the VFXManager module and initialize it
+ */
+async function loadVFXManager() {
+    try {
+        // Load VFXManager script dynamically
+        const script = document.createElement('script');
+        script.src = 'js/effects/VFXManager.js';
+        document.head.appendChild(script);
+        
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+        });
+        
+        // Initialize VFXManager with scene and camera
+        if (typeof window.VFXManager !== 'undefined') {
+            VFXManager = window.VFXManager;
+        }
+        vfxManager = new VFXManager(scene, camera);
+        console.log('[Game] VFXManager initialized');
+    } catch (error) {
+        console.warn('[Game] VFXManager failed to load:', error);
+    }
 }
 
 // =================================
@@ -1566,8 +1644,8 @@ function handleAttackHit(data) {
                 target.controller.velocity.y = Math.abs(hit.knockback.y);
             }
             
-            // Trigger visual effects
-            triggerHitEffect(hit.targetId);
+            // Trigger visual effects with damage and blocked info
+            triggerHitEffect(hit.targetId, data.attackerId, hit.damage || 0, hit.blocked || false);
             updatePlayerHUD(target);
             
             // Show "BLOCKED!" indicator if attack was blocked
@@ -1974,18 +2052,52 @@ function removePlayerHUD(playerId) {
     }
 }
 
-function triggerHitEffect(playerId) {
+function triggerHitEffect(playerId, attackerId = null, damage = 0, blocked = false) {
+    const player = players.get(playerId);
+    const attacker = attackerId ? players.get(attackerId) : null;
     const hud = document.getElementById(`hud-${playerId}`);
+    
     if (hud) {
         hud.classList.add('hit');
         setTimeout(() => hud.classList.remove('hit'), 300);
     }
     
-    // Screen shake
-    document.getElementById('game-container').classList.add('screen-shake');
-    setTimeout(() => {
-        document.getElementById('game-container').classList.remove('screen-shake');
-    }, 300);
+    // Use VFXManager for particle effects
+    if (vfxManager && player) {
+        const hitPosition = player.controller.position.clone();
+        hitPosition.y += 1.0; // Offset to body center
+        
+        // Get attacker color for effects
+        let effectColor = 0xFF6600;
+        if (attacker) {
+            const colorIndex = attacker.controller.playerNumber - 1;
+            const colors = [0xff3366, 0x00ffcc, 0xffcc00, 0x9966ff];
+            effectColor = colors[colorIndex] || 0xFF6600;
+        }
+        
+        if (blocked) {
+            // Block effects - blue shield sparks
+            vfxManager.createBlockShield(hitPosition, 0x00BFFF);
+            vfxManager.createBlockSparks(hitPosition);
+        } else {
+            // Hit effects - sparks, ring, damage number, flash
+            const intensity = Math.min(2.0, 0.5 + damage / 50);
+            vfxManager.createHitSparks(hitPosition, effectColor, intensity);
+            vfxManager.createImpactRing(hitPosition, effectColor);
+            
+            // Damage number
+            if (damage > 0) {
+                vfxManager.createDamageNumber(hitPosition, damage, effectColor);
+            }
+            
+            // Flash the character
+            vfxManager.createCharacterFlash(player.model, 100);
+        }
+    }
+    
+    // Screen shake (intensity based on damage)
+    const shakeIntensity = blocked ? 0.2 : Math.min(0.5, 0.2 + damage / 100);
+    triggerScreenShake(shakeIntensity, blocked ? 150 : 300);
 }
 
 function triggerKOEffect(playerId) {
@@ -2387,6 +2499,11 @@ function animate() {
     
     // Check collisions between players (push them apart)
     checkPlayerCollisions();
+    
+    // Update VFX Manager (particle effects, etc.)
+    if (vfxManager) {
+        vfxManager.update(delta);
+    }
     
     // Update camera - Side view following system (Smash Bros style)
     updateSideViewCamera();
