@@ -20,15 +20,15 @@ const ARENA_CONFIG = {
     // Health & Stamina
     MAX_HEALTH: 100,
     MAX_STAMINA: 100,
-    STAMINA_REGEN: 5,           // Slower base regen (was 10)
+    STAMINA_REGEN: 10,          // Normal regen rate
     STAMINA_REGEN_TAUNT: 25,    // Fast regen when taunting/dancing
     
-    // Stamina costs (increased for faster drain)
-    PUNCH_STAMINA: 20,          // Was 15
-    KICK_STAMINA: 28,           // Was 20
-    GRAB_STAMINA: 35,           // Was 25
-    THROW_STAMINA: 40,          // Was 30
-    BLOCK_STAMINA_PER_SEC: 10,  // Was 5
+    // Stamina costs
+    PUNCH_STAMINA: 20,
+    KICK_STAMINA: 28,
+    GRAB_STAMINA: 35,
+    THROW_STAMINA: 0,           // Throw is FREE - reward for successful grab!
+    BLOCK_STAMINA_PER_SEC: 10,
     
     // Damage
     PUNCH_DAMAGE: 10,
@@ -260,8 +260,10 @@ class ArenaStateManager {
         }
         
         // Apply friction
-        playerState.velocity.x *= ARENA_CONFIG.FRICTION;
-        playerState.velocity.z *= ARENA_CONFIG.FRICTION;
+        // Apply less friction when being thrown to maintain momentum
+        const friction = playerState.isBeingThrown ? 0.98 : ARENA_CONFIG.FRICTION;
+        playerState.velocity.x *= friction;
+        playerState.velocity.z *= friction;
         
         // Apply gravity if in air
         if (playerState.position.y > ARENA_CONFIG.RING_HEIGHT) {
@@ -323,13 +325,27 @@ class ArenaStateManager {
             playerState.velocity.z * playerState.velocity.z
         );
         
-        // If moving fast enough (thrown), allow passing through ropes
-        const RING_OUT_SPEED = 10; // Minimum speed to exit ring
-        if (speed > RING_OUT_SPEED) {
-            // Mark as potentially out of ring - will be checked in checkRingOuts
+        // If being thrown, allow passing through ropes with less speed required
+        const RING_OUT_SPEED = playerState.isBeingThrown ? 5 : 10; // Lower threshold when thrown
+        
+        if (speed > RING_OUT_SPEED || playerState.isBeingThrown) {
+            // Check if about to exit or already outside
+            const isNearEdgeX = Math.abs(playerState.position.x) > ringHalf - 1;
+            const isNearEdgeZ = Math.abs(playerState.position.z) > ringHalf - 1;
+            
+            if (isNearEdgeX || isNearEdgeZ) {
+                console.log(`[Ring Out] ${playerState.name} near edge! Speed: ${speed.toFixed(2)}, Pos: (${playerState.position.x.toFixed(2)}, ${playerState.position.z.toFixed(2)})`);
+            }
+            
+            // Mark as potentially out of ring
             playerState.isOutOfRing = 
                 Math.abs(playerState.position.x) > ringHalf + ARENA_CONFIG.RING_OUT_ZONE ||
                 Math.abs(playerState.position.z) > ringHalf + ARENA_CONFIG.RING_OUT_ZONE;
+            
+            if (playerState.isOutOfRing) {
+                console.log(`[Ring Out] ${playerState.name} IS OUT OF RING!`);
+            }
+            
             return; // Don't bounce, let them fly out
         }
         
