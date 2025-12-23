@@ -969,6 +969,9 @@ function updateCharacterSelector() {
     });
 }
 
+// Expose changeCharacter to global scope for onclick handlers
+window.changeCharacter = changeCharacter;
+
 /**
  * Create character selector UI
  */
