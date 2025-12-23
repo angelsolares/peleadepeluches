@@ -639,6 +639,58 @@ html, body {
 }
 
 /* =================================
+   Character Selector
+   ================================= */
+
+.character-section {
+    padding-bottom: 15px;
+    margin-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.pg-character-options {
+    display: flex;
+    gap: 10px;
+}
+
+.pg-char-btn {
+    flex: 1;
+    padding: 12px 8px;
+    background: var(--bg-secondary);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.pg-char-btn:hover {
+    border-color: var(--accent-cyan);
+    background: rgba(0, 255, 204, 0.1);
+    transform: translateY(-2px);
+}
+
+.pg-char-btn.selected {
+    border-color: var(--accent-cyan);
+    background: rgba(0, 255, 204, 0.15);
+    box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+}
+
+.pg-char-thumb {
+    font-size: 2rem;
+}
+
+.pg-char-name {
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    font-family: 'Orbitron', sans-serif;
+    letter-spacing: 1px;
+}
+
+/* =================================
    Responsive
    ================================= */
 

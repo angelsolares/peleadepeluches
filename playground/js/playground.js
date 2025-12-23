@@ -20,6 +20,25 @@ const CAMERA_POSITIONS = {
 };
 
 // =================================
+// Character Models (shared with main game)
+// =================================
+
+const CHARACTER_MODELS = {
+    edgar: {
+        name: 'Edgar',
+        file: 'Edgar_Model.fbx',
+        thumbnail: '👦'
+    },
+    isabella: {
+        name: 'Isabella', 
+        file: 'Isabella_Model.fbx',
+        thumbnail: '👧'
+    }
+};
+
+let selectedCharacter = 'edgar';
+
+// =================================
 // Global Variables
 // =================================
 
@@ -100,6 +119,9 @@ async function init() {
     // Setup controls
     setupControls();
     
+    // Create character selector UI
+    createPlaygroundCharacterSelector();
+    
     // Handle window resize
     window.addEventListener('resize', onWindowResize);
     
@@ -171,40 +193,53 @@ function createGround() {
 // Character Loading
 // =================================
 
-async function loadCharacter() {
+async function loadCharacter(characterId = null) {
     const loader = new FBXLoader();
     const animationFiles = ANIMATION_CONFIG.files;
-    const totalFiles = Object.keys(animationFiles).length;
+    const totalFiles = Object.keys(animationFiles).length + 1; // +1 for character model
     let loadedCount = 0;
     
+    // Use provided character or selected one
+    const charId = characterId || selectedCharacter;
+    const characterConfig = CHARACTER_MODELS[charId];
+    
+    if (!characterConfig) {
+        console.error(`[Playground] Character ${charId} not found!`);
+        return;
+    }
+    
     try {
-        // Load base model (walk has the skinned mesh)
-        loadingText.textContent = 'Cargando modelo...';
-        model = await loadFBX(loader, `../assets/${animationFiles.walk}`);
+        // Load selected character model
+        loadingText.textContent = `Cargando modelo: ${characterConfig.name}...`;
+        model = await loadFBX(loader, `../assets/${characterConfig.file}`);
         // Scale (negative Z to face right by default)
         model.scale.set(0.01, 0.01, -0.01);
         
         // Rotate model 90° to show profile view
         model.rotation.y = -Math.PI / 2;
         
-        // Enable shadows
+        // Enable shadows and fix transparency
         model.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
+                
+                // Fix transparency
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach(mat => {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                    mat.depthWrite = true;
+                    mat.needsUpdate = true;
+                });
             }
         });
         
-        // Store walk animation
-        if (model.animations && model.animations.length > 0) {
-            animations.walk = model.animations[0];
-            loadedCount++;
-        }
+        loadedCount++;
+        console.log(`[Playground] Loaded model: ${characterConfig.name}`);
         
-        // Load remaining animations
+        // Load all animations
         for (const [actionName, fileName] of Object.entries(animationFiles)) {
-            if (actionName === 'walk') continue;
-            
             loadingText.textContent = `Cargando: ${actionName}...`;
             
             try {
@@ -270,6 +305,108 @@ async function loadCharacter() {
 function loadFBX(loader, path) {
     return new Promise((resolve, reject) => {
         loader.load(path, resolve, undefined, reject);
+    });
+}
+
+/**
+ * Change character model in playground
+ */
+async function changePlaygroundCharacter(characterId) {
+    if (!CHARACTER_MODELS[characterId]) {
+        console.error(`[Playground] Character ${characterId} not found!`);
+        return;
+    }
+    
+    if (selectedCharacter === characterId && model) {
+        console.log(`[Playground] Character ${characterId} already loaded`);
+        return;
+    }
+    
+    console.log(`[Playground] Changing character to: ${characterId}`);
+    selectedCharacter = characterId;
+    
+    // Show loading
+    loadingOverlay.classList.remove('hidden');
+    loadingText.textContent = `Cargando ${CHARACTER_MODELS[characterId].name}...`;
+    
+    // Clean up old model
+    if (model) {
+        scene.remove(model);
+        model.traverse((child) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                mats.forEach(m => m.dispose());
+            }
+        });
+        model = null;
+    }
+    
+    // Clean up animation controller
+    if (animationController) {
+        animationController.dispose();
+        animationController = null;
+    }
+    
+    // Clear animations
+    Object.keys(animations).forEach(key => delete animations[key]);
+    
+    // Reset position
+    positionX = 0;
+    facingRight = true;
+    
+    // Load new character
+    await loadCharacter(characterId);
+    
+    // Update UI
+    updateCharacterSelector();
+}
+
+/**
+ * Update character selector buttons
+ */
+function updateCharacterSelector() {
+    document.querySelectorAll('.pg-char-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.character === selectedCharacter);
+    });
+}
+
+/**
+ * Create character selector in playground
+ */
+function createPlaygroundCharacterSelector() {
+    const panel = document.getElementById('control-panel');
+    if (!panel) return;
+    
+    // Find first section or create at start
+    const firstSection = panel.querySelector('.panel-section');
+    
+    const selectorHTML = `
+        <section class="panel-section character-section">
+            <h2>🎭 Personaje</h2>
+            <div class="pg-character-options">
+                ${Object.entries(CHARACTER_MODELS).map(([id, char]) => `
+                    <button class="pg-char-btn ${id === selectedCharacter ? 'selected' : ''}" 
+                            data-character="${id}">
+                        <span class="pg-char-thumb">${char.thumbnail}</span>
+                        <span class="pg-char-name">${char.name}</span>
+                    </button>
+                `).join('')}
+            </div>
+        </section>
+    `;
+    
+    if (firstSection) {
+        firstSection.insertAdjacentHTML('beforebegin', selectorHTML);
+    } else {
+        panel.insertAdjacentHTML('afterbegin', selectorHTML);
+    }
+    
+    // Add click handlers
+    document.querySelectorAll('.pg-char-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            changePlaygroundCharacter(btn.dataset.character);
+        });
     });
 }
 

@@ -479,6 +479,23 @@ const ANIMATION_FILES = {
     taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx'
 };
 
+// Available character models
+const CHARACTER_MODELS = {
+    edgar: {
+        name: 'Edgar',
+        file: 'Edgar_Model.fbx',
+        thumbnail: '👦'
+    },
+    isabella: {
+        name: 'Isabella', 
+        file: 'Isabella_Model.fbx',
+        thumbnail: '👧'
+    }
+};
+
+// Currently selected character
+let selectedCharacter = 'edgar';
+
 // Player colors
 const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff'];
 
@@ -740,29 +757,31 @@ function createArena() {
 // Character & Animation Loading
 // =================================
 
-async function loadCharacterWithAnimations() {
+async function loadCharacterWithAnimations(characterId = null) {
     const loader = new FBXLoader();
-    const totalFiles = Object.keys(ANIMATION_FILES).length;
+    const totalFiles = Object.keys(ANIMATION_FILES).length + 1; // +1 for character model
     let loadedCount = 0;
     
+    // Use provided character or selected one
+    const charId = characterId || selectedCharacter;
+    const characterConfig = CHARACTER_MODELS[charId];
+    
+    if (!characterConfig) {
+        console.error(`Character ${charId} not found!`);
+        return;
+    }
+    
     try {
-        updateLoadingProgress(0, 'Cargando modelo base...');
+        updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         
-        // Load base model
-        baseModel = await loadFBX(loader, `assets/${ANIMATION_FILES.walk}`);
+        // Load selected character model
+        baseModel = await loadFBX(loader, `assets/${characterConfig.file}`);
+        console.log(`=== MODELO CARGADO: ${characterConfig.name} ===`);
+        loadedCount++;
         
-        // Store walk animation
-        if (baseModel.animations && baseModel.animations.length > 0) {
-            console.log('=== ANIMACIONES CARGADAS ===');
-            console.log(`Base model (walk): ${baseModel.animations[0].name}`);
-            baseAnimations.walk = baseModel.animations[0];
-            loadedCount++;
-        }
-        
-        // Load remaining animations
+        // Load all animations
+        console.log('=== CARGANDO ANIMACIONES ===');
         for (const [actionName, fileName] of Object.entries(ANIMATION_FILES)) {
-            if (actionName === 'walk') continue;
-            
             updateLoadingProgress(
                 (loadedCount / totalFiles) * 100,
                 `Cargando animación: ${actionName}...`
@@ -796,6 +815,9 @@ async function loadCharacterWithAnimations() {
             loadingScreen.classList.add('hidden');
             updateAnimationDisplay('Conectando al servidor...');
             gameState = 'lobby';
+            
+            // Create character selector UI
+            createCharacterSelector();
         }, 500);
         
     } catch (error) {
@@ -844,6 +866,189 @@ function createLocalPlayer() {
     localPlayer.controller.position.set(0, 0, 0);
     scene.add(localPlayer.model);
     players.set('local', localPlayer);
+}
+
+/**
+ * Change character model - reloads the model and recreates local player
+ */
+async function changeCharacter(characterId) {
+    if (!CHARACTER_MODELS[characterId]) {
+        console.error(`Character ${characterId} not found!`);
+        return;
+    }
+    
+    if (selectedCharacter === characterId) {
+        console.log(`Character ${characterId} already selected`);
+        return;
+    }
+    
+    console.log(`[Game] Changing character to: ${characterId}`);
+    selectedCharacter = characterId;
+    
+    // Show loading indicator
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'character-loading';
+    loadingOverlay.innerHTML = `
+        <div style="
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 10, 21, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            color: #00ffcc;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.5rem;
+        ">
+            <div>Cargando ${CHARACTER_MODELS[characterId].name}...</div>
+        </div>
+    `;
+    document.body.appendChild(loadingOverlay);
+    
+    // Remove existing local player
+    if (localPlayer) {
+        scene.remove(localPlayer.model);
+        localPlayer.dispose();
+        players.delete('local');
+        localPlayer = null;
+    }
+    
+    // Dispose old base model
+    if (baseModel) {
+        disposeModel(baseModel);
+        baseModel = null;
+    }
+    
+    // Clear animations
+    Object.keys(baseAnimations).forEach(key => delete baseAnimations[key]);
+    
+    // Load new character
+    const loader = new FBXLoader();
+    const characterConfig = CHARACTER_MODELS[characterId];
+    
+    try {
+        // Load new model
+        baseModel = await loadFBX(loader, `assets/${characterConfig.file}`);
+        
+        // Load animations
+        for (const [actionName, fileName] of Object.entries(ANIMATION_FILES)) {
+            try {
+                const animationModel = await loadFBX(loader, `assets/${fileName}`);
+                if (animationModel.animations && animationModel.animations.length > 0) {
+                    baseAnimations[actionName] = animationModel.animations[0];
+                }
+                disposeModel(animationModel);
+            } catch (error) {
+                console.error(`Error loading animation ${actionName}:`, error);
+            }
+        }
+        
+        // Recreate local player
+        createLocalPlayer();
+        
+        // Update UI
+        updateCharacterSelector();
+        
+        console.log(`[Game] Character changed to: ${characterConfig.name}`);
+    } catch (error) {
+        console.error('Error changing character:', error);
+    }
+    
+    // Remove loading overlay
+    loadingOverlay.remove();
+}
+
+/**
+ * Update character selector UI to show current selection
+ */
+function updateCharacterSelector() {
+    const buttons = document.querySelectorAll('.character-btn');
+    buttons.forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.character === selectedCharacter);
+    });
+}
+
+/**
+ * Create character selector UI
+ */
+function createCharacterSelector() {
+    const controlsPanel = document.getElementById('controls-panel');
+    if (!controlsPanel) return;
+    
+    // Check if already exists
+    if (document.getElementById('character-selector')) return;
+    
+    const selectorHTML = `
+        <div id="character-selector" class="character-selector">
+            <h3>🎭 PERSONAJE</h3>
+            <div class="character-options">
+                ${Object.entries(CHARACTER_MODELS).map(([id, char]) => `
+                    <button class="character-btn ${id === selectedCharacter ? 'selected' : ''}" 
+                            data-character="${id}"
+                            onclick="changeCharacter('${id}')">
+                        <span class="char-thumb">${char.thumbnail}</span>
+                        <span class="char-name">${char.name}</span>
+                    </button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+    
+    controlsPanel.insertAdjacentHTML('afterbegin', selectorHTML);
+    
+    // Add styles
+    if (!document.getElementById('character-selector-styles')) {
+        const styles = document.createElement('style');
+        styles.id = 'character-selector-styles';
+        styles.textContent = `
+            .character-selector {
+                margin-bottom: 15px;
+                padding-bottom: 15px;
+                border-bottom: 1px solid rgba(0, 255, 204, 0.2);
+            }
+            .character-selector h3 {
+                color: #ffcc00;
+                font-size: 0.8rem;
+                margin-bottom: 10px;
+            }
+            .character-options {
+                display: flex;
+                gap: 10px;
+            }
+            .character-btn {
+                flex: 1;
+                padding: 10px;
+                background: rgba(0, 0, 0, 0.3);
+                border: 2px solid rgba(255, 255, 255, 0.2);
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.2s;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 5px;
+            }
+            .character-btn:hover {
+                border-color: rgba(0, 255, 204, 0.5);
+                background: rgba(0, 255, 204, 0.1);
+            }
+            .character-btn.selected {
+                border-color: #00ffcc;
+                background: rgba(0, 255, 204, 0.2);
+                box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+            }
+            .char-thumb {
+                font-size: 2rem;
+            }
+            .char-name {
+                color: white;
+                font-size: 0.75rem;
+                font-family: 'Orbitron', sans-serif;
+            }
+        `;
+        document.head.appendChild(styles);
+    }
 }
 
 function addPlayer(playerData) {
