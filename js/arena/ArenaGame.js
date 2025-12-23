@@ -1517,6 +1517,15 @@ class ArenaGame {
                 const p1 = playerArray[i].controller;
                 const p2 = playerArray[j].controller;
                 
+                // Skip collision if one is grabbing the other
+                if (p1.isGrabbing && p1.grabbedPlayer === p2) continue;
+                if (p2.isGrabbing && p2.grabbedPlayer === p1) continue;
+                if (p1.isGrabbed && p1.grabbedBy === p2) continue;
+                if (p2.isGrabbed && p2.grabbedBy === p1) continue;
+                
+                // Skip collision if either is being carried
+                if (playerArray[i].isBeingCarried || playerArray[j].isBeingCarried) continue;
+                
                 const dx = p2.position.x - p1.position.x;
                 const dz = p2.position.z - p1.position.z;
                 const dist = Math.sqrt(dx * dx + dz * dz);
