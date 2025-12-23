@@ -938,6 +938,25 @@ function animate() {
         const targetScaleZ = facingRight ? -0.01 : 0.01;
         model.scale.z = THREE.MathUtils.lerp(model.scale.z, targetScaleZ, 0.15);
         
+        // IDLE ROTATION: When idle, rotate character slightly toward camera to show face
+        // When moving, return to profile view for proper walk/run animation
+        const isIdle = !isMoving && 
+                       !animationController.isAttacking && 
+                       !animationController.isBlocking && 
+                       !animationController.isTaunting;
+        
+        // Base rotation is -90° (profile), idle rotation is -60° (showing more face)
+        const profileRotation = -Math.PI / 2;  // 90° - full profile
+        const idleRotation = -Math.PI / 3;     // 60° - showing face toward camera
+        const targetRotation = isIdle ? idleRotation : profileRotation;
+        
+        // Smooth interpolation for rotation
+        model.rotation.y = THREE.MathUtils.lerp(
+            model.rotation.y, 
+            targetRotation, 
+            0.08 // Slower lerp for smoother rotation
+        );
+        
         // Update animation mixer
         animationController.update(delta);
     }

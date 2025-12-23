@@ -417,6 +417,25 @@ class PlayerEntity {
         const isMoving = input.left || input.right;
         const isRunning = isMoving && input.run;
         
+        // IDLE ROTATION: When idle, rotate character slightly toward camera to show face
+        // When moving, return to profile view for proper walk/run animation
+        const isIdle = !isMoving && this.controller.isGrounded && 
+                       !this.animController.isAttacking && 
+                       !this.animController.isBlocking && 
+                       !this.animController.isTaunting;
+        
+        // Base rotation is -90° (profile), idle rotation is -60° (showing more face)
+        const profileRotation = -Math.PI / 2;  // 90° - full profile
+        const idleRotation = -Math.PI / 3;     // 60° - showing face toward camera
+        const targetRotation = isIdle ? idleRotation : profileRotation;
+        
+        // Smooth interpolation for rotation
+        this.model.rotation.y = THREE.MathUtils.lerp(
+            this.model.rotation.y, 
+            targetRotation, 
+            0.08 // Slower lerp for smoother rotation
+        );
+        
         this.animController.updateFromMovementState({
             isMoving,
             isRunning,
