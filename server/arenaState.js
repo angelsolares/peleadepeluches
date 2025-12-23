@@ -684,6 +684,11 @@ class ArenaStateManager {
         target.velocity.z = Math.cos(throwAngle) * ARENA_CONFIG.THROW_KNOCKBACK;
         target.velocity.y = ARENA_CONFIG.THROW_HEIGHT; // Launch upward for arc
         
+        console.log(`[Throw Debug] Throwing ${target.name}:`);
+        console.log(`  - Angle: ${throwAngle.toFixed(2)}`);
+        console.log(`  - Velocity: X=${target.velocity.x.toFixed(2)}, Y=${target.velocity.y.toFixed(2)}, Z=${target.velocity.z.toFixed(2)}`);
+        console.log(`  - Config: KNOCKBACK=${ARENA_CONFIG.THROW_KNOCKBACK}, HEIGHT=${ARENA_CONFIG.THROW_HEIGHT}`);
+        
         target.isStunned = true;
         target.isBeingThrown = true; // Mark as thrown for client effects
         target.stunEndTime = Date.now() + ARENA_CONFIG.STUN_DURATION * 2;

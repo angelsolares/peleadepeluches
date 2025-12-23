@@ -1678,42 +1678,45 @@ class ArenaGame {
             victim.controller.position.y = grabber.controller.position.y; // Back to ground level
             victim.model.position.copy(victim.controller.position);
             
-            // Play UPPERCUT animation on escaping player (fast!)
+            // Victim (escaping player) plays uppercut animation
             victim.playAnimation('punch');
             if (victim.animController) {
                 const punchAction = victim.animController.mixer?.clipAction(
                     victim.animController.animations['punch']
                 );
                 if (punchAction) {
-                    punchAction.timeScale = 2.0; // Double speed for dramatic effect
+                    punchAction.timeScale = 2.0; // Fast uppercut
                 }
             }
             
-            // Play KNOCKDOWN animation on grabber (fast!)
-            grabber.playAnimation('fall');
+            // Grabber receives HURT (not fall) - they got punched!
+            grabber.playAnimation('hit');
             if (grabber.animController) {
-                const fallAction = grabber.animController.mixer?.clipAction(
-                    grabber.animController.animations['fall']
+                const hitAction = grabber.animController.mixer?.clipAction(
+                    grabber.animController.animations['hit']
                 );
-                if (fallAction) {
-                    fallAction.timeScale = 1.5; // Faster fall
+                if (hitAction) {
+                    hitAction.timeScale = 1.5; // Faster hurt
                 }
             }
             
             // Show status
             if (this.hud) {
-                this.hud.showStatus(data.targetId, '¡ESCAPÓ CON GOLPE!');
-                this.hud.showStatus(data.grabberId, '¡DERRIBADO!');
+                this.hud.showStatus(data.targetId, '¡ESCAPÓ!');
+                this.hud.showStatus(data.grabberId, '¡GOLPEADO!');
+                // Show damage on grabber
+                this.hud.showDamage(data.grabberId, 10, false);
             }
             
             // Screen shake for dramatic effect
-            this.shakeScreen(0.4, 300);
+            this.shakeScreen(0.3, 200);
             
-            // Create VFX
+            // Create VFX on grabber (they got hit)
             if (this.vfxManager) {
                 const pos = grabber.model.position.clone();
-                this.vfxManager.createHitSparks?.(pos, 0xff3366, 2);
-                this.vfxManager.createImpactRing?.(pos);
+                pos.y += 1;
+                this.vfxManager.createHitSparks?.(pos, 0xff3366, 1.5);
+                this.vfxManager.createDamageNumber?.(pos, 10, 0xff3366);
             }
             
             // Return both players to idle after animations
@@ -1724,11 +1727,11 @@ class ArenaGame {
                 if (grabber && !grabber.controller.isEliminated) {
                     grabber.playAnimation('idle');
                 }
-            }, 800); // After escape animations complete
+            }, 600); // After escape animations complete
             
             // Play punch sound
             if (this.sfxManager) {
-                this.sfxManager.playPunch?.();
+                this.sfxManager.playHit?.(10, false);
             }
         }
     }
@@ -1956,6 +1959,10 @@ class ArenaGame {
     updateThrownPlayer(player, delta) {
         // Handle flying state (no animation, just tumbling)
         if (player.isFlying || player.isBeingThrown) {
+            // Log position for debugging
+            const pos = player.controller.position;
+            console.log(`[Throw Debug] Player ${player.name} pos: X=${pos.x.toFixed(2)}, Y=${pos.y.toFixed(2)}, Z=${pos.z.toFixed(2)}`);
+            
             // Apply tumbling rotation while in air
             if (player.throwSpin && player.throwSpin.active) {
                 player.model.rotation.x += player.throwSpin.speed * delta;
@@ -1963,7 +1970,10 @@ class ArenaGame {
             
             // Check if player landed (Y position back to ground level)
             const groundLevel = ARENA_CONFIG.RING_HEIGHT || 0.5;
+            console.log(`[Throw Debug] Ground level: ${groundLevel}, Player Y: ${pos.y.toFixed(2)}`);
+            
             if (player.controller.position.y <= groundLevel + 0.2) {
+                console.log(`[Throw Debug] Player ${player.name} LANDED!`);
                 // Player landed!
                 player.isBeingThrown = false;
                 player.isFlying = false;
@@ -1981,9 +1991,9 @@ class ArenaGame {
                 
                 // Play landing effect
                 if (this.vfxManager && player.model) {
-                    const pos = player.model.position.clone();
-                    this.vfxManager.createDustCloud?.(pos, 2);
-                    this.vfxManager.createImpactRing?.(pos);
+                    const vfxPos = player.model.position.clone();
+                    this.vfxManager.createDustCloud?.(vfxPos, 2);
+                    this.vfxManager.createImpactRing?.(vfxPos);
                 }
                 
                 // Play landing sound
