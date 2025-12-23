@@ -13,6 +13,9 @@ import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animati
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
 
+// SFX Manager will be loaded dynamically
+let SFXManager = null;
+
 // =================================
 // Configuration
 // =================================
@@ -392,6 +395,10 @@ class PlayerEntity {
                     vfxManager.createAttackTrail(attackPos, 'punch', direction, playerColor);
                     vfxManager.createChargeGlow(this.model, playerColor);
                 }
+                // SFX: Punch whoosh
+                if (sfxManager) {
+                    sfxManager.playPunchWhoosh();
+                }
                 break;
             case 'kick':
                 this.animController.playKick();
@@ -402,6 +409,10 @@ class PlayerEntity {
                     const direction = this.controller.facingRight ? 1 : -1;
                     vfxManager.createAttackTrail(attackPos, 'kick', direction, playerColor);
                     vfxManager.createChargeGlow(this.model, playerColor);
+                }
+                // SFX: Kick whoosh
+                if (sfxManager) {
+                    sfxManager.playKickWhoosh();
                 }
                 break;
             case 'hit':
@@ -422,8 +433,9 @@ class PlayerEntity {
     }
     
     update(delta, skipPhysics = false) {
-        // Track previous state for VFX triggers
+        // Track previous state for VFX/SFX triggers
         const wasInAir = !this.controller.isGrounded;
+        const wasGrounded = this.controller.isGrounded;
         const prevVelocityY = this.controller.velocity.y;
         
         // Update controller physics only if not skipped (skip during online game)
@@ -446,11 +458,26 @@ class PlayerEntity {
         const isRunning = isMoving && input.run;
         
         // VFX: Landing impact when hitting ground
-        if (vfxManager && wasInAir && this.controller.isGrounded && prevVelocityY < -5) {
+        if (wasInAir && this.controller.isGrounded && prevVelocityY < -5) {
             const landPosition = this.controller.position.clone();
             const fallSpeed = Math.abs(prevVelocityY);
             const intensity = Math.min(1.5, fallSpeed / 15);
-            vfxManager.createLandingImpact(landPosition, intensity);
+            
+            if (vfxManager) {
+                vfxManager.createLandingImpact(landPosition, intensity);
+            }
+            
+            // SFX: Landing sound
+            if (sfxManager) {
+                sfxManager.playLand(intensity);
+            }
+        }
+        
+        // SFX: Jump sound when leaving ground
+        if (wasGrounded && !this.controller.isGrounded && this.controller.velocity.y > 0) {
+            if (sfxManager) {
+                sfxManager.playJump();
+            }
         }
         
         // VFX: Dust cloud when running (throttled)
@@ -524,6 +551,9 @@ let clock = new THREE.Clock();
 
 // VFX Manager instance
 let vfxManager = null;
+
+// SFX Manager instance
+let sfxManager = null;
 
 // Base model and animations
 let baseModel = null;
@@ -620,6 +650,9 @@ async function init() {
 
     // Load and initialize VFX Manager
     await loadVFXManager();
+    
+    // Load and initialize SFX Manager
+    await loadSFXManager();
 
     // Add lights
     setupLights();
@@ -666,6 +699,32 @@ async function loadVFXManager() {
         console.log('[Game] VFXManager initialized');
     } catch (error) {
         console.warn('[Game] VFXManager failed to load:', error);
+    }
+}
+
+/**
+ * Load the SFXManager module and initialize it
+ */
+async function loadSFXManager() {
+    try {
+        // Load SFXManager script dynamically
+        const script = document.createElement('script');
+        script.src = 'js/audio/SFXManager.js';
+        document.head.appendChild(script);
+        
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+        });
+        
+        // Initialize SFXManager
+        if (typeof window.SFXManager !== 'undefined') {
+            SFXManager = window.SFXManager;
+        }
+        sfxManager = new SFXManager();
+        console.log('[Game] SFXManager initialized');
+    } catch (error) {
+        console.warn('[Game] SFXManager failed to load:', error);
     }
 }
 
@@ -2098,6 +2157,11 @@ function triggerHitEffect(playerId, attackerId = null, damage = 0, blocked = fal
     // Screen shake (intensity based on damage)
     const shakeIntensity = blocked ? 0.2 : Math.min(0.5, 0.2 + damage / 100);
     triggerScreenShake(shakeIntensity, blocked ? 150 : 300);
+    
+    // SFX: Hit sound
+    if (sfxManager) {
+        sfxManager.playHit(damage, blocked);
+    }
 }
 
 function triggerKOEffect(playerId) {
@@ -2133,6 +2197,11 @@ function triggerKOEffect(playerId) {
     
     // Screen flash
     triggerScreenFlash(playerColor);
+    
+    // SFX: KO sound
+    if (sfxManager) {
+        sfxManager.playKO();
+    }
 }
 
 /**
