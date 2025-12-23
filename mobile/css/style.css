@@ -530,14 +530,16 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 20px;
+    gap: 40px; /* Add space between d-pad and action buttons */
 }
 
 /* D-Pad */
 .dpad-container {
-    flex: 1;
+    flex: 0 0 auto; /* Don't grow, don't shrink */
     display: flex;
     justify-content: center;
     align-items: center;
+    margin-left: 10px;
 }
 
 .dpad {
@@ -615,13 +617,14 @@ body {
 
 /* Action Buttons - 4 button diamond layout like Xbox/Nintendo */
 .action-buttons {
-    flex: 1;
+    flex: 0 0 auto; /* Don't grow, don't shrink */
     display: grid;
     grid-template-columns: repeat(3, 70px);
     grid-template-rows: repeat(3, 70px);
     gap: 5px;
     align-items: center;
     justify-content: center;
+    margin-right: 10px;
 }
 
 .action-btn {
