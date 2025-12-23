@@ -348,8 +348,8 @@ class PlayerEntity {
         
         const label = new CSS2DObject(div);
         // Position above player's head (in model's local space, scaled by 0.01)
-        // Model is scaled to 0.01, so 200 in local = 2 in world (above head)
-        label.position.set(0, 200, 0);
+        // Model is scaled to 0.01, so 280 in local = 2.8 in world (well above head)
+        label.position.set(0, 280, 0);
         label.center.set(0.5, 0);
         
         return label;

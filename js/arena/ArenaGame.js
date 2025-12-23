@@ -121,7 +121,8 @@ class ArenaPlayerEntity {
         
         const label = new CSS2DObject(div);
         // Position above player's head (in model's local space, scaled by 0.01)
-        label.position.set(0, 200, 0);
+        // 280 in local = 2.8 in world (well above head, not covering face)
+        label.position.set(0, 280, 0);
         label.center.set(0.5, 0);
         
         return label;
