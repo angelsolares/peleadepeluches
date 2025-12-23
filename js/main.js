@@ -16,6 +16,9 @@ let VFXManager = null;
 // SFX Manager will be loaded dynamically
 let SFXManager = null;
 
+// BGM Manager will be loaded dynamically
+let BGMManager = null;
+
 // =================================
 // Configuration
 // =================================
@@ -553,6 +556,9 @@ let vfxManager = null;
 // SFX Manager instance
 let sfxManager = null;
 
+// BGM Manager instance
+let bgmManager = null;
+
 // Base model and animations
 let baseModel = null;
 const baseAnimations = {};
@@ -651,6 +657,9 @@ async function init() {
     
     // Load and initialize SFX Manager
     await loadSFXManager();
+    
+    // Load and initialize BGM Manager
+    await loadBGMManager();
 
     // Add lights
     setupLights();
@@ -723,6 +732,36 @@ async function loadSFXManager() {
         console.log('[Game] SFXManager initialized');
     } catch (error) {
         console.warn('[Game] SFXManager failed to load:', error);
+    }
+}
+
+/**
+ * Load the BGMManager module and initialize it
+ */
+async function loadBGMManager() {
+    try {
+        // Load BGMManager script dynamically
+        const script = document.createElement('script');
+        script.src = 'js/audio/BGMManager.js';
+        document.head.appendChild(script);
+        
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+        });
+        
+        // Initialize BGMManager
+        if (typeof window.BGMManager !== 'undefined') {
+            BGMManager = window.BGMManager;
+        }
+        bgmManager = new BGMManager();
+        
+        // Start playing character select music in lobby
+        bgmManager.playCharacterSelect();
+        
+        console.log('[Game] BGMManager initialized');
+    } catch (error) {
+        console.warn('[Game] BGMManager failed to load:', error);
     }
 }
 
@@ -1613,6 +1652,11 @@ async function handleGameStarted(data) {
     // Show fight announcement
     showFightAnnouncement();
     
+    // BGM: Start battle music
+    if (bgmManager) {
+        bgmManager.playBattle();
+    }
+    
     updateAnimationDisplay('¡PELEA!');
 }
 
@@ -1809,6 +1853,11 @@ function handleGameOver(data) {
     console.log('[Game] Game over!', data);
     gameState = 'finished';
     
+    // BGM: Victory fanfare
+    if (bgmManager) {
+        bgmManager.playVictory();
+    }
+    
     if (data.winner) {
         updateAnimationDisplay(`¡${data.winner.name} GANA!`);
     } else {
@@ -1822,6 +1871,11 @@ function handleGameOver(data) {
 function handleGameReset(data) {
     console.log('[Game] Game reset');
     gameState = 'lobby';
+    
+    // BGM: Back to character select music
+    if (bgmManager) {
+        bgmManager.playCharacterSelect();
+    }
     
     // Reset all players
     players.forEach(player => {
@@ -2199,6 +2253,11 @@ function triggerKOEffect(playerId) {
     // SFX: KO sound
     if (sfxManager) {
         sfxManager.playKO();
+    }
+    
+    // BGM: Knockout impact
+    if (bgmManager) {
+        bgmManager.playKnockout();
     }
 }
 
