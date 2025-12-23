@@ -920,6 +920,7 @@ class ArenaGame {
         this.socket.on('player-taunting', (data) => this.handleArenaTaunt(data));
         this.socket.on('arena-game-over', (data) => this.handleArenaGameOver(data));
         this.socket.on('arena-grab-escape', (data) => this.handleArenaGrabEscape(data));
+        this.socket.on('arena-elimination', (data) => this.handleArenaElimination(data));
     }
     
     showRoomCode(code) {
@@ -1252,27 +1253,31 @@ class ArenaGame {
             // Release grab state
             grabber.controller.isGrabbing = false;
             grabber.controller.grabbedPlayer = null;
-            grabber.grabbedEntity = null; // Clear entity reference
+            grabber.grabbedEntity = null;
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
             victim.isBeingCarried = false;
             
-            // Reset victim's rotation to normal (was laying flat)
+            // Mark victim as being thrown for visual effects
+            victim.isBeingThrown = true;
+            victim.throwStartTime = Date.now();
+            
+            // Reset victim's rotation
             victim.model.rotation.x = 0;
             victim.model.rotation.z = 0;
-            victim.controller.position.y = grabber.controller.position.y; // Back to ground level
-            
-            // Apply visual knockback on victim
-            if (victim.controller) {
-                // The server handles the actual velocity, but we can add visual feedback
-                victim.controller.isStunned = true;
-            }
             
             // Play throw animation
             grabber.playAnimation('throw');
-            victim.playAnimation('fall'); // Victim gets thrown/falls
+            victim.playAnimation('fall');
             
-            // Create VFX
+            // Add spinning effect to thrown victim
+            victim.throwSpin = {
+                active: true,
+                speed: 15, // Rotations per second
+                axis: 'x' // Spin forward/backward
+            };
+            
+            // Create dramatic VFX
             if (this.vfxManager && victim.model) {
                 const pos = victim.model.position.clone();
                 this.vfxManager.createHitSpark?.(pos);
@@ -1292,8 +1297,161 @@ class ArenaGame {
             }
             
             // Screen shake for dramatic effect
-            this.shakeScreen(0.3, 200);
+            this.shakeScreen(0.5, 300);
         }
+    }
+    
+    /**
+     * Handle player elimination
+     */
+    handleArenaElimination(data) {
+        console.log('[Arena] Elimination:', data);
+        const player = this.players.get(data.playerId);
+        
+        if (player) {
+            // Show elimination announcement
+            const reason = data.reason === 'ringout' ? '¡RING OUT!' : '¡K.O.!';
+            this.showEliminationAnnouncement(data.playerName, reason);
+            
+            // Play fall animation
+            player.playAnimation('fall');
+            
+            // Start fade out effect
+            this.fadeOutPlayer(player);
+            
+            // Hide HUD for this player after delay
+            setTimeout(() => {
+                if (this.hud) {
+                    this.hud.hidePlayer(data.playerId);
+                }
+            }, 2000);
+            
+            // Play KO sound
+            if (this.sfxManager) {
+                this.sfxManager.playKO?.();
+            }
+            
+            // Screen shake
+            this.shakeScreen(0.8, 500);
+            
+            // Create dramatic particles
+            if (this.vfxManager && player.model) {
+                const pos = player.model.position.clone();
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        this.vfxManager.createHitSparks?.(pos, 0xff0000, 2);
+                        this.vfxManager.createImpactRing?.(pos);
+                    }, i * 100);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Show elimination announcement
+     */
+    showEliminationAnnouncement(playerName, reason) {
+        const announcement = document.createElement('div');
+        announcement.className = 'elimination-announcement';
+        announcement.innerHTML = `
+            <div class="elimination-text">${reason}</div>
+            <div class="eliminated-name">${playerName}</div>
+            <div class="eliminated-label">ELIMINADO</div>
+        `;
+        announcement.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 1000;
+            pointer-events: none;
+            animation: eliminationPulse 2s ease-out forwards;
+        `;
+        
+        // Add styles if not exists
+        if (!document.getElementById('elimination-styles')) {
+            const style = document.createElement('style');
+            style.id = 'elimination-styles';
+            style.textContent = `
+                @keyframes eliminationPulse {
+                    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+                    20% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+                    40% { transform: translate(-50%, -50%) scale(1); }
+                    80% { opacity: 1; }
+                    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+                }
+                .elimination-announcement .elimination-text {
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: 3rem;
+                    font-weight: bold;
+                    color: #ff3366;
+                    text-shadow: 0 0 20px #ff3366, 0 0 40px #ff0000;
+                }
+                .elimination-announcement .eliminated-name {
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: 2rem;
+                    color: white;
+                    margin: 10px 0;
+                    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+                }
+                .elimination-announcement .eliminated-label {
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: 1.5rem;
+                    color: #ff6666;
+                    text-shadow: 0 0 10px #ff3366;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(announcement);
+        
+        // Remove after animation
+        setTimeout(() => announcement.remove(), 2000);
+    }
+    
+    /**
+     * Fade out eliminated player
+     */
+    fadeOutPlayer(player) {
+        if (!player.model) return;
+        
+        const duration = 1500; // ms
+        const startTime = Date.now();
+        
+        const fadeOut = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const opacity = 1 - progress;
+            
+            // Apply opacity to all materials
+            player.model.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach(mat => {
+                        mat.transparent = true;
+                        mat.opacity = opacity;
+                    });
+                }
+            });
+            
+            // Continue fading or hide completely
+            if (progress < 1) {
+                requestAnimationFrame(fadeOut);
+            } else {
+                // Remove from scene
+                if (player.model.parent) {
+                    player.model.parent.remove(player.model);
+                }
+                // Remove name label
+                if (player.nameLabel && player.nameLabel.parent) {
+                    player.nameLabel.parent.remove(player.nameLabel);
+                }
+            }
+        };
+        
+        fadeOut();
     }
     
     handleArenaGameOver(data) {
@@ -1602,6 +1760,9 @@ class ArenaGame {
         this.players.forEach(player => {
             player.update(delta);
             
+            // Update thrown player effects
+            this.updateThrownPlayer(player, delta);
+            
             if (this.hud) {
                 this.hud.updatePlayer(player);
             }
@@ -1627,6 +1788,54 @@ class ArenaGame {
         // Render floating name labels
         if (this.labelRenderer) {
             this.labelRenderer.render(this.scene, this.camera);
+        }
+    }
+    
+    /**
+     * Update thrown player - spin effect and landing recovery
+     */
+    updateThrownPlayer(player, delta) {
+        if (!player.isBeingThrown) return;
+        
+        // Apply spinning effect while in air
+        if (player.throwSpin && player.throwSpin.active) {
+            player.model.rotation.x += player.throwSpin.speed * delta;
+        }
+        
+        // Check if player landed (Y position back to ground level)
+        const groundLevel = ARENA_CONFIG.RING_HEIGHT || 0.5;
+        if (player.controller.position.y <= groundLevel + 0.1) {
+            // Player landed!
+            player.isBeingThrown = false;
+            
+            if (player.throwSpin) {
+                player.throwSpin.active = false;
+            }
+            
+            // Reset rotation
+            player.model.rotation.x = 0;
+            player.model.rotation.z = 0;
+            
+            // Play landing effect
+            if (this.vfxManager && player.model) {
+                const pos = player.model.position.clone();
+                this.vfxManager.createDustCloud?.(pos, 1.5);
+                this.vfxManager.createImpactRing?.(pos);
+            }
+            
+            // Play landing sound
+            if (this.sfxManager) {
+                this.sfxManager.playLand?.();
+            }
+            
+            // After a short delay, return to idle animation (if not eliminated)
+            if (!player.controller.isEliminated) {
+                setTimeout(() => {
+                    if (!player.controller.isEliminated && !player.controller.isStunned) {
+                        player.playAnimation('idle');
+                    }
+                }, 500);
+            }
         }
     }
     

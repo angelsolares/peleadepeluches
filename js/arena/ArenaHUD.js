@@ -92,6 +92,45 @@ class ArenaHUD {
     }
     
     /**
+     * Hide a player's HUD with fade out effect (for elimination)
+     * @param {string} playerId - Player ID
+     */
+    hidePlayer(playerId) {
+        const hudData = this.playerHUDs.get(playerId);
+        
+        if (hudData) {
+            const hud = hudData.element;
+            
+            // Add eliminated class for styling
+            hud.classList.add('eliminated', 'fading-out');
+            
+            // Animate fade out
+            hud.style.transition = 'opacity 1s ease-out, transform 1s ease-out';
+            hud.style.opacity = '0.3';
+            hud.style.transform = 'scale(0.9)';
+            
+            // Add "ELIMINADO" overlay
+            const eliminatedOverlay = document.createElement('div');
+            eliminatedOverlay.className = 'eliminated-overlay';
+            eliminatedOverlay.innerHTML = '❌ ELIMINADO';
+            eliminatedOverlay.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                font-family: 'Orbitron', sans-serif;
+                font-size: 1rem;
+                font-weight: bold;
+                color: #ff3366;
+                text-shadow: 0 0 10px #ff0000;
+                white-space: nowrap;
+            `;
+            hud.style.position = 'relative';
+            hud.appendChild(eliminatedOverlay);
+        }
+    }
+    
+    /**
      * Update a player's HUD display
      * @param {object} player - Player entity
      */

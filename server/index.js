@@ -586,6 +586,30 @@ function startArenaLoop(roomCode) {
             const attackResults = arenaStateManager.processPendingAttacks(roomCode);
             for (const result of attackResults) {
                 io.to(roomCode).emit('arena-attack-hit', result);
+                
+                // Check for eliminations in this attack
+                if (result.hits) {
+                    for (const hit of result.hits) {
+                        if (hit.eliminated) {
+                            const eliminatedPlayer = state.players.find(p => p.id === hit.targetId);
+                            if (eliminatedPlayer) {
+                                io.to(roomCode).emit('arena-elimination', {
+                                    playerId: hit.targetId,
+                                    playerName: eliminatedPlayer.name,
+                                    playerNumber: eliminatedPlayer.number,
+                                    reason: 'knockout',
+                                    eliminatedBy: result.attackerId
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check for ring out eliminations
+            const ringOuts = arenaStateManager.checkRingOuts(roomCode);
+            for (const ringOut of ringOuts) {
+                io.to(roomCode).emit('arena-elimination', ringOut);
             }
             
             // Check for game over

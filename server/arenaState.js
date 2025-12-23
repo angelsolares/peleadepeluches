@@ -38,7 +38,8 @@ const ARENA_CONFIG = {
     // Knockback
     PUNCH_KNOCKBACK: 3,
     KICK_KNOCKBACK: 5,
-    THROW_KNOCKBACK: 15,       // Increased for more dramatic throws
+    THROW_KNOCKBACK: 20,       // High knockback for ring outs
+    THROW_HEIGHT: 5,           // Vertical velocity for throw arc
     
     // Timing
     ATTACK_COOLDOWN: 500,      // ms
@@ -258,8 +259,25 @@ class ArenaStateManager {
         playerState.velocity.x *= ARENA_CONFIG.FRICTION;
         playerState.velocity.z *= ARENA_CONFIG.FRICTION;
         
+        // Apply gravity if in air
+        if (playerState.position.y > ARENA_CONFIG.RING_HEIGHT) {
+            playerState.velocity.y += ARENA_CONFIG.GRAVITY * delta;
+        } else if (playerState.velocity.y < 0) {
+            // Land on the ground
+            playerState.position.y = ARENA_CONFIG.RING_HEIGHT;
+            playerState.velocity.y = 0;
+            
+            // Reset thrown state when landing
+            if (playerState.isBeingThrown) {
+                playerState.isBeingThrown = false;
+                // Reduce stun time when landing
+                playerState.stunEndTime = Math.min(playerState.stunEndTime, Date.now() + 500);
+            }
+        }
+        
         // Update position
         playerState.position.x += playerState.velocity.x * delta;
+        playerState.position.y += playerState.velocity.y * delta;
         playerState.position.z += playerState.velocity.z * delta;
     }
     
@@ -286,28 +304,39 @@ class ArenaStateManager {
     checkRingBoundaries(arenaState, playerState) {
         const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.8; // Rope boundary (matches client)
         const ringBounce = 0.3; // Bounce back force when hitting ropes
-        let hitRope = false;
+        
+        // Calculate total horizontal speed
+        const speed = Math.sqrt(
+            playerState.velocity.x * playerState.velocity.x + 
+            playerState.velocity.z * playerState.velocity.z
+        );
+        
+        // If moving fast enough (thrown), allow passing through ropes
+        const RING_OUT_SPEED = 10; // Minimum speed to exit ring
+        if (speed > RING_OUT_SPEED) {
+            // Mark as potentially out of ring - will be checked in checkRingOuts
+            playerState.isOutOfRing = 
+                Math.abs(playerState.position.x) > ringHalf + ARENA_CONFIG.RING_OUT_ZONE ||
+                Math.abs(playerState.position.z) > ringHalf + ARENA_CONFIG.RING_OUT_ZONE;
+            return; // Don't bounce, let them fly out
+        }
         
         // Check X boundaries - bounce off ropes
         if (playerState.position.x > ringHalf) {
             playerState.position.x = ringHalf;
             playerState.velocity.x *= -ringBounce;
-            hitRope = true;
         } else if (playerState.position.x < -ringHalf) {
             playerState.position.x = -ringHalf;
             playerState.velocity.x *= -ringBounce;
-            hitRope = true;
         }
         
         // Check Z boundaries - bounce off ropes
         if (playerState.position.z > ringHalf) {
             playerState.position.z = ringHalf;
             playerState.velocity.z *= -ringBounce;
-            hitRope = true;
         } else if (playerState.position.z < -ringHalf) {
             playerState.position.z = -ringHalf;
             playerState.velocity.z *= -ringBounce;
-            hitRope = true;
         }
         
         // Set near edge flag for visual warnings
@@ -315,6 +344,45 @@ class ArenaStateManager {
         playerState.isNearEdge = 
             Math.abs(playerState.position.x) > ringHalf - edgeDistance ||
             Math.abs(playerState.position.z) > ringHalf - edgeDistance;
+    }
+    
+    /**
+     * Check for ring out eliminations
+     */
+    checkRingOuts(roomCode) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState) return [];
+        
+        const ringOuts = [];
+        const ringHalf = ARENA_CONFIG.RING_SIZE / 2;
+        const outZone = ARENA_CONFIG.RING_OUT_ZONE || 3;
+        
+        arenaState.players.forEach((playerState, playerId) => {
+            if (playerState.isEliminated) return;
+            
+            // Check if player is outside ring out zone
+            const isOutX = Math.abs(playerState.position.x) > ringHalf + outZone;
+            const isOutZ = Math.abs(playerState.position.z) > ringHalf + outZone;
+            
+            if (isOutX || isOutZ) {
+                console.log(`[Arena] RING OUT! ${playerState.name} fell out of the ring!`);
+                
+                // Eliminate the player
+                const elimInfo = this.eliminatePlayer(arenaState, playerId);
+                
+                if (elimInfo) {
+                    ringOuts.push({
+                        playerId,
+                        playerName: playerState.name,
+                        playerNumber: playerState.number,
+                        reason: 'ringout',
+                        position: elimInfo.position
+                    });
+                }
+            }
+        });
+        
+        return ringOuts;
     }
     
     /**
@@ -614,8 +682,10 @@ class ArenaStateManager {
         const throwAngle = direction || attacker.facingAngle;
         target.velocity.x = Math.sin(throwAngle) * ARENA_CONFIG.THROW_KNOCKBACK;
         target.velocity.z = Math.cos(throwAngle) * ARENA_CONFIG.THROW_KNOCKBACK;
+        target.velocity.y = ARENA_CONFIG.THROW_HEIGHT; // Launch upward for arc
         
         target.isStunned = true;
+        target.isBeingThrown = true; // Mark as thrown for client effects
         target.stunEndTime = Date.now() + ARENA_CONFIG.STUN_DURATION * 2;
         
         // Release grab
@@ -714,10 +784,11 @@ class ArenaStateManager {
     
     /**
      * Eliminate a player
+     * Returns elimination info for broadcasting
      */
     eliminatePlayer(arenaState, playerId) {
         const playerState = arenaState.players.get(playerId);
-        if (!playerState || playerState.isEliminated) return;
+        if (!playerState || playerState.isEliminated) return null;
         
         playerState.isEliminated = true;
         playerState.health = 0;
@@ -731,6 +802,16 @@ class ArenaStateManager {
         }
         
         arenaState.eliminationOrder.push(playerId);
+        
+        console.log(`[Arena] Player ${playerState.name} (${playerId}) ELIMINATED!`);
+        
+        // Return elimination info for broadcasting
+        return {
+            playerId,
+            playerName: playerState.name,
+            playerNumber: playerState.number,
+            position: arenaState.eliminationOrder.length
+        };
         
         // Check for round end
         const alivePlayers = [];
