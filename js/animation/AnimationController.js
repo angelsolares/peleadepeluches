@@ -94,6 +94,7 @@ export class AnimationController {
         // State flags
         this.isAttacking = false;
         this.isBlocking = false;
+        this.isTaunting = false;
         this.isPaused = false;
         
         // Callbacks
@@ -153,6 +154,7 @@ export class AnimationController {
             // Check if this was a one-shot animation (not held animations like block)
             if (ANIMATION_CONFIG.oneShot.includes(finishedName)) {
                 this.isAttacking = false;
+                this.isTaunting = false;  // Reset taunt state
                 
                 // Return to idle or walk based on previous state
                 // Use 'walk' as fallback if 'idle' doesn't exist
@@ -333,7 +335,8 @@ export class AnimationController {
      * Play taunt/dance animation
      */
     playTaunt() {
-        if (this.isAttacking || this.isBlocking) return false;
+        if (this.isAttacking || this.isBlocking || this.isTaunting) return false;
+        this.isTaunting = true;
         return this.play(AnimationState.TAUNT, ANIMATION_CONFIG.fadeDuration.toAttack);
     }
     
@@ -342,8 +345,8 @@ export class AnimationController {
      * @param {Object} state - { isMoving, isRunning, isGrounded, isJumping }
      */
     updateFromMovementState(state) {
-        // Don't change animation during attack or block
-        if (this.isAttacking || this.isBlocking) return;
+        // Don't change animation during attack, block, or taunt
+        if (this.isAttacking || this.isBlocking || this.isTaunting) return;
         
         const { isMoving, isRunning, isGrounded, isJumping } = state;
         
@@ -391,6 +394,7 @@ export class AnimationController {
         this.currentActionName = AnimationState.IDLE;
         this.isAttacking = false;
         this.isBlocking = false;
+        this.isTaunting = false;
     }
     
     /**

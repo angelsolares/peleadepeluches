@@ -65,6 +65,7 @@ class PlayerController {
         this.isJumping = false;
         this.isAttacking = false;
         this.isBlocking = false;
+        this.isTaunting = false;
         this.facingRight = true;
         
         // Game state
@@ -99,8 +100,8 @@ class PlayerController {
             }
         }
         
-        // Don't process movement during attack, but still apply gravity
-        if (this.isAttacking) {
+        // Don't process movement during attack, block, or taunt - but still apply gravity
+        if (this.isAttacking || this.isBlocking || this.isTaunting) {
             if (!this.isGrounded) {
                 this.velocity.y += PHYSICS.GRAVITY * delta;
                 const prevY = this.position.y;
@@ -410,6 +411,10 @@ class PlayerEntity {
             isGrounded: this.controller.isGrounded,
             isJumping: this.controller.isJumping
         });
+        
+        // Sync state flags from animController to controller
+        // This ensures controller knows when animations finish
+        this.controller.isTaunting = this.animController.isTaunting;
         
         // Update animation mixer
         this.animController.update(delta);
@@ -1294,6 +1299,7 @@ function handlePlayerBlockState(data) {
 function handlePlayerTaunt(data) {
     const player = players.get(data.playerId);
     if (player) {
+        player.controller.isTaunting = true;
         player.playAnimation('taunt');
     }
 }
@@ -1541,7 +1547,8 @@ function setupKeyboardControls() {
                 break;
             case 't':
                 // Taunt - Hip Hop Dance!
-                if (!localPlayer.animController.isAttacking && !localPlayer.controller.isBlocking) {
+                if (!localPlayer.animController.isAttacking && !localPlayer.controller.isBlocking && !localPlayer.controller.isTaunting) {
+                    localPlayer.controller.isTaunting = true;
                     localPlayer.playAnimation('taunt');
                     if (socket && socket.connected) {
                         socket.emit('player-taunt');
