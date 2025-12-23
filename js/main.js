@@ -658,11 +658,11 @@ async function loadVFXManager() {
             script.onerror = reject;
         });
         
-        // Initialize VFXManager with scene and camera
+        // Initialize VFXManager with scene, camera, and THREE library
         if (typeof window.VFXManager !== 'undefined') {
             VFXManager = window.VFXManager;
         }
-        vfxManager = new VFXManager(scene, camera);
+        vfxManager = new VFXManager(scene, camera, THREE);
         console.log('[Game] VFXManager initialized');
     } catch (error) {
         console.warn('[Game] VFXManager failed to load:', error);

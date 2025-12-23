@@ -3,11 +3,19 @@
  * Manages all particle effects, sprites, and visual feedback for the game
  */
 class VFXManager {
-    constructor(scene, camera) {
+    constructor(scene, camera, threeLib = null) {
         this.scene = scene;
         this.camera = camera;
         this.activeEffects = [];
         this.particlePools = {};
+        
+        // Use provided THREE library or get from window (for ES modules compatibility)
+        this.THREE = threeLib || window.THREE;
+        
+        if (!this.THREE) {
+            console.error('[VFXManager] THREE.js not found! Effects will be disabled.');
+            return;
+        }
         
         // Reusable geometries and materials
         this.sparkGeometry = null;
@@ -49,7 +57,7 @@ class VFXManager {
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, 64, 64);
         
-        const texture = new THREE.CanvasTexture(canvas);
+        const texture = new this.THREE.CanvasTexture(canvas);
         return texture;
     }
     
@@ -90,7 +98,7 @@ class VFXManager {
         ctx.shadowBlur = 10;
         ctx.fill();
         
-        const texture = new THREE.CanvasTexture(canvas);
+        const texture = new this.THREE.CanvasTexture(canvas);
         return texture;
     }
     
@@ -116,7 +124,7 @@ class VFXManager {
         ctx.arc(64, 64, 50, 0, Math.PI * 2);
         ctx.stroke();
         
-        const texture = new THREE.CanvasTexture(canvas);
+        const texture = new this.THREE.CanvasTexture(canvas);
         return texture;
     }
     
@@ -153,7 +161,7 @@ class VFXManager {
         ctx.lineWidth = 3;
         ctx.stroke();
         
-        const texture = new THREE.CanvasTexture(canvas);
+        const texture = new this.THREE.CanvasTexture(canvas);
         return texture;
     }
 
@@ -169,10 +177,10 @@ class VFXManager {
      */
     createHitSparks(position, color = 0xFF6600, intensity = 1.0) {
         const particleCount = Math.floor(20 * intensity);
-        const baseColor = new THREE.Color(color);
+        const baseColor = new this.THREE.Color(color);
         
         // Create particles
-        const geometry = new THREE.BufferGeometry();
+        const geometry = new this.THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const colors = new Float32Array(particleCount * 3);
         const sizes = new Float32Array(particleCount);
@@ -200,22 +208,22 @@ class VFXManager {
             });
         }
         
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        geometry.setAttribute('position', new this.THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new this.THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('size', new this.THREE.BufferAttribute(sizes, 1));
         
-        const material = new THREE.PointsMaterial({
+        const material = new this.THREE.PointsMaterial({
             size: 0.3,
             map: this.sparkTexture,
             vertexColors: true,
             transparent: true,
             opacity: 1,
-            blending: THREE.AdditiveBlending,
+            blending: this.THREE.AdditiveBlending,
             depthWrite: false,
             sizeAttenuation: true
         });
         
-        const particles = new THREE.Points(geometry, material);
+        const particles = new this.THREE.Points(geometry, material);
         this.scene.add(particles);
         
         // Animation
@@ -252,17 +260,17 @@ class VFXManager {
      * @param {number|string} color - Ring color
      */
     createImpactRing(position, color = 0xFF6600) {
-        const ringGeometry = new THREE.RingGeometry(0.1, 0.3, 32);
-        const ringMaterial = new THREE.MeshBasicMaterial({
+        const ringGeometry = new this.THREE.RingGeometry(0.1, 0.3, 32);
+        const ringMaterial = new this.THREE.MeshBasicMaterial({
             color: color,
             transparent: true,
             opacity: 0.8,
-            side: THREE.DoubleSide,
-            blending: THREE.AdditiveBlending,
+            side: this.THREE.DoubleSide,
+            blending: this.THREE.AdditiveBlending,
             depthWrite: false
         });
         
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        const ring = new this.THREE.Mesh(ringGeometry, ringMaterial);
         ring.position.copy(position);
         ring.rotation.x = -Math.PI / 2; // Face camera
         ring.lookAt(this.camera.position);
@@ -396,16 +404,16 @@ class VFXManager {
      */
     createBlockShield(position, color = 0x00BFFF) {
         // Create hexagonal shield sprite
-        const spriteMaterial = new THREE.SpriteMaterial({
+        const spriteMaterial = new this.THREE.SpriteMaterial({
             map: this.shieldTexture,
             color: color,
             transparent: true,
             opacity: 0.9,
-            blending: THREE.AdditiveBlending,
+            blending: this.THREE.AdditiveBlending,
             depthWrite: false
         });
         
-        const shield = new THREE.Sprite(spriteMaterial);
+        const shield = new this.THREE.Sprite(spriteMaterial);
         shield.position.copy(position);
         shield.position.z += 0.5;
         shield.scale.set(0.1, 0.1, 1);
@@ -422,7 +430,7 @@ class VFXManager {
                 // Pop-in then fade
                 let scale, opacity;
                 if (progress < 0.3) {
-                    scale = THREE.MathUtils.lerp(0.1, 2.5, progress / 0.3);
+                    scale = this.THREE.MathUtils.lerp(0.1, 2.5, progress / 0.3);
                     opacity = 0.9;
                 } else {
                     scale = 2.5;
@@ -443,13 +451,13 @@ class VFXManager {
      */
     createBlockSparks(position) {
         const particleCount = 15;
-        const geometry = new THREE.BufferGeometry();
+        const geometry = new this.THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const colors = new Float32Array(particleCount * 3);
         const velocities = [];
         
-        const blueColor = new THREE.Color(0x00BFFF);
-        const whiteColor = new THREE.Color(0xFFFFFF);
+        const blueColor = new this.THREE.Color(0x00BFFF);
+        const whiteColor = new this.THREE.Color(0xFFFFFF);
         
         for (let i = 0; i < particleCount; i++) {
             positions[i * 3] = position.x;
@@ -469,20 +477,20 @@ class VFXManager {
             });
         }
         
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('position', new this.THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new this.THREE.BufferAttribute(colors, 3));
         
-        const material = new THREE.PointsMaterial({
+        const material = new this.THREE.PointsMaterial({
             size: 0.2,
             map: this.starTexture,
             vertexColors: true,
             transparent: true,
             opacity: 1,
-            blending: THREE.AdditiveBlending,
+            blending: this.THREE.AdditiveBlending,
             depthWrite: false
         });
         
-        const particles = new THREE.Points(geometry, material);
+        const particles = new this.THREE.Points(geometry, material);
         this.scene.add(particles);
         
         const effect = {
@@ -522,7 +530,7 @@ class VFXManager {
      */
     createDustCloud(position, direction = 1) {
         const particleCount = 8;
-        const geometry = new THREE.BufferGeometry();
+        const geometry = new this.THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const velocities = [];
         
@@ -538,9 +546,9 @@ class VFXManager {
             });
         }
         
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('position', new this.THREE.BufferAttribute(positions, 3));
         
-        const material = new THREE.PointsMaterial({
+        const material = new this.THREE.PointsMaterial({
             size: 0.25,
             color: 0xAAAAAA,
             transparent: true,
@@ -548,7 +556,7 @@ class VFXManager {
             depthWrite: false
         });
         
-        const particles = new THREE.Points(geometry, material);
+        const particles = new this.THREE.Points(geometry, material);
         this.scene.add(particles);
         
         const effect = {
@@ -584,7 +592,7 @@ class VFXManager {
      */
     createLandingImpact(position, intensity = 1.0) {
         const particleCount = Math.floor(12 * intensity);
-        const geometry = new THREE.BufferGeometry();
+        const geometry = new this.THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const velocities = [];
         
@@ -601,9 +609,9 @@ class VFXManager {
             });
         }
         
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('position', new this.THREE.BufferAttribute(positions, 3));
         
-        const material = new THREE.PointsMaterial({
+        const material = new this.THREE.PointsMaterial({
             size: 0.2,
             color: 0xBBBBBB,
             transparent: true,
@@ -611,20 +619,20 @@ class VFXManager {
             depthWrite: false
         });
         
-        const particles = new THREE.Points(geometry, material);
+        const particles = new this.THREE.Points(geometry, material);
         this.scene.add(particles);
         
         // Also create ground ring
-        const ringGeometry = new THREE.RingGeometry(0.1, 0.2, 16);
-        const ringMaterial = new THREE.MeshBasicMaterial({
+        const ringGeometry = new this.THREE.RingGeometry(0.1, 0.2, 16);
+        const ringMaterial = new this.THREE.MeshBasicMaterial({
             color: 0xAAAAAA,
             transparent: true,
             opacity: 0.5,
-            side: THREE.DoubleSide,
+            side: this.THREE.DoubleSide,
             depthWrite: false
         });
         
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        const ring = new this.THREE.Mesh(ringGeometry, ringMaterial);
         ring.position.copy(position);
         ring.rotation.x = -Math.PI / 2;
         this.scene.add(ring);
@@ -672,15 +680,15 @@ class VFXManager {
      * @param {number|string} color - Trail color
      */
     createJumpTrail(position, color = 0xFFFFFF) {
-        const spriteMaterial = new THREE.SpriteMaterial({
+        const spriteMaterial = new this.THREE.SpriteMaterial({
             color: color,
             transparent: true,
             opacity: 0.4,
-            blending: THREE.AdditiveBlending,
+            blending: this.THREE.AdditiveBlending,
             depthWrite: false
         });
         
-        const sprite = new THREE.Sprite(spriteMaterial);
+        const sprite = new this.THREE.Sprite(spriteMaterial);
         sprite.position.copy(position);
         sprite.scale.set(0.8, 1.2, 1);
         this.scene.add(sprite);
@@ -713,10 +721,10 @@ class VFXManager {
      */
     createAttackTrail(position, attackType = 'punch', direction = 1, color = 0xFF6600) {
         // Create arc/slash effect
-        const curve = new THREE.QuadraticBezierCurve3(
-            new THREE.Vector3(position.x - direction * 0.5, position.y + 0.5, position.z),
-            new THREE.Vector3(position.x + direction * 0.8, position.y + 0.8, position.z + 0.3),
-            new THREE.Vector3(position.x + direction * 1.2, position.y + 0.3, position.z)
+        const curve = new this.THREE.QuadraticBezierCurve3(
+            new this.THREE.Vector3(position.x - direction * 0.5, position.y + 0.5, position.z),
+            new this.THREE.Vector3(position.x + direction * 0.8, position.y + 0.8, position.z + 0.3),
+            new this.THREE.Vector3(position.x + direction * 1.2, position.y + 0.3, position.z)
         );
         
         if (attackType === 'kick') {
@@ -727,17 +735,17 @@ class VFXManager {
         }
         
         const points = curve.getPoints(20);
-        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const geometry = new this.THREE.BufferGeometry().setFromPoints(points);
         
-        const material = new THREE.LineBasicMaterial({
+        const material = new this.THREE.LineBasicMaterial({
             color: color,
             transparent: true,
             opacity: 0.8,
             linewidth: 3,
-            blending: THREE.AdditiveBlending
+            blending: this.THREE.AdditiveBlending
         });
         
-        const trail = new THREE.Line(geometry, material);
+        const trail = new this.THREE.Line(geometry, material);
         this.scene.add(trail);
         
         const effect = {
@@ -762,18 +770,18 @@ class VFXManager {
     createChargeGlow(model, color = 0xFF6600) {
         if (!model) return;
         
-        const position = new THREE.Vector3();
+        const position = new this.THREE.Vector3();
         model.getWorldPosition(position);
         
-        const spriteMaterial = new THREE.SpriteMaterial({
+        const spriteMaterial = new this.THREE.SpriteMaterial({
             color: color,
             transparent: true,
             opacity: 0.3,
-            blending: THREE.AdditiveBlending,
+            blending: this.THREE.AdditiveBlending,
             depthWrite: false
         });
         
-        const glow = new THREE.Sprite(spriteMaterial);
+        const glow = new this.THREE.Sprite(spriteMaterial);
         glow.position.copy(position);
         glow.scale.set(3, 3, 1);
         this.scene.add(glow);
