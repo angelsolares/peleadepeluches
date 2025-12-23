@@ -24,8 +24,8 @@ export const ANIMATION_CONFIG = {
     
     // Animation types
     looping: ['walk', 'run', 'idle'],
-    oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt'],
-    held: ['block'],  // Animations that play once and hold on last frame while button is held
+    oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt', 'throw'],
+    held: ['block', 'grab'],  // Animations that play once and hold on last frame while held
     
     // Default fade durations
     fadeDuration: {
@@ -53,7 +53,9 @@ export const ANIMATION_CONFIG = {
         hit: 1.5,    // Faster hit reaction
         fall: 1.2,   // Slightly faster fall
         block: 1.0,  // Normal block speed
-        taunt: 1.0   // Normal dance speed
+        taunt: 1.0,  // Normal dance speed
+        grab: 1.2,   // Grab animation speed
+        throw: 1.5   // Throw animation speed (faster for impact)
     }
 };
 

@@ -76,7 +76,9 @@ const ANIMATION_FILES = {
     hit: 'Meshy_AI_Animation_Hit_Reaction_1_withSkin.fbx',
     fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
     block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
-    taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx'
+    taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
+    grab: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx',
+    throw: 'Meshy_AI_Animation_Throw_withSkin.fbx'
 };
 
 const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff'];
@@ -183,6 +185,8 @@ class ArenaPlayerEntity {
             case 'fall': this.animController.playFall(); break;
             case 'block': this.animController.playBlock(); break;
             case 'taunt': this.animController.playTaunt(); break;
+            case 'grab': this.animController.play('grab'); break;
+            case 'throw': this.animController.play('throw'); break;
             default: this.animController.play(actionName);
         }
     }
@@ -1107,9 +1111,9 @@ class ArenaGame {
             victim.controller.isGrabbed = true;
             victim.controller.grabbedBy = grabber.controller;
             
-            // Play grab animation on grabber
+            // Play grab animation on grabber (held pose)
             if (grabber.animController) {
-                grabber.animController.play('punch'); // Use punch animation for grab
+                grabber.playAnimation('grab');
             }
             
             // Position the victim near the grabber
@@ -1151,11 +1155,11 @@ class ArenaGame {
             }
             
             // Play throw animation
-            if (grabber.animController) {
-                grabber.animController.play('kick'); // Use kick animation for throw
+            if (grabber) {
+                grabber.playAnimation('throw');
             }
-            if (victim.animController) {
-                victim.animController.play('hit');
+            if (victim) {
+                victim.playAnimation('fall'); // Victim gets thrown/falls
             }
             
             // Create VFX
