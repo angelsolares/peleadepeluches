@@ -403,6 +403,21 @@ class ArenaGame {
                 text-transform: uppercase;
                 letter-spacing: 1px;
             }
+            
+            @keyframes grabPulse {
+                0% {
+                    transform: translate(-50%, -50%) scale(0.5);
+                    opacity: 0;
+                }
+                30% {
+                    transform: translate(-50%, -50%) scale(1.2);
+                    opacity: 1;
+                }
+                100% {
+                    transform: translate(-50%, -50%) scale(1);
+                    opacity: 0;
+                }
+            }
         `;
         document.head.appendChild(style);
     }
@@ -898,7 +913,10 @@ class ArenaGame {
         this.socket.on('arena-attack-hit', (data) => this.handleArenaAttackHit(data));
         this.socket.on('arena-grab', (data) => this.handleArenaGrab(data));
         this.socket.on('arena-throw', (data) => this.handleArenaThrow(data));
+        this.socket.on('arena-block-state', (data) => this.handleArenaBlockState(data));
+        this.socket.on('player-taunting', (data) => this.handleArenaTaunt(data));
         this.socket.on('arena-game-over', (data) => this.handleArenaGameOver(data));
+        this.socket.on('arena-grab-escape', (data) => this.handleArenaGrabEscape(data));
     }
     
     showRoomCode(code) {
@@ -1127,16 +1145,56 @@ class ArenaGame {
             // Play hit animation on victim (being grabbed)
             victim.playAnimation('hit');
             
-            // Show status indicators
+            // Show status indicators for both players
             if (this.hud) {
+                // Show who the grabber is holding
+                this.hud.showStatus(data.grabberId, `¡AGARRANDO: ${victim.name}!`);
+                // Show that victim is grabbed
                 this.hud.showStatus(data.targetId, '¡AGARRADO!');
             }
+            
+            // Show floating grab indicator
+            this.showGrabIndicator(grabber, victim);
             
             // Play grab sound
             if (this.sfxManager) {
                 this.sfxManager.playHit?.(5, false);
             }
         }
+    }
+    
+    /**
+     * Show visual indicator when someone is grabbed
+     */
+    showGrabIndicator(grabber, victim) {
+        // Create a floating text indicator
+        const indicator = document.createElement('div');
+        indicator.className = 'grab-indicator';
+        indicator.innerHTML = `🤼 ${grabber.name} → ${victim.name}`;
+        indicator.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(45deg, rgba(153, 102, 255, 0.9), rgba(255, 102, 0, 0.9));
+            color: white;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 15px 30px;
+            border-radius: 10px;
+            z-index: 1000;
+            animation: grabPulse 0.5s ease-out forwards;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        `;
+        
+        document.body.appendChild(indicator);
+        
+        // Remove after animation
+        setTimeout(() => {
+            indicator.remove();
+        }, 1500);
     }
     
     /**
@@ -1148,8 +1206,8 @@ class ArenaGame {
                 const victim = player.grabbedEntity;
                 const grabber = player;
                 
-                // Position the victim in front of the grabber
-                const offset = 1.2;
+                // Position the victim in front of the grabber (closer)
+                const offset = 0.6; // Reduced from 1.2 for closer grab
                 const angle = grabber.controller.facingAngle || 0;
                 victim.controller.position.x = grabber.controller.position.x + Math.sin(angle) * offset;
                 victim.controller.position.z = grabber.controller.position.z + Math.cos(angle) * offset;
@@ -1222,6 +1280,70 @@ class ArenaGame {
         // Play victory music
         if (this.bgmManager) {
             this.bgmManager.playVictory?.();
+        }
+    }
+    
+    /**
+     * Handle block state change
+     */
+    handleArenaBlockState(data) {
+        console.log('[Arena] Block state:', data);
+        const player = this.players.get(data.playerId);
+        if (player) {
+            player.controller.isBlocking = data.isBlocking;
+            if (data.isBlocking) {
+                player.playAnimation('block');
+            } else {
+                player.playAnimation('idle');
+            }
+        }
+    }
+    
+    /**
+     * Handle taunt animation
+     */
+    handleArenaTaunt(data) {
+        console.log('[Arena] Taunt:', data);
+        const player = this.players.get(data.playerId);
+        if (player) {
+            player.playAnimation('taunt');
+            
+            // Play taunt sound
+            if (this.sfxManager) {
+                this.sfxManager.playTaunt?.();
+            }
+        }
+    }
+    
+    /**
+     * Handle grab escape event
+     */
+    handleArenaGrabEscape(data) {
+        console.log('[Arena] Grab escape:', data);
+        const grabber = this.players.get(data.grabberId);
+        const victim = this.players.get(data.targetId);
+        
+        if (grabber && victim) {
+            // Release grab state
+            grabber.controller.isGrabbing = false;
+            grabber.controller.grabbedPlayer = null;
+            grabber.grabbedEntity = null;
+            victim.controller.isGrabbed = false;
+            victim.controller.grabbedBy = null;
+            
+            // Play animations
+            grabber.playAnimation('hit'); // Grabber gets pushed back
+            victim.playAnimation('idle');
+            
+            // Show status
+            if (this.hud) {
+                this.hud.showStatus(data.targetId, '¡ESCAPÓ!');
+            }
+            
+            // Play sound
+            if (this.sfxManager) {
+                this.sfxManager.playBlock?.();
+            }
         }
     }
     

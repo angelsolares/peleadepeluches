@@ -406,6 +406,27 @@ io.on('connection', (socket) => {
         });
     });
     
+    /**
+     * Arena escape from grab
+     */
+    socket.on('arena-escape', (callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) {
+            return callback?.({ success: false, error: 'Not in room' });
+        }
+        
+        const result = arenaStateManager.processEscape(socket.id, roomCode);
+        callback?.(result);
+        
+        if (result.success) {
+            // Broadcast escape to all clients
+            io.to(roomCode).emit('arena-grab-escape', {
+                targetId: socket.id,
+                grabberId: result.grabberId
+            });
+        }
+    });
+    
     // ========== COMMON EVENTS ==========
     
     /**

@@ -622,6 +622,49 @@ class ArenaStateManager {
     }
     
     /**
+     * Process an escape from grab attempt
+     */
+    processEscape(socketId, roomCode) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState) return { success: false, error: 'No arena state' };
+        
+        const target = arenaState.players.get(socketId);
+        if (!target) return { success: false, error: 'Player not found' };
+        
+        // Check if player is actually grabbed
+        if (!target.isGrabbed || !target.grabbedBy) {
+            return { success: false, error: 'Not grabbed' };
+        }
+        
+        const grabberId = target.grabbedBy;
+        
+        // Release the grab
+        this.releaseGrab(arenaState, grabberId);
+        
+        // Apply small knockback to both players (push apart)
+        const grabber = arenaState.players.get(grabberId);
+        if (grabber) {
+            const angle = grabber.facingAngle || 0;
+            // Push grabber backwards
+            grabber.velocity.x -= Math.sin(angle) * 3;
+            grabber.velocity.z -= Math.cos(angle) * 3;
+            grabber.isStunned = true;
+            grabber.stunEndTime = Date.now() + 300; // Brief stun
+        }
+        
+        // Push target away
+        target.velocity.x += Math.sin(Math.PI) * 2;
+        target.velocity.z += Math.cos(Math.PI) * 2;
+        
+        console.log(`[Arena] Player ${target.name} escaped from grab!`);
+        
+        return { 
+            success: true, 
+            grabberId: grabberId 
+        };
+    }
+    
+    /**
      * Eliminate a player
      */
     eliminatePlayer(arenaState, playerId) {

@@ -75,6 +75,9 @@ let isConnected = false;
 let selectedCharacter = 'edgar'; // Default character
 let gameMode = 'smash'; // 'smash' or 'arena'
 let isGrabbing = false; // Track if player is currently grabbing someone (Arena mode)
+let isGrabbed = false; // Track if player is currently grabbed by someone (Arena mode)
+let escapeProgress = 0; // Progress towards escaping from grab (0-100)
+let escapeThreshold = 5; // Number of button presses needed to escape
 
 // Available characters
 const CHARACTERS = {
@@ -554,8 +557,11 @@ function handleArenaGrabEvent(data) {
         updateGrabButtonState();
         triggerHaptic();
     }
-    // If we are the target, vibrate
+    // If we are the target (being grabbed), show escape UI
     if (data.targetId === socket.id) {
+        isGrabbed = true;
+        escapeProgress = 0;
+        showEscapeUI();
         triggerHaptic(true);
     }
 }
@@ -571,8 +577,10 @@ function handleArenaThrowEvent(data) {
         updateGrabButtonState();
         triggerHaptic();
     }
-    // If we were thrown, vibrate strongly
+    // If we were thrown, hide escape UI and vibrate strongly
     if (data.targetId === socket.id) {
+        isGrabbed = false;
+        hideEscapeUI();
         triggerHaptic(true);
     }
 }
@@ -582,9 +590,13 @@ function handleArenaThrowEvent(data) {
  */
 function handleArenaGrabReleased(data) {
     console.log('[Arena] Grab released:', data);
-    if (data.grabberId === socket.id || data.targetId === socket.id) {
+    if (data.grabberId === socket.id) {
         isGrabbing = false;
         updateGrabButtonState();
+    }
+    if (data.targetId === socket.id) {
+        isGrabbed = false;
+        hideEscapeUI();
     }
 }
 
@@ -892,6 +904,173 @@ function updateGrabButtonState() {
         grabButton.style.color = '#9966ff';
         grabButton.style.animation = 'none';
         if (labelSpan) labelSpan.textContent = 'AGARRAR';
+    }
+}
+
+/**
+ * Show escape UI when player is grabbed
+ */
+function showEscapeUI() {
+    // Remove existing escape UI if present
+    hideEscapeUI();
+    
+    // Create escape overlay
+    const escapeOverlay = document.createElement('div');
+    escapeOverlay.id = 'escape-overlay';
+    escapeOverlay.innerHTML = `
+        <div class="escape-container">
+            <div class="escape-title">¡ESTÁS AGARRADO!</div>
+            <div class="escape-instruction">¡PRESIONA RÁPIDO PARA ESCAPAR!</div>
+            <div class="escape-progress-bar">
+                <div class="escape-progress-fill" id="escape-fill"></div>
+            </div>
+            <button class="escape-btn" id="escape-btn">
+                <span class="escape-btn-icon">💪</span>
+                <span class="escape-btn-text">¡ESCAPAR!</span>
+            </button>
+        </div>
+    `;
+    
+    // Add styles
+    escapeOverlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 0, 0, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        animation: pulseRed 0.5s infinite;
+    `;
+    
+    const style = document.createElement('style');
+    style.id = 'escape-styles';
+    style.textContent = `
+        @keyframes pulseRed {
+            0%, 100% { background: rgba(255, 0, 0, 0.2); }
+            50% { background: rgba(255, 0, 0, 0.4); }
+        }
+        .escape-container {
+            background: rgba(0, 0, 0, 0.9);
+            border: 4px solid #ff3366;
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            max-width: 90%;
+        }
+        .escape-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #ff3366;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(255, 51, 102, 0.8);
+        }
+        .escape-instruction {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1rem;
+            color: white;
+            margin-bottom: 20px;
+        }
+        .escape-progress-bar {
+            width: 100%;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 2px solid #00ffcc;
+        }
+        .escape-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #00ffcc, #00ff88);
+            transition: width 0.1s ease;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
+        }
+        .escape-btn {
+            width: 100%;
+            padding: 20px;
+            font-size: 1.5rem;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+            background: linear-gradient(45deg, #00ffcc, #00ff88);
+            color: #0a0a15;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            animation: escapeButtonPulse 0.3s infinite;
+        }
+        @keyframes escapeButtonPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        .escape-btn:active {
+            transform: scale(0.95) !important;
+            background: linear-gradient(45deg, #00ff88, #00ffcc);
+        }
+        .escape-btn-icon {
+            font-size: 2rem;
+        }
+    `;
+    
+    document.head.appendChild(style);
+    document.body.appendChild(escapeOverlay);
+    
+    // Add click handler for escape button
+    const escapeBtn = document.getElementById('escape-btn');
+    escapeBtn.addEventListener('click', handleEscapePress);
+    escapeBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        handleEscapePress();
+    });
+}
+
+/**
+ * Hide escape UI
+ */
+function hideEscapeUI() {
+    const overlay = document.getElementById('escape-overlay');
+    const styles = document.getElementById('escape-styles');
+    if (overlay) overlay.remove();
+    if (styles) styles.remove();
+    escapeProgress = 0;
+}
+
+/**
+ * Handle escape button press
+ */
+function handleEscapePress() {
+    if (!isGrabbed) return;
+    
+    escapeProgress += (100 / escapeThreshold);
+    
+    // Update progress bar
+    const fill = document.getElementById('escape-fill');
+    if (fill) {
+        fill.style.width = Math.min(100, escapeProgress) + '%';
+    }
+    
+    // Haptic feedback
+    triggerHaptic();
+    
+    // Check if escaped
+    if (escapeProgress >= 100) {
+        console.log('[Escape] Escaped from grab!');
+        socket.emit('arena-escape', (response) => {
+            console.log('[Escape] Response:', response);
+            if (response.success) {
+                isGrabbed = false;
+                hideEscapeUI();
+            }
+        });
     }
 }
 
