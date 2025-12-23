@@ -2871,43 +2871,108 @@ function animate() {
 }
 
 /**
- * Update camera to follow players from side view (Smash Bros style)
+ * Dynamic elastic camera with automatic framing (Smash Bros style)
+ * - Follows all players
+ * - Adjusts zoom to keep everyone visible
+ * - Smooth interpolation for elastic feel
  */
+
+// Camera configuration
+const CAMERA_CONFIG = {
+    // Minimum and maximum zoom distances
+    MIN_ZOOM: 8,
+    MAX_ZOOM: 25,
+    
+    // Padding around players (in world units)
+    HORIZONTAL_PADDING: 3,
+    VERTICAL_PADDING: 2,
+    
+    // Interpolation speeds (lower = smoother/slower)
+    POSITION_LERP: 0.06,
+    ZOOM_LERP: 0.04,
+    
+    // Vertical offset for camera target
+    LOOK_AT_OFFSET_Y: 1.0,
+    
+    // Camera height offset from center
+    CAMERA_HEIGHT_OFFSET: 1.5,
+    
+    // FOV for calculations (should match camera FOV)
+    FOV: 45
+};
+
 function updateSideViewCamera() {
     if (players.size === 0) return;
     
-    // Calculate bounds of all players
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let avgY = 0;
+    // Calculate bounding box of all players
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
     
     players.forEach(player => {
         const px = player.controller.position.x;
         const py = player.controller.position.y;
+        
         minX = Math.min(minX, px);
         maxX = Math.max(maxX, px);
-        avgY += py;
+        minY = Math.min(minY, py);
+        maxY = Math.max(maxY, py);
     });
-    avgY /= players.size;
     
-    // Calculate center and spread
+    // Add padding to bounds
+    minX -= CAMERA_CONFIG.HORIZONTAL_PADDING;
+    maxX += CAMERA_CONFIG.HORIZONTAL_PADDING;
+    minY -= CAMERA_CONFIG.VERTICAL_PADDING;
+    maxY += CAMERA_CONFIG.VERTICAL_PADDING + 1; // Extra for names above heads
+    
+    // Calculate center of bounding box
     const centerX = (minX + maxX) / 2;
-    const spread = maxX - minX;
+    const centerY = (minY + maxY) / 2;
+    
+    // Calculate required dimensions
+    const spreadX = maxX - minX;
+    const spreadY = maxY - minY;
+    
+    // Calculate required distance based on FOV to fit all players
+    // Using vertical FOV for calculation
+    const fovRad = THREE.MathUtils.degToRad(CAMERA_CONFIG.FOV);
+    const aspectRatio = window.innerWidth / window.innerHeight;
+    
+    // Distance needed to fit vertical spread
+    const distanceForHeight = (spreadY / 2) / Math.tan(fovRad / 2);
+    
+    // Distance needed to fit horizontal spread (accounting for aspect ratio)
+    const horizontalFov = 2 * Math.atan(Math.tan(fovRad / 2) * aspectRatio);
+    const distanceForWidth = (spreadX / 2) / Math.tan(horizontalFov / 2);
+    
+    // Use the larger distance to ensure everything fits
+    let targetZ = Math.max(distanceForHeight, distanceForWidth);
+    
+    // Clamp zoom to min/max
+    targetZ = THREE.MathUtils.clamp(targetZ, CAMERA_CONFIG.MIN_ZOOM, CAMERA_CONFIG.MAX_ZOOM);
     
     // Target camera position
-    // X follows players, Y stays slightly above players, Z adjusts for zoom
     const targetX = centerX;
-    const targetY = Math.max(1.5, avgY + 1.5);
-    const targetZ = Math.max(10, 8 + spread * 0.8); // Dynamic zoom based on spread
+    const targetY = centerY + CAMERA_CONFIG.CAMERA_HEIGHT_OFFSET;
     
-    // Smoothly interpolate camera position
-    camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, 0.05);
-    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, 0.03);
-    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, 0.03);
+    // Smoothly interpolate camera position (elastic effect)
+    camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, CAMERA_CONFIG.POSITION_LERP);
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, CAMERA_CONFIG.POSITION_LERP);
+    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, CAMERA_CONFIG.ZOOM_LERP);
     
-    // Look at center of action
-    const lookAtY = Math.max(1, avgY + 0.5);
-    camera.lookAt(centerX, lookAtY, 0);
+    // Look at center of action with smooth interpolation
+    // Store current lookAt target for smooth transitions
+    if (!camera.userData.lookAtTarget) {
+        camera.userData.lookAtTarget = new THREE.Vector3(centerX, centerY + CAMERA_CONFIG.LOOK_AT_OFFSET_Y, 0);
+    }
+    
+    camera.userData.lookAtTarget.x = THREE.MathUtils.lerp(
+        camera.userData.lookAtTarget.x, centerX, CAMERA_CONFIG.POSITION_LERP
+    );
+    camera.userData.lookAtTarget.y = THREE.MathUtils.lerp(
+        camera.userData.lookAtTarget.y, centerY + CAMERA_CONFIG.LOOK_AT_OFFSET_Y, CAMERA_CONFIG.POSITION_LERP
+    );
+    
+    camera.lookAt(camera.userData.lookAtTarget);
 }
 
 // =================================

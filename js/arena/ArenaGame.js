@@ -1401,26 +1401,98 @@ class ArenaGame {
         }
     }
     
+    /**
+     * Dynamic elastic camera with automatic framing for Arena mode
+     * - Follows all players from isometric view
+     * - Adjusts height/zoom to keep everyone visible
+     * - Smooth interpolation for elastic feel
+     */
     updateCamera() {
         if (this.players.size === 0) return;
         
-        // Calculate center of all players
-        let centerX = 0, centerZ = 0;
+        // Camera configuration for Arena
+        const ARENA_CAMERA = {
+            MIN_HEIGHT: 15,
+            MAX_HEIGHT: 35,
+            PADDING: 4,
+            POSITION_LERP: 0.06,
+            ZOOM_LERP: 0.04,
+            ANGLE: ARENA_CONFIG.CAMERA_ANGLE,
+            FOV: 45
+        };
+        
+        // Calculate bounding box of all players
+        let minX = Infinity, maxX = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+        
         this.players.forEach(player => {
-            centerX += player.controller.position.x;
-            centerZ += player.controller.position.z;
+            const px = player.controller.position.x;
+            const pz = player.controller.position.z;
+            
+            minX = Math.min(minX, px);
+            maxX = Math.max(maxX, px);
+            minZ = Math.min(minZ, pz);
+            maxZ = Math.max(maxZ, pz);
         });
-        centerX /= this.players.size;
-        centerZ /= this.players.size;
         
-        // Smoothly move camera to follow action
-        const targetX = centerX * 0.5;
-        const targetZ = centerZ * 0.5 + ARENA_CONFIG.CAMERA_HEIGHT * Math.sin(ARENA_CONFIG.CAMERA_ANGLE);
+        // Add padding to bounds
+        minX -= ARENA_CAMERA.PADDING;
+        maxX += ARENA_CAMERA.PADDING;
+        minZ -= ARENA_CAMERA.PADDING;
+        maxZ += ARENA_CAMERA.PADDING;
         
-        this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetX, 0.05);
-        this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetZ, 0.05);
+        // Calculate center of bounding box
+        const centerX = (minX + maxX) / 2;
+        const centerZ = (minZ + maxZ) / 2;
         
-        this.camera.lookAt(centerX * 0.3, 0, centerZ * 0.3);
+        // Calculate required dimensions
+        const spreadX = maxX - minX;
+        const spreadZ = maxZ - minZ;
+        const maxSpread = Math.max(spreadX, spreadZ);
+        
+        // Calculate required height based on spread and FOV
+        const fovRad = THREE.MathUtils.degToRad(ARENA_CAMERA.FOV);
+        const aspectRatio = window.innerWidth / window.innerHeight;
+        
+        // Distance needed to fit the spread (considering the camera angle)
+        const viewDistance = (maxSpread / 2) / Math.tan(fovRad / 2);
+        let targetHeight = viewDistance * Math.cos(ARENA_CAMERA.ANGLE);
+        
+        // Clamp height to min/max
+        targetHeight = THREE.MathUtils.clamp(targetHeight, ARENA_CAMERA.MIN_HEIGHT, ARENA_CAMERA.MAX_HEIGHT);
+        
+        // Calculate camera offset based on angle
+        const horizontalOffset = targetHeight * Math.tan(ARENA_CAMERA.ANGLE);
+        
+        // Target camera position (isometric view from above and behind)
+        const targetCamX = centerX;
+        const targetCamY = targetHeight;
+        const targetCamZ = centerZ + horizontalOffset;
+        
+        // Smoothly interpolate camera position (elastic effect)
+        this.camera.position.x = THREE.MathUtils.lerp(
+            this.camera.position.x, targetCamX, ARENA_CAMERA.POSITION_LERP
+        );
+        this.camera.position.y = THREE.MathUtils.lerp(
+            this.camera.position.y, targetCamY, ARENA_CAMERA.ZOOM_LERP
+        );
+        this.camera.position.z = THREE.MathUtils.lerp(
+            this.camera.position.z, targetCamZ, ARENA_CAMERA.POSITION_LERP
+        );
+        
+        // Look at center of action with smooth interpolation
+        if (!this.camera.userData.lookAtTarget) {
+            this.camera.userData.lookAtTarget = new THREE.Vector3(centerX, 0, centerZ);
+        }
+        
+        this.camera.userData.lookAtTarget.x = THREE.MathUtils.lerp(
+            this.camera.userData.lookAtTarget.x, centerX, ARENA_CAMERA.POSITION_LERP
+        );
+        this.camera.userData.lookAtTarget.z = THREE.MathUtils.lerp(
+            this.camera.userData.lookAtTarget.z, centerZ, ARENA_CAMERA.POSITION_LERP
+        );
+        
+        this.camera.lookAt(this.camera.userData.lookAtTarget);
     }
 }
 
