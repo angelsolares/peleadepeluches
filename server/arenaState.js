@@ -38,8 +38,8 @@ const ARENA_CONFIG = {
     // Knockback
     PUNCH_KNOCKBACK: 3,
     KICK_KNOCKBACK: 5,
-    THROW_KNOCKBACK: 15,       // Horizontal knockback for ring outs
-    THROW_HEIGHT: 15,          // High vertical velocity for parabolic arc
+    THROW_KNOCKBACK: 20,       // High knockback for ring outs
+    THROW_HEIGHT: 5,           // Vertical velocity for throw arc
     
     // Timing
     ATTACK_COOLDOWN: 500,      // ms

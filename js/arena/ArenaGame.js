@@ -1154,12 +1154,27 @@ class ArenaGame {
         data.players?.forEach(state => {
             const player = this.players.get(state.id);
             if (player) {
+                // Check if player was grabbed and now isn't (grab released)
+                const wasGrabbed = player.controller.isGrabbed;
+                const wasBeingCarried = player.isBeingCarried;
+                
                 // Apply position and state from server
                 player.controller.applyServerState(state);
                 
-                // Debug: Log first player position every 60 frames
-                if (state.id === data.players[0].id && Math.random() < 0.03) {
-                    console.log('[Arena] P1 pos:', state.position);
+                // Detect grab release (was grabbed, now isn't, and not being thrown)
+                if ((wasGrabbed || wasBeingCarried) && 
+                    !state.isGrabbed && 
+                    !player.isBeingThrown && 
+                    !player.isFlying) {
+                    console.log('[Arena] Grab released for player:', state.id);
+                    player.isBeingCarried = false;
+                    
+                    // Reset rotation to upright
+                    player.model.rotation.x = 0;
+                    player.model.rotation.z = 0;
+                    
+                    // Return to idle animation
+                    player.playAnimation('idle');
                 }
                 
                 // Update HUD

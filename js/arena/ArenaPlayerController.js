@@ -447,10 +447,12 @@ class ArenaPlayerController {
         if (state.velocity) {
             this.velocity.set(state.velocity.x, state.velocity.y, state.velocity.z);
         }
+        if (typeof state.facingAngle === 'number') this.facingAngle = state.facingAngle;
         if (typeof state.health === 'number') this.health = state.health;
         if (typeof state.stamina === 'number') this.stamina = state.stamina;
         if (typeof state.isStunned === 'boolean') this.isStunned = state.isStunned;
         if (typeof state.isGrabbed === 'boolean') this.isGrabbed = state.isGrabbed;
+        if (typeof state.isGrabbing === 'boolean') this.isGrabbing = state.isGrabbing;
         if (typeof state.isEliminated === 'boolean') this.isEliminated = state.isEliminated;
         if (state.input) this.input = { ...this.input, ...state.input };
     }
