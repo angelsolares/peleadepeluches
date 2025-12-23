@@ -38,8 +38,8 @@ const ARENA_CONFIG = {
     // Knockback
     PUNCH_KNOCKBACK: 3,
     KICK_KNOCKBACK: 5,
-    THROW_KNOCKBACK: 20,       // High knockback for ring outs
-    THROW_HEIGHT: 5,           // Vertical velocity for throw arc
+    THROW_KNOCKBACK: 15,       // Horizontal knockback for ring outs
+    THROW_HEIGHT: 15,          // High vertical velocity for parabolic arc
     
     // Timing
     ATTACK_COOLDOWN: 500,      // ms
@@ -222,8 +222,8 @@ class ArenaStateManager {
      * Process player movement for 360 degrees
      */
     processPlayerMovement(playerState, delta) {
-        if (playerState.isAttacking || playerState.isGrabbing) {
-            // Slow down while attacking
+        if (playerState.isAttacking) {
+            // Slow down while attacking (can't move)
             playerState.velocity.x *= 0.9;
             playerState.velocity.z *= 0.9;
         } else {
@@ -235,18 +235,18 @@ class ArenaStateManager {
             if (playerState.input.up) dirZ -= 1;
             if (playerState.input.down) dirZ += 1;
             
-            // Debug: Log input if any direction is pressed
-            if (dirX !== 0 || dirZ !== 0) {
-                console.log(`[Arena] Player ${playerState.number} moving: dirX=${dirX}, dirZ=${dirZ}, input=${JSON.stringify(playerState.input)}`);
-            }
-            
             // Normalize diagonal
             const length = Math.sqrt(dirX * dirX + dirZ * dirZ);
             if (length > 0) {
                 dirX /= length;
                 dirZ /= length;
                 
-                const speed = playerState.input.run ? ARENA_CONFIG.RUN_SPEED : ARENA_CONFIG.MOVE_SPEED;
+                // Slower speed when carrying someone
+                let speed = playerState.input.run ? ARENA_CONFIG.RUN_SPEED : ARENA_CONFIG.MOVE_SPEED;
+                if (playerState.isGrabbing) {
+                    speed *= 0.5; // Walk slower when carrying
+                }
+                
                 playerState.velocity.x = dirX * speed;
                 playerState.velocity.z = dirZ * speed;
                 

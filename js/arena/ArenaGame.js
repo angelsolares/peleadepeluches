@@ -1320,21 +1320,17 @@ class ArenaGame {
                 }
             }
             
-            // Play fall animation on victim (ragdoll effect)
-            victim.playAnimation('fall');
-            if (victim.animController) {
-                const fallAction = victim.animController.mixer?.clipAction(
-                    victim.animController.animations['fall']
-                );
-                if (fallAction) {
-                    fallAction.timeScale = 1.5;
-                }
+            // Freeze victim in T-pose/ragdoll while flying (no animation)
+            // Stop all animations on victim
+            if (victim.animController && victim.animController.mixer) {
+                victim.animController.mixer.stopAllAction();
             }
             
-            // Add spinning effect to thrown victim (ragdoll)
+            // Mark for ragdoll physics (no animation, just rotation)
+            victim.isFlying = true;
             victim.throwSpin = {
                 active: true,
-                speed: 12, // Rotations per second
+                speed: 8, // Slower tumble rotation
                 axis: 'x'
             };
             
@@ -1867,49 +1863,57 @@ class ArenaGame {
     }
     
     /**
-     * Update thrown player - spin effect and landing recovery
+     * Update thrown player - ragdoll spin while flying, fall animation on landing
      */
     updateThrownPlayer(player, delta) {
-        if (!player.isBeingThrown) return;
-        
-        // Apply spinning effect while in air
-        if (player.throwSpin && player.throwSpin.active) {
-            player.model.rotation.x += player.throwSpin.speed * delta;
-        }
-        
-        // Check if player landed (Y position back to ground level)
-        const groundLevel = ARENA_CONFIG.RING_HEIGHT || 0.5;
-        if (player.controller.position.y <= groundLevel + 0.1) {
-            // Player landed!
-            player.isBeingThrown = false;
-            
-            if (player.throwSpin) {
-                player.throwSpin.active = false;
+        // Handle flying state (no animation, just tumbling)
+        if (player.isFlying || player.isBeingThrown) {
+            // Apply tumbling rotation while in air
+            if (player.throwSpin && player.throwSpin.active) {
+                player.model.rotation.x += player.throwSpin.speed * delta;
             }
             
-            // Reset rotation
-            player.model.rotation.x = 0;
-            player.model.rotation.z = 0;
-            
-            // Play landing effect
-            if (this.vfxManager && player.model) {
-                const pos = player.model.position.clone();
-                this.vfxManager.createDustCloud?.(pos, 1.5);
-                this.vfxManager.createImpactRing?.(pos);
-            }
-            
-            // Play landing sound
-            if (this.sfxManager) {
-                this.sfxManager.playLand?.();
-            }
-            
-            // After a short delay, return to idle animation (if not eliminated)
-            if (!player.controller.isEliminated) {
-                setTimeout(() => {
-                    if (!player.controller.isEliminated && !player.controller.isStunned) {
-                        player.playAnimation('idle');
-                    }
-                }, 500);
+            // Check if player landed (Y position back to ground level)
+            const groundLevel = ARENA_CONFIG.RING_HEIGHT || 0.5;
+            if (player.controller.position.y <= groundLevel + 0.2) {
+                // Player landed!
+                player.isBeingThrown = false;
+                player.isFlying = false;
+                
+                if (player.throwSpin) {
+                    player.throwSpin.active = false;
+                }
+                
+                // Reset rotation to upright
+                player.model.rotation.x = 0;
+                player.model.rotation.z = 0;
+                
+                // NOW play fall/landing animation
+                player.playAnimation('fall');
+                
+                // Play landing effect
+                if (this.vfxManager && player.model) {
+                    const pos = player.model.position.clone();
+                    this.vfxManager.createDustCloud?.(pos, 2);
+                    this.vfxManager.createImpactRing?.(pos);
+                }
+                
+                // Play landing sound
+                if (this.sfxManager) {
+                    this.sfxManager.playLand?.();
+                }
+                
+                // Screen shake on impact
+                this.shakeScreen(0.3, 200);
+                
+                // After fall animation, return to idle (if not eliminated)
+                if (!player.controller.isEliminated) {
+                    setTimeout(() => {
+                        if (!player.controller.isEliminated && !player.controller.isStunned) {
+                            player.playAnimation('idle');
+                        }
+                    }, 1000); // Wait for fall animation to complete
+                }
             }
         }
     }
