@@ -945,11 +945,15 @@ function animate() {
                        !animationController.isBlocking && 
                        !animationController.isTaunting;
         
-        // With negative scale.z flip, rotating MORE negative shows the face
-        // -PI/2 (-90°) = profile view (for walking)
-        // -PI*0.65 (-117°) = 3/4 view showing more face (for idle)
+        // Profile rotation is -90° for walking (both directions)
+        // For idle, we rotate toward camera - but direction depends on facing
+        // Facing right (scale.z < 0): rotate more negative (-117°) to show face
+        // Facing left (scale.z > 0): rotate less negative (-63°) to show face
         const profileRotation = -Math.PI / 2;      // -90° full profile for walking
-        const idleRotation = -Math.PI * 0.65;      // -117° 3/4 view showing face
+        const idleOffset = Math.PI * 0.15;         // 27° offset toward camera
+        const idleRotation = facingRight 
+            ? profileRotation - idleOffset   // -117° when facing right
+            : profileRotation + idleOffset;  // -63° when facing left
         const targetRotation = isIdle ? idleRotation : profileRotation;
         
         // Smooth interpolation for rotation
