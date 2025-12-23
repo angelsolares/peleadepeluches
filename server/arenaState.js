@@ -502,25 +502,56 @@ class ArenaStateManager {
      * Process a grab attempt
      */
     processGrab(socketId, roomCode) {
+        console.log(`[Arena] processGrab called for ${socketId} in ${roomCode}`);
+        
         const arenaState = this.arenaStates.get(roomCode);
-        if (!arenaState) return null;
+        if (!arenaState) {
+            console.log('[Arena] No arena state found');
+            return null;
+        }
         
         const attacker = arenaState.players.get(socketId);
-        if (!attacker || attacker.isEliminated || attacker.isGrabbing) return null;
+        if (!attacker) {
+            console.log('[Arena] Attacker not found');
+            return null;
+        }
+        if (attacker.isEliminated) {
+            console.log('[Arena] Attacker is eliminated');
+            return null;
+        }
+        if (attacker.isGrabbing) {
+            console.log('[Arena] Attacker already grabbing');
+            return null;
+        }
         
         // Check stamina
-        if (attacker.stamina < ARENA_CONFIG.GRAB_STAMINA) return null;
+        if (attacker.stamina < ARENA_CONFIG.GRAB_STAMINA) {
+            console.log(`[Arena] Not enough stamina: ${attacker.stamina} < ${ARENA_CONFIG.GRAB_STAMINA}`);
+            return null;
+        }
         
         // Find nearest player in grab range
         let nearestTarget = null;
         let nearestDistance = ARENA_CONFIG.GRAB_RANGE;
         
+        console.log(`[Arena] Looking for target in range ${ARENA_CONFIG.GRAB_RANGE} from pos (${attacker.position.x.toFixed(2)}, ${attacker.position.z.toFixed(2)})`);
+        
         arenaState.players.forEach((targetState, targetId) => {
-            if (targetId === socketId || targetState.isEliminated || targetState.isGrabbed) return;
+            if (targetId === socketId) return;
+            if (targetState.isEliminated) {
+                console.log(`[Arena] Target ${targetId} is eliminated`);
+                return;
+            }
+            if (targetState.isGrabbed) {
+                console.log(`[Arena] Target ${targetId} already grabbed`);
+                return;
+            }
             
             const dx = targetState.position.x - attacker.position.x;
             const dz = targetState.position.z - attacker.position.z;
             const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            console.log(`[Arena] Target ${targetId} at distance ${distance.toFixed(2)}`);
             
             if (distance < nearestDistance) {
                 nearestDistance = distance;
@@ -529,6 +560,8 @@ class ArenaStateManager {
         });
         
         if (nearestTarget) {
+            console.log(`[Arena] GRAB SUCCESS! Target: ${nearestTarget.id}`);
+            
             // Consume stamina
             attacker.stamina -= ARENA_CONFIG.GRAB_STAMINA;
             
@@ -546,6 +579,7 @@ class ArenaStateManager {
             };
         }
         
+        console.log('[Arena] No target found in range');
         return null;
     }
     

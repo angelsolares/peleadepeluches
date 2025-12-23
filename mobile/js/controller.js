@@ -783,6 +783,7 @@ function handleAction(action, btn) {
         if (action === 'taunt') {
             socket.emit('player-taunt');
         } else if (action === 'grab') {
+            console.log(`[Arena] Grab button pressed. isGrabbing=${isGrabbing}`);
             if (isGrabbing) {
                 // If already grabbing, try to throw
                 // Calculate throw direction from current input
@@ -792,20 +793,26 @@ function handleAction(action, btn) {
                 else if (inputState.up) direction = 0;
                 else if (inputState.down) direction = Math.PI;
                 
+                console.log(`[Arena] Throwing with direction=${direction}`);
                 socket.emit('arena-throw', direction, (response) => {
-                    console.log('[Arena Throw]', response);
-                    if (response.success) {
+                    console.log('[Arena Throw] Response:', response);
+                    if (response && response.success) {
                         isGrabbing = false;
                         updateGrabButtonState();
+                        console.log('[Arena] Throw success, button reset to AGARRAR');
                     }
                 });
             } else {
                 // Try to grab
+                console.log('[Arena] Attempting grab...');
                 socket.emit('arena-grab', (response) => {
-                    console.log('[Arena Grab]', response);
-                    if (response.success) {
+                    console.log('[Arena Grab] Response:', response);
+                    if (response && response.success) {
                         isGrabbing = true;
                         updateGrabButtonState();
+                        console.log('[Arena] Grab success! Button changed to LANZAR');
+                    } else {
+                        console.log('[Arena] Grab failed - no target in range?');
                     }
                 });
             }
