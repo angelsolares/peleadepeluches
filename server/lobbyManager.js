@@ -317,44 +317,26 @@ class LobbyManager {
         
         room.state = 'playing';
         
-        // Get all mobile players
+        // Get all mobile players (host is NOT a player, just the display screen)
         const playerArray = Array.from(room.players.values());
         
-        // Add host as a player (Player 1, always first)
-        const hostPlayer = {
-            id: room.hostId,
-            name: 'Host',
-            number: 1,
-            color: '#ff6b6b',
-            character: room.hostCharacter || 'edgar',
-            health: 0,
-            stocks: 3,
-            isHost: true
-        };
-        
-        // Renumber mobile players starting from 2
-        playerArray.forEach((player, index) => {
-            player.number = index + 2;
-        });
-        
-        // Combine host + mobile players
-        const allPlayers = [hostPlayer, ...playerArray];
-        
         // Initialize player positions
-        allPlayers.forEach((player, index) => {
+        playerArray.forEach((player, index) => {
             player.position = {
-                x: (index - (allPlayers.length - 1) / 2) * 3,
+                x: (index - (playerArray.length - 1) / 2) * 3,
                 y: 0,
                 z: 0
             };
+            player.health = 0;
+            player.stocks = 3;
         });
         
-        console.log(`[Lobby] Game started in room ${roomCode} with ${allPlayers.length} players (1 host + ${room.players.size} mobile)`);
+        console.log(`[Lobby] Game started in room ${roomCode} with ${room.players.size} mobile players`);
         
         return {
             success: true,
             room: this.getRoomInfo(roomCode),
-            players: allPlayers.map(p => ({
+            players: playerArray.map(p => ({
                 id: p.id,
                 name: p.name,
                 number: p.number,
@@ -362,8 +344,7 @@ class LobbyManager {
                 position: p.position,
                 health: p.health,
                 stocks: p.stocks,
-                character: p.character || 'edgar',
-                isHost: p.isHost || false
+                character: p.character || 'edgar'
             }))
         };
     }

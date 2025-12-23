@@ -1153,12 +1153,6 @@ async function changeCharacter(characterId) {
     console.log(`[Game] Changing character to: ${characterId}`);
     selectedCharacter = characterId;
     
-    // Notify server about host's character selection
-    if (socket && socket.connected && isHost) {
-        socket.emit('host-select-character', characterId);
-        console.log(`[Game] Sent host character selection to server: ${characterId}`);
-    }
-    
     // Show loading indicator
     const loadingOverlay = document.createElement('div');
     loadingOverlay.id = 'character-loading';
@@ -1461,17 +1455,13 @@ function initializeSocket() {
         console.log('[Socket] Connected to server');
         isHost = true;
         
-        // Create room as host
+        // Create room as host (host is display only, not a player)
         socket.emit('create-room', (response) => {
             if (response.success) {
                 roomCode = response.roomCode;
                 console.log(`[Socket] Room created: ${roomCode}`);
                 updateAnimationDisplay(`Sala: ${roomCode} - Esperando jugadores...`);
                 showRoomCode(roomCode);
-                
-                // Send current character selection to server
-                socket.emit('host-select-character', selectedCharacter);
-                console.log(`[Socket] Sent initial host character: ${selectedCharacter}`);
             } else {
                 console.error('[Socket] Failed to create room:', response.error);
             }
