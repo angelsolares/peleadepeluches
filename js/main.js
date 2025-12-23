@@ -608,6 +608,31 @@ const CHARACTER_MODELS = {
         name: 'Lia',
         file: 'Lia_Model.fbx',
         thumbnail: '👩'
+    },
+    hector: {
+        name: 'Hector',
+        file: 'Hector.fbx',
+        thumbnail: '🧑'
+    },
+    katy: {
+        name: 'Katy',
+        file: 'Katy.fbx',
+        thumbnail: '👱‍♀️'
+    },
+    mariana: {
+        name: 'Mariana',
+        file: 'Mariana.fbx',
+        thumbnail: '👩‍🦱'
+    },
+    sol: {
+        name: 'Sol',
+        file: 'Sol.fbx',
+        thumbnail: '🌞'
+    },
+    yadira: {
+        name: 'Yadira',
+        file: 'Yadira.fbx',
+        thumbnail: '💃'
     }
 };
 
