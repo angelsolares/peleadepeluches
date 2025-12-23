@@ -78,7 +78,9 @@ let selectedCharacter = null;
 // Available characters
 const CHARACTERS = {
     edgar: { name: 'Edgar', emoji: '👦' },
-    isabella: { name: 'Isabella', emoji: '👧' }
+    isabella: { name: 'Isabella', emoji: '👧' },
+    jesus: { name: 'Jesus', emoji: '🧔' },
+    lia: { name: 'Lia', emoji: '👩' }
 };
 
 // Track which characters are taken by other players

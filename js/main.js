@@ -515,6 +515,16 @@ const CHARACTER_MODELS = {
         name: 'Isabella', 
         file: 'Isabella_Model.fbx',
         thumbnail: '👧'
+    },
+    jesus: {
+        name: 'Jesus',
+        file: 'Jesus_Model.fbx',
+        thumbnail: '🧔'
+    },
+    lia: {
+        name: 'Lia',
+        file: 'Lia_Model.fbx',
+        thumbnail: '👩'
     }
 };
 
@@ -1075,12 +1085,12 @@ function createCharacterSelector() {
                 margin-bottom: 10px;
             }
             .character-options {
-                display: flex;
-                gap: 10px;
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
             }
             .character-btn {
-                flex: 1;
-                padding: 10px;
+                padding: 8px;
                 background: rgba(0, 0, 0, 0.3);
                 border: 2px solid rgba(255, 255, 255, 0.2);
                 border-radius: 8px;

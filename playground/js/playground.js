@@ -33,6 +33,16 @@ const CHARACTER_MODELS = {
         name: 'Isabella', 
         file: 'Isabella_Model.fbx',
         thumbnail: '👧'
+    },
+    jesus: {
+        name: 'Jesus',
+        file: 'Jesus_Model.fbx',
+        thumbnail: '🧔'
+    },
+    lia: {
+        name: 'Lia',
+        file: 'Lia_Model.fbx',
+        thumbnail: '👩'
     }
 };
 
