@@ -43,7 +43,7 @@ const ARENA_CONFIG = {
     // Timing
     ATTACK_COOLDOWN: 500,      // ms
     ACTIVE_FRAME_DELAY: 150,   // ms before hit detection
-    GRAB_DURATION: 3000,       // ms - time to hold before auto-release
+    GRAB_DURATION: 10000,      // ms - time to hold before auto-release (10 seconds)
     STUN_DURATION: 500,        // ms
     
     // Attack ranges (radius)
