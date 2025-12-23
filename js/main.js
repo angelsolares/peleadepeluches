@@ -1479,6 +1479,10 @@ function showRoomCode(code) {
     // Create room code overlay
     let overlay = document.getElementById('room-code-overlay');
     
+    // Generate mobile URL with room code
+    const mobileUrl = `${window.location.origin}/mobile/?room=${code}`;
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(mobileUrl)}&bgcolor=0a0a15&color=00ffcc`;
+    
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'room-code-overlay';
@@ -1486,8 +1490,11 @@ function showRoomCode(code) {
             <div class="room-code-content">
                 <h2>CÓDIGO DE SALA</h2>
                 <div class="room-code">${code}</div>
+                <div class="qr-container">
+                    <img src="${qrCodeUrl}" alt="QR Code" class="qr-code" />
+                </div>
                 <p>Escanea o ingresa este código en tu celular</p>
-                <p class="url">${window.location.origin}/mobile/</p>
+                <a href="${mobileUrl}" target="_blank" class="url">${mobileUrl}</a>
                 <button id="start-game-btn" disabled>INICIAR JUEGO</button>
                 <p class="waiting-text">Esperando jugadores...</p>
             </div>
@@ -1524,6 +1531,20 @@ function showRoomCode(code) {
                 text-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
                 margin-bottom: 12px;
             }
+            #room-code-overlay .qr-container {
+                margin: 16px auto;
+                padding: 10px;
+                background: #0a0a15;
+                border-radius: 12px;
+                border: 2px solid #00ffcc;
+                display: inline-block;
+            }
+            #room-code-overlay .qr-code {
+                display: block;
+                width: 120px;
+                height: 120px;
+                border-radius: 8px;
+            }
             #room-code-overlay p {
                 color: rgba(255, 255, 255, 0.7);
                 font-size: 0.85rem;
@@ -1531,9 +1552,17 @@ function showRoomCode(code) {
                 font-family: 'Rajdhani', sans-serif;
             }
             #room-code-overlay .url {
+                display: block;
                 color: #ff3366;
-                font-size: 0.8rem;
+                font-size: 0.75rem;
                 word-break: break-all;
+                text-decoration: none;
+                margin-bottom: 8px;
+                font-family: 'Rajdhani', sans-serif;
+            }
+            #room-code-overlay .url:hover {
+                color: #ffcc00;
+                text-decoration: underline;
             }
             #room-code-overlay button {
                 margin-top: 16px;
@@ -1572,6 +1601,9 @@ function showRoomCode(code) {
         document.getElementById('start-game-btn').addEventListener('click', startGame);
     } else {
         overlay.querySelector('.room-code').textContent = code;
+        overlay.querySelector('.qr-code').src = qrCodeUrl;
+        overlay.querySelector('.url').href = mobileUrl;
+        overlay.querySelector('.url').textContent = mobileUrl;
         overlay.classList.remove('hidden');
     }
 }

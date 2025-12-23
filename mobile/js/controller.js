@@ -3,14 +3,6 @@
  * Handles touch input and WebSocket communication
  */
 
-import BGMManager from './BGMManager.js';
-
-// =================================
-// BGM Manager
-// =================================
-
-let bgmManager = null;
-
 // =================================
 // Configuration
 // =================================
@@ -44,7 +36,6 @@ const screens = {
 const elements = {
     // Join screen
     roomCodeInput: document.getElementById('room-code'),
-    playerNameInput: document.getElementById('player-name'),
     joinBtn: document.getElementById('join-btn'),
     joinError: document.getElementById('join-error'),
     connectionStatus: document.getElementById('connection-status'),
@@ -81,7 +72,7 @@ let playerData = null;
 let roomCode = null;
 let isReady = false;
 let isConnected = false;
-let selectedCharacter = null;
+let selectedCharacter = 'edgar'; // Default character
 
 // Available characters
 const CHARACTERS = {
@@ -183,7 +174,7 @@ function showScreen(screenName) {
 
 function joinRoom() {
     const code = elements.roomCodeInput.value.trim().toUpperCase();
-    const name = elements.playerNameInput.value.trim() || 'Jugador';
+    const name = CHARACTERS[selectedCharacter]?.name || 'Jugador';
     
     if (code.length !== 4) {
         showError('Ingresa un código de 4 letras');
@@ -193,11 +184,6 @@ function joinRoom() {
     if (!isConnected) {
         showError('No hay conexión al servidor');
         return;
-    }
-    
-    // Initialize BGM on first user interaction (required by browsers)
-    if (!bgmManager) {
-        bgmManager = new BGMManager('../');
     }
     
     elements.joinBtn.disabled = true;
@@ -212,11 +198,6 @@ function joinRoom() {
             
             updateLobbyUI(response.room);
             showScreen('lobby');
-            
-            // BGM: Play character select music
-            if (bgmManager) {
-                bgmManager.playCharacterSelect();
-            }
         } else {
             showError(response.error || 'Error al unirse');
         }
@@ -417,11 +398,6 @@ function handleGameStarted(data) {
     
     updateStocks(3);
     triggerHaptic();
-    
-    // BGM: Play battle music
-    if (bgmManager) {
-        bgmManager.playBattle();
-    }
 }
 
 function handleGameState(data) {
@@ -448,22 +424,12 @@ function handlePlayerKO(kos) {
         if (ko.playerId === socket.id) {
             updateStocks(ko.stocksRemaining);
             triggerHaptic(true); // Strong haptic for KO
-            
-            // BGM: Play knockout sound
-            if (bgmManager) {
-                bgmManager.playKnockout();
-            }
         }
     });
 }
 
 function handleGameOver(data) {
     console.log('[Game] Game over!', data);
-    
-    // BGM: Play victory fanfare
-    if (bgmManager) {
-        bgmManager.playVictory();
-    }
     
     elements.gameOverOverlay.classList.remove('hidden');
     
@@ -486,11 +452,6 @@ function handleGameReset(data) {
     isReady = false;
     updateLobbyUI(data.room);
     showScreen('lobby');
-    
-    // BGM: Back to character select music
-    if (bgmManager) {
-        bgmManager.playCharacterSelect();
-    }
 }
 
 function handleRoomClosed(data) {
@@ -698,12 +659,6 @@ function setupEventListeners() {
     
     elements.roomCodeInput.addEventListener('keyup', (e) => {
         if (e.key === 'Enter') {
-            elements.playerNameInput.focus();
-        }
-    });
-    
-    elements.playerNameInput.addEventListener('keyup', (e) => {
-        if (e.key === 'Enter') {
             joinRoom();
         }
     });
@@ -748,6 +703,13 @@ function setupEventListeners() {
 
 function init() {
     console.log('[Controller] Initializing...');
+    
+    // Check for room code in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomCodeFromUrl = urlParams.get('room');
+    if (roomCodeFromUrl) {
+        elements.roomCodeInput.value = roomCodeFromUrl.toUpperCase();
+    }
     
     // Connect to server
     connectToServer();
