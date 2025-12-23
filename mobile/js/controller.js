@@ -426,34 +426,48 @@ function updateControllerUIForMode() {
     const dpadDown = document.querySelector('.dpad-down');
     const healthLabel = document.querySelector('.health-label');
     const stocksDisplay = elements.stocksDisplay;
+    const grabBtn = document.querySelector('.btn-grab');
+    const runLabel = dpadDown?.querySelector('.label');
     
     if (gameMode === 'arena') {
-        // Arena mode: D-pad controls all 4 directions
+        // Arena mode: D-pad controls all 4 directions for movement
         if (dpadUp) {
             dpadUp.dataset.input = 'up';
-            const label = dpadUp.querySelector('.label');
-            if (label) label.remove();
+            dpadUp.dataset.originalInput = 'up';
         }
         if (dpadDown) {
             dpadDown.dataset.input = 'down';
-            const label = dpadDown.querySelector('.label');
-            if (label) label.textContent = '';
+            dpadDown.dataset.originalInput = 'down';
+            if (runLabel) runLabel.style.display = 'none';
         }
+        
+        // Show grab button in Arena mode
+        if (grabBtn) grabBtn.style.display = 'flex';
         
         // Change health display for Arena mode
         if (healthLabel) healthLabel.textContent = 'VIDA';
         if (stocksDisplay) stocksDisplay.style.display = 'none';
+        
+        console.log('[Controller] Arena mode UI configured');
     } else {
         // Smash mode: Up = jump, Down = run
         if (dpadUp) {
             dpadUp.dataset.input = 'jump';
+            dpadUp.dataset.originalInput = 'jump';
         }
         if (dpadDown) {
             dpadDown.dataset.input = 'run';
+            dpadDown.dataset.originalInput = 'run';
+            if (runLabel) runLabel.style.display = 'block';
         }
+        
+        // Hide grab button in Smash mode
+        if (grabBtn) grabBtn.style.display = 'none';
         
         if (healthLabel) healthLabel.textContent = 'DAÑO';
         if (stocksDisplay) stocksDisplay.style.display = 'flex';
+        
+        console.log('[Controller] Smash mode UI configured');
     }
 }
 
@@ -731,7 +745,19 @@ function handleBlockEnd(inputType, btn) {
 
 function sendInput() {
     if (socket && socket.connected) {
-        socket.emit('player-input', inputState);
+        // Create input object based on game mode
+        const gameInput = { ...inputState };
+        
+        if (gameMode === 'arena') {
+            // Arena mode: ensure up/down are movement (not jump/run)
+            // The d-pad buttons already send 'up'/'down' in arena mode
+            // but we need to map them correctly
+            gameInput.up = inputState.up || false;
+            gameInput.down = inputState.down || false;
+            gameInput.run = inputState.run || false; // Shift can still be run
+        }
+        
+        socket.emit('player-input', gameInput);
     }
 }
 

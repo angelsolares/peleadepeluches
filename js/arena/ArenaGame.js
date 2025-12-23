@@ -17,16 +17,16 @@ import ArenaHUD from './ArenaHUD.js';
 // =================================
 
 const ARENA_CONFIG = {
-    // Ring dimensions
-    RING_SIZE: 12,          // Width/depth of the ring
+    // Ring dimensions - BIGGER RING
+    RING_SIZE: 18,          // Width/depth of the ring (was 12)
     RING_HEIGHT: 0.5,       // Height of the ring platform
-    ROPE_HEIGHT: 1.2,       // Height of the ropes
-    RING_OUT_ZONE: 2,       // Distance outside ring before considered "out"
+    ROPE_HEIGHT: 1.5,       // Height of the ropes
+    RING_OUT_ZONE: 3,       // Distance outside ring before considered "out"
     
     // Physics
     GRAVITY: -30,
-    MOVE_SPEED: 5,
-    RUN_SPEED: 8,
+    MOVE_SPEED: 6,
+    RUN_SPEED: 10,
     
     // Combat
     MAX_HEALTH: 100,
@@ -46,9 +46,9 @@ const ARENA_CONFIG = {
     THROW_DAMAGE: 25,
     RING_OUT_DAMAGE: 50,
     
-    // Camera
-    CAMERA_HEIGHT: 18,
-    CAMERA_ANGLE: Math.PI / 3, // 60 degrees from vertical
+    // Camera - adjusted for bigger ring
+    CAMERA_HEIGHT: 24,
+    CAMERA_ANGLE: Math.PI / 3.5, // Slightly less steep for better view
 };
 
 // Character models (same as main game)
@@ -310,19 +310,25 @@ class ArenaGame {
     }
     
     setupLights() {
-        // Ambient light
-        const ambient = new THREE.AmbientLight(0x404060, 0.6);
+        // Stronger ambient light for better visibility
+        const ambient = new THREE.AmbientLight(0x6060a0, 1.2);
         this.scene.add(ambient);
         
-        // Main spotlight (arena style)
-        const mainLight = new THREE.SpotLight(0xffffff, 2, 50, Math.PI / 4, 0.5);
-        mainLight.position.set(0, 20, 0);
+        // Main spotlight (arena style) - BRIGHTER
+        const mainLight = new THREE.SpotLight(0xffffff, 3, 60, Math.PI / 3, 0.3);
+        mainLight.position.set(0, 25, 0);
         mainLight.castShadow = true;
         mainLight.shadow.mapSize.width = 2048;
         mainLight.shadow.mapSize.height = 2048;
         this.scene.add(mainLight);
         
-        // Corner spotlights (colored)
+        // Second overhead light for more coverage
+        const overheadLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        overheadLight.position.set(0, 20, 5);
+        overheadLight.castShadow = true;
+        this.scene.add(overheadLight);
+        
+        // Corner spotlights (colored) - BRIGHTER
         const cornerColors = [0xff3366, 0x00ffcc, 0xffcc00, 0x9966ff];
         const corners = [
             [-ARENA_CONFIG.RING_SIZE/2, -ARENA_CONFIG.RING_SIZE/2],
@@ -332,19 +338,24 @@ class ArenaGame {
         ];
         
         corners.forEach((corner, i) => {
-            const light = new THREE.PointLight(cornerColors[i], 0.8, 15);
-            light.position.set(corner[0], 8, corner[1]);
+            const light = new THREE.PointLight(cornerColors[i], 1.5, 25);
+            light.position.set(corner[0], 10, corner[1]);
             this.scene.add(light);
         });
         
-        // Rim lights for drama
-        const rimLight1 = new THREE.DirectionalLight(0xff3366, 0.5);
-        rimLight1.position.set(-10, 5, -10);
+        // Rim lights for drama - STRONGER
+        const rimLight1 = new THREE.DirectionalLight(0xff3366, 1.0);
+        rimLight1.position.set(-15, 8, -15);
         this.scene.add(rimLight1);
         
-        const rimLight2 = new THREE.DirectionalLight(0x00ffcc, 0.5);
-        rimLight2.position.set(10, 5, 10);
+        const rimLight2 = new THREE.DirectionalLight(0x00ffcc, 1.0);
+        rimLight2.position.set(15, 8, 15);
         this.scene.add(rimLight2);
+        
+        // Additional fill light from front
+        const fillLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        fillLight.position.set(0, 10, 20);
+        this.scene.add(fillLight);
     }
     
     createRing() {
@@ -1023,23 +1034,51 @@ class ArenaGame {
     }
     
     checkRingBoundaries() {
-        const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.5;
+        const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.8; // Rope boundary
+        const ringBounce = 0.3; // Bounce back force when hitting ropes
         
         this.players.forEach(player => {
             const pos = player.controller.position;
+            const vel = player.controller.velocity;
             
-            // Check if outside ring
-            if (Math.abs(pos.x) > ringHalf || Math.abs(pos.z) > ringHalf) {
-                // Player is near/at edge - could implement ring-out here
-                player.controller.isNearEdge = true;
-            } else {
-                player.controller.isNearEdge = false;
+            // Check and enforce rope boundaries (can't go through ropes)
+            let hitRope = false;
+            
+            // Left rope
+            if (pos.x < -ringHalf) {
+                pos.x = -ringHalf;
+                vel.x = Math.abs(vel.x) * ringBounce; // Bounce back
+                hitRope = true;
+            }
+            // Right rope
+            if (pos.x > ringHalf) {
+                pos.x = ringHalf;
+                vel.x = -Math.abs(vel.x) * ringBounce;
+                hitRope = true;
+            }
+            // Front rope (near camera)
+            if (pos.z > ringHalf) {
+                pos.z = ringHalf;
+                vel.z = -Math.abs(vel.z) * ringBounce;
+                hitRope = true;
+            }
+            // Back rope (far from camera)
+            if (pos.z < -ringHalf) {
+                pos.z = -ringHalf;
+                vel.z = Math.abs(vel.z) * ringBounce;
+                hitRope = true;
             }
             
-            // Clamp to max arena bounds (outside ring but not infinite)
-            const maxBound = ARENA_CONFIG.RING_SIZE / 2 + ARENA_CONFIG.RING_OUT_ZONE;
-            pos.x = THREE.MathUtils.clamp(pos.x, -maxBound, maxBound);
-            pos.z = THREE.MathUtils.clamp(pos.z, -maxBound, maxBound);
+            // Set near edge status (for visual warnings)
+            const edgeDistance = 1.5;
+            player.controller.isNearEdge = 
+                Math.abs(pos.x) > ringHalf - edgeDistance ||
+                Math.abs(pos.z) > ringHalf - edgeDistance;
+            
+            // Play bounce sound effect if hit rope
+            if (hitRope && this.sfxManager && Math.abs(vel.x) + Math.abs(vel.z) > 2) {
+                this.sfxManager.playBlock();
+            }
         });
     }
     

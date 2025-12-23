@@ -688,6 +688,23 @@ body {
     box-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
 }
 
+/* G button - Grab (Arena mode only - Purple) */
+.btn-grab {
+    grid-column: 3;
+    grid-row: 3;
+    border-color: #9966ff;
+    color: #9966ff;
+    display: none; /* Hidden by default, shown in Arena mode */
+}
+
+.btn-grab:active,
+.btn-grab.pressed {
+    background: #9966ff;
+    color: var(--dark);
+    transform: scale(0.95);
+    box-shadow: 0 0 20px rgba(153, 102, 255, 0.5);
+}
+
 /* A button - right (Pink/Red - Punch) */
 .btn-a {
     grid-column: 3;
