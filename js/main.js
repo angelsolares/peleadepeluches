@@ -1688,11 +1688,295 @@ function triggerHitEffect(playerId) {
 }
 
 function triggerKOEffect(playerId) {
+    const player = players.get(playerId);
     const hud = document.getElementById(`hud-${playerId}`);
+    
     if (hud) {
         hud.classList.add('ko');
         setTimeout(() => hud.classList.remove('ko'), 1500);
     }
+    
+    // Get player's last position for particle effect
+    let effectPosition = new THREE.Vector3(0, -5, 0);
+    let playerColor = 0xff3366;
+    
+    if (player) {
+        effectPosition.copy(player.controller.position);
+        // Clamp to screen edges for effect
+        effectPosition.x = Math.max(-10, Math.min(10, effectPosition.x));
+        effectPosition.y = Math.max(-8, Math.min(12, effectPosition.y));
+        
+        // Get player color
+        const colorIndex = player.controller.playerNumber - 1;
+        const colors = [0xff3366, 0x00ffcc, 0xffcc00, 0x9966ff];
+        playerColor = colors[colorIndex] || 0xff3366;
+    }
+    
+    // Create explosion particles
+    createKOExplosion(effectPosition, playerColor);
+    
+    // Intense screen shake
+    triggerScreenShake(0.8, 500);
+    
+    // Screen flash
+    triggerScreenFlash(playerColor);
+}
+
+/**
+ * Create explosion particle effect at position (Smash Bros style)
+ */
+function createKOExplosion(position, color) {
+    const particleCount = 50;
+    const particles = [];
+    
+    // Create particle geometry
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    const velocities = [];
+    
+    const baseColor = new THREE.Color(color);
+    const whiteColor = new THREE.Color(0xffffff);
+    
+    for (let i = 0; i < particleCount; i++) {
+        // Start position (slightly randomized around impact point)
+        positions[i * 3] = position.x + (Math.random() - 0.5) * 0.5;
+        positions[i * 3 + 1] = position.y + (Math.random() - 0.5) * 0.5;
+        positions[i * 3 + 2] = position.z + (Math.random() - 0.5) * 0.5;
+        
+        // Random color between player color and white
+        const mixRatio = Math.random() * 0.5;
+        const particleColor = baseColor.clone().lerp(whiteColor, mixRatio);
+        colors[i * 3] = particleColor.r;
+        colors[i * 3 + 1] = particleColor.g;
+        colors[i * 3 + 2] = particleColor.b;
+        
+        // Random size
+        sizes[i] = Math.random() * 0.5 + 0.2;
+        
+        // Explosion velocity (outward burst)
+        const angle = Math.random() * Math.PI * 2;
+        const upAngle = Math.random() * Math.PI - Math.PI / 4; // Mostly upward
+        const speed = Math.random() * 15 + 8;
+        
+        velocities.push({
+            x: Math.cos(angle) * Math.cos(upAngle) * speed,
+            y: Math.abs(Math.sin(upAngle)) * speed + 5, // Mostly upward
+            z: Math.sin(angle) * Math.cos(upAngle) * speed * 0.3
+        });
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    // Particle material
+    const material = new THREE.PointsMaterial({
+        size: 0.4,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    
+    const particleSystem = new THREE.Points(geometry, material);
+    scene.add(particleSystem);
+    
+    // Create star/spark sprites for extra effect
+    const starSprites = [];
+    for (let i = 0; i < 8; i++) {
+        const starGeometry = new THREE.PlaneGeometry(1, 1);
+        const starMaterial = new THREE.MeshBasicMaterial({
+            color: i % 2 === 0 ? color : 0xffffff,
+            transparent: true,
+            opacity: 1,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        
+        const star = new THREE.Mesh(starGeometry, starMaterial);
+        star.position.copy(position);
+        star.rotation.z = Math.random() * Math.PI;
+        
+        const angle = (i / 8) * Math.PI * 2;
+        star.userData = {
+            vx: Math.cos(angle) * 12,
+            vy: Math.sin(angle) * 8 + 6,
+            vz: 0,
+            rotSpeed: (Math.random() - 0.5) * 10
+        };
+        
+        scene.add(star);
+        starSprites.push(star);
+    }
+    
+    // Animate particles
+    let elapsed = 0;
+    const duration = 1.5;
+    const gravity = -25;
+    
+    const animateParticles = () => {
+        elapsed += 0.016;
+        const progress = elapsed / duration;
+        
+        if (progress >= 1) {
+            scene.remove(particleSystem);
+            geometry.dispose();
+            material.dispose();
+            
+            starSprites.forEach(star => {
+                scene.remove(star);
+                star.geometry.dispose();
+                star.material.dispose();
+            });
+            return;
+        }
+        
+        // Update particle positions
+        const posAttr = geometry.getAttribute('position');
+        for (let i = 0; i < particleCount; i++) {
+            velocities[i].y += gravity * 0.016;
+            
+            posAttr.array[i * 3] += velocities[i].x * 0.016;
+            posAttr.array[i * 3 + 1] += velocities[i].y * 0.016;
+            posAttr.array[i * 3 + 2] += velocities[i].z * 0.016;
+        }
+        posAttr.needsUpdate = true;
+        
+        // Update star sprites
+        starSprites.forEach(star => {
+            star.userData.vy += gravity * 0.016;
+            star.position.x += star.userData.vx * 0.016;
+            star.position.y += star.userData.vy * 0.016;
+            star.rotation.z += star.userData.rotSpeed * 0.016;
+            star.scale.setScalar(1 - progress * 0.5);
+            star.material.opacity = 1 - progress;
+        });
+        
+        // Fade out particles
+        material.opacity = 1 - progress;
+        
+        requestAnimationFrame(animateParticles);
+    };
+    
+    animateParticles();
+    
+    // Create shockwave ring
+    createShockwave(position, color);
+}
+
+/**
+ * Create expanding shockwave ring
+ */
+function createShockwave(position, color) {
+    const ringGeometry = new THREE.RingGeometry(0.1, 0.3, 32);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.position.copy(position);
+    ring.rotation.x = -Math.PI / 2; // Lay flat
+    scene.add(ring);
+    
+    let elapsed = 0;
+    const duration = 0.6;
+    
+    const animateRing = () => {
+        elapsed += 0.016;
+        const progress = elapsed / duration;
+        
+        if (progress >= 1) {
+            scene.remove(ring);
+            ringGeometry.dispose();
+            ringMaterial.dispose();
+            return;
+        }
+        
+        // Expand ring
+        const scale = 1 + progress * 8;
+        ring.scale.set(scale, scale, 1);
+        
+        // Fade out
+        ringMaterial.opacity = 0.8 * (1 - progress);
+        
+        requestAnimationFrame(animateRing);
+    };
+    
+    animateRing();
+}
+
+/**
+ * Trigger screen shake effect
+ */
+function triggerScreenShake(intensity = 0.5, duration = 300) {
+    const container = document.getElementById('game-container');
+    if (!container) return;
+    
+    const startTime = Date.now();
+    const originalTransform = container.style.transform;
+    
+    const shake = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = elapsed / duration;
+        
+        if (progress >= 1) {
+            container.style.transform = originalTransform || '';
+            return;
+        }
+        
+        // Decreasing intensity over time
+        const currentIntensity = intensity * (1 - progress);
+        const offsetX = (Math.random() - 0.5) * 20 * currentIntensity;
+        const offsetY = (Math.random() - 0.5) * 20 * currentIntensity;
+        
+        container.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+        
+        requestAnimationFrame(shake);
+    };
+    
+    shake();
+}
+
+/**
+ * Trigger screen flash effect
+ */
+function triggerScreenFlash(color) {
+    const flash = document.createElement('div');
+    flash.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: #${color.toString(16).padStart(6, '0')};
+        opacity: 0.6;
+        pointer-events: none;
+        z-index: 9999;
+        mix-blend-mode: screen;
+    `;
+    document.body.appendChild(flash);
+    
+    let opacity = 0.6;
+    const fadeOut = () => {
+        opacity -= 0.05;
+        if (opacity <= 0) {
+            flash.remove();
+            return;
+        }
+        flash.style.opacity = opacity;
+        requestAnimationFrame(fadeOut);
+    };
+    
+    requestAnimationFrame(fadeOut);
 }
 
 function showFightAnnouncement() {
