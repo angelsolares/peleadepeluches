@@ -1839,12 +1839,34 @@ class ArenaGame {
     }
     
     handleArenaGameOver(data) {
-        console.log('[Arena] Game Over:', data);
+        console.log('[Arena] Game Over from server:', data);
+        
+        // Don't show twice
+        if (this.gameState === 'finished') {
+            console.log('[Arena] Game already finished, ignoring duplicate');
+            return;
+        }
+        
         this.gameState = 'finished';
         
-        // Show winner announcement
+        // Show full victory screen with confetti
         if (data.winner) {
-            this.showRoundAnnouncement(`¡${data.winner.name} GANA!`);
+            // Find the winner player entity
+            let winnerPlayer = null;
+            this.players.forEach((player, playerId) => {
+                if (player.name === data.winner.name || playerId === data.winner.id) {
+                    winnerPlayer = player;
+                }
+            });
+            
+            const winnerData = {
+                id: data.winner.id,
+                name: data.winner.name,
+                player: winnerPlayer
+            };
+            
+            console.log('[Arena] Showing victory screen for:', winnerData.name);
+            this.showVictoryScreen(winnerData);
         } else {
             this.showRoundAnnouncement('¡EMPATE!');
         }
