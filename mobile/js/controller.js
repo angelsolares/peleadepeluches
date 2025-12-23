@@ -544,6 +544,22 @@ function handleArenaState(data) {
                 updateGrabButtonState();
             }
         }
+        
+        // Update grabbed state from server (sync in case of auto-release)
+        if (myState.isGrabbed !== undefined) {
+            if (isGrabbed && !myState.isGrabbed) {
+                // We were grabbed but now we're not - grab was released
+                console.log('[Arena] Grab auto-released by server');
+                isGrabbed = false;
+                hideEscapeUI();
+            } else if (!isGrabbed && myState.isGrabbed) {
+                // Server says we're grabbed but we didn't know - show escape UI
+                console.log('[Arena] Grab detected from server state');
+                isGrabbed = true;
+                escapeProgress = 0;
+                showEscapeUI();
+            }
+        }
     }
 }
 
