@@ -32,9 +32,10 @@ class LobbyManager {
     /**
      * Create a new room
      * @param {string} hostSocketId - Socket ID of the host (main screen)
+     * @param {string} gameMode - Game mode ('smash' or 'arena')
      * @returns {object} Room info
      */
-    createRoom(hostSocketId) {
+    createRoom(hostSocketId, gameMode = 'smash') {
         // Generate unique room code
         let roomCode;
         do {
@@ -46,6 +47,7 @@ class LobbyManager {
             hostId: hostSocketId,
             players: new Map(),
             state: 'lobby', // 'lobby', 'playing', 'finished'
+            gameMode: gameMode, // 'smash' or 'arena'
             maxPlayers: 4,
             createdAt: Date.now()
         };
@@ -53,11 +55,12 @@ class LobbyManager {
         this.rooms.set(roomCode, room);
         this.playerRooms.set(hostSocketId, roomCode);
         
-        console.log(`[Lobby] Room ${roomCode} created by host ${hostSocketId}`);
+        console.log(`[Lobby] Room ${roomCode} created by host ${hostSocketId} with mode: ${gameMode}`);
         
         return {
             success: true,
             roomCode: roomCode,
+            gameMode: gameMode,
             room: this.getRoomInfo(roomCode)
         };
     }
@@ -194,6 +197,7 @@ class LobbyManager {
         return {
             code: room.code,
             state: room.state,
+            gameMode: room.gameMode || 'smash',
             playerCount: room.players.size,
             maxPlayers: room.maxPlayers,
             players: Array.from(room.players.values()).map(p => ({

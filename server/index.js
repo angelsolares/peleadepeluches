@@ -9,6 +9,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import LobbyManager from './lobbyManager.js';
 import GameStateManager from './gameState.js';
+import ArenaStateManager from './arenaState.js';
 
 // Configuration
 const PORT = process.env.PORT || 3001;
@@ -33,9 +34,13 @@ const io = new Server(httpServer, {
 // Initialize managers
 const lobbyManager = new LobbyManager();
 const gameStateManager = new GameStateManager(lobbyManager);
+const arenaStateManager = new ArenaStateManager(lobbyManager);
 
 // Game tick intervals per room
 const gameLoops = new Map();
+
+// Arena game loops (separate from smash)
+const arenaLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -72,17 +77,31 @@ io.on('connection', (socket) => {
     
     /**
      * Create a new game room
+     * @param {object|function} dataOrCallback - Either { gameMode: 'smash'|'arena' } or callback for backward compatibility
+     * @param {function} callback - Callback function
      */
-    socket.on('create-room', (callback) => {
-        const result = lobbyManager.createRoom(socket.id);
+    socket.on('create-room', (dataOrCallback, callback) => {
+        // Handle both old format (just callback) and new format (data + callback)
+        let gameMode = 'smash';
+        let actualCallback = callback;
+        
+        if (typeof dataOrCallback === 'function') {
+            // Old format: create-room with just callback
+            actualCallback = dataOrCallback;
+        } else if (dataOrCallback && typeof dataOrCallback === 'object') {
+            // New format: create-room with data object
+            gameMode = dataOrCallback.gameMode || 'smash';
+        }
+        
+        const result = lobbyManager.createRoom(socket.id, gameMode);
         
         if (result.success) {
             socket.join(result.roomCode);
-            console.log(`[Socket] Room ${result.roomCode} created`);
+            console.log(`[Socket] Room ${result.roomCode} created with mode: ${gameMode}`);
         }
         
-        if (typeof callback === 'function') {
-            callback(result);
+        if (typeof actualCallback === 'function') {
+            actualCallback(result);
         }
     });
     
@@ -112,12 +131,22 @@ io.on('connection', (socket) => {
         
         if (result.success) {
             // Notify all players in room
-            io.to(roomCode).emit('game-started', result);
+            io.to(roomCode).emit('game-started', {
+                ...result,
+                gameMode: room.gameMode || 'smash'
+            });
             
-            // Start game loop for this room
-            startGameLoop(roomCode);
-            
-            console.log(`[Socket] Game started in room ${roomCode}`);
+            // Start appropriate game loop based on mode
+            if (room.gameMode === 'arena') {
+                // Initialize arena state
+                arenaStateManager.initializeArena(roomCode);
+                startArenaLoop(roomCode);
+                console.log(`[Socket] Arena game started in room ${roomCode}`);
+            } else {
+                // Start smash game loop
+                startGameLoop(roomCode);
+                console.log(`[Socket] Smash game started in room ${roomCode}`);
+            }
         }
         
         if (typeof callback === 'function') {
@@ -278,6 +307,96 @@ io.on('connection', (socket) => {
         });
     });
     
+    // ========== ARENA MODE EVENTS ==========
+    
+    /**
+     * Arena attack action (punch/kick with 360 detection)
+     */
+    socket.on('arena-attack', (attackType, callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        
+        if (!roomCode) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Not in a room' });
+            }
+            return;
+        }
+        
+        const attackInfo = arenaStateManager.queueAttack(socket.id, attackType, roomCode);
+        
+        if (attackInfo) {
+            // Broadcast attack started for animation
+            io.to(roomCode).emit('arena-attack-started', attackInfo);
+        }
+        
+        if (typeof callback === 'function') {
+            callback({ success: !!attackInfo, attackInfo });
+        }
+    });
+    
+    /**
+     * Arena grab attempt
+     */
+    socket.on('arena-grab', (callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        
+        if (!roomCode) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Not in a room' });
+            }
+            return;
+        }
+        
+        const grabInfo = arenaStateManager.processGrab(socket.id, roomCode);
+        
+        if (grabInfo) {
+            io.to(roomCode).emit('arena-grab', grabInfo);
+        }
+        
+        if (typeof callback === 'function') {
+            callback({ success: !!grabInfo, grabInfo });
+        }
+    });
+    
+    /**
+     * Arena throw (when grabbing another player)
+     */
+    socket.on('arena-throw', (direction, callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        
+        if (!roomCode) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Not in a room' });
+            }
+            return;
+        }
+        
+        const throwInfo = arenaStateManager.processThrow(socket.id, roomCode, direction);
+        
+        if (throwInfo) {
+            io.to(roomCode).emit('arena-throw', throwInfo);
+        }
+        
+        if (typeof callback === 'function') {
+            callback({ success: !!throwInfo, throwInfo });
+        }
+    });
+    
+    /**
+     * Arena block state
+     */
+    socket.on('arena-block', (isBlocking) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        arenaStateManager.setPlayerBlocking(socket.id, roomCode, isBlocking);
+        
+        io.to(roomCode).emit('arena-block-state', {
+            playerId: socket.id,
+            isBlocking: isBlocking
+        });
+    });
+    
     // ========== COMMON EVENTS ==========
     
     /**
@@ -414,6 +533,57 @@ function stopGameLoop(roomCode) {
         clearInterval(loop);
         gameLoops.delete(roomCode);
         console.log(`[Game] Stopped game loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start arena game loop for a room
+ */
+function startArenaLoop(roomCode) {
+    // Stop existing loop if any
+    stopArenaLoop(roomCode);
+    
+    const tickRate = 1000 / 60; // 60 FPS
+    
+    const loop = setInterval(() => {
+        const state = arenaStateManager.processTick(roomCode);
+        
+        if (state) {
+            // Send state to all clients in room
+            io.to(roomCode).emit('arena-state', state);
+            
+            // Process pending attacks (active frames system)
+            const attackResults = arenaStateManager.processPendingAttacks(roomCode);
+            for (const result of attackResults) {
+                io.to(roomCode).emit('arena-attack-hit', result);
+            }
+            
+            // Check for game over
+            const gameOver = arenaStateManager.checkGameOver(roomCode);
+            if (gameOver) {
+                stopArenaLoop(roomCode);
+                io.to(roomCode).emit('arena-game-over', gameOver);
+            }
+        } else {
+            // Room no longer active
+            stopArenaLoop(roomCode);
+        }
+    }, tickRate);
+    
+    arenaLoops.set(roomCode, loop);
+    console.log(`[Arena] Started arena loop for room ${roomCode}`);
+}
+
+/**
+ * Stop arena game loop for a room
+ */
+function stopArenaLoop(roomCode) {
+    const loop = arenaLoops.get(roomCode);
+    
+    if (loop) {
+        clearInterval(loop);
+        arenaLoops.delete(roomCode);
+        console.log(`[Arena] Stopped arena loop for room ${roomCode}`);
     }
 }
 

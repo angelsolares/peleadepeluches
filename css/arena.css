@@ -1,0 +1,313 @@
+/* ==================================
+   ARENA DE PELUCHES - Arena Mode Styles
+   ================================== */
+
+/* Override title for Arena mode */
+.game-title {
+    background: linear-gradient(135deg, #00ffcc, #9966ff, #ff3366);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ==================================
+   Arena Player HUD (Health + Stamina)
+   ================================== */
+
+#arena-player-huds {
+    position: absolute;
+    top: 80px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    padding: 0 20px;
+    pointer-events: none;
+    flex-wrap: wrap;
+}
+
+.arena-player-hud {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 220px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px 20px;
+    border-radius: 16px;
+    backdrop-filter: blur(8px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+}
+
+.arena-player-hud.eliminated {
+    opacity: 0.4;
+    transform: scale(0.95);
+}
+
+.arena-hud-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    width: 100%;
+}
+
+.arena-player-badge {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 0.9rem;
+    color: var(--dark-bg);
+}
+
+.arena-player-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    flex: 1;
+}
+
+/* Health Bar */
+.arena-health-container {
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.arena-health-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 4px;
+}
+
+.arena-health-bar {
+    width: 100%;
+    height: 16px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    position: relative;
+}
+
+.arena-health-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00ff00, #88ff00);
+    transition: width 0.3s ease, background 0.3s ease;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+}
+
+.arena-health-fill.medium {
+    background: linear-gradient(90deg, #ffcc00, #ff9900);
+    box-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+}
+
+.arena-health-fill.low {
+    background: linear-gradient(90deg, #ff6600, #ff3300);
+    box-shadow: 0 0 10px rgba(255, 51, 0, 0.5);
+}
+
+.arena-health-fill.critical {
+    background: linear-gradient(90deg, #ff0000, #cc0000);
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+    animation: health-pulse 0.5s ease infinite;
+}
+
+@keyframes health-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Stamina Bar */
+.arena-stamina-container {
+    width: 100%;
+}
+
+.arena-stamina-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 4px;
+}
+
+.arena-stamina-bar {
+    width: 100%;
+    height: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 5px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.arena-stamina-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00bfff, #0080ff);
+    transition: width 0.15s ease;
+    border-radius: 5px;
+    box-shadow: 0 0 8px rgba(0, 191, 255, 0.4);
+}
+
+.arena-stamina-fill.exhausted {
+    background: linear-gradient(90deg, #666, #444);
+    box-shadow: none;
+}
+
+/* ==================================
+   Arena Ring Indicator (Mini-map style)
+   ================================== */
+
+.arena-minimap {
+    position: absolute;
+    bottom: 100px;
+    right: 20px;
+    width: 150px;
+    height: 150px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid rgba(0, 255, 204, 0.5);
+    border-radius: 12px;
+    padding: 10px;
+    pointer-events: none;
+}
+
+.arena-minimap-ring {
+    width: 100%;
+    height: 100%;
+    border: 3px solid #ffcc00;
+    border-radius: 4px;
+    position: relative;
+}
+
+.arena-minimap-player {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 8px currentColor;
+}
+
+/* ==================================
+   Status Indicators
+   ================================== */
+
+.arena-status-indicator {
+    position: absolute;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    animation: status-fade 1.5s ease forwards;
+}
+
+.arena-status-indicator.stunned {
+    background: rgba(255, 204, 0, 0.9);
+    color: #000;
+}
+
+.arena-status-indicator.grabbed {
+    background: rgba(255, 51, 102, 0.9);
+    color: #fff;
+}
+
+.arena-status-indicator.exhausted {
+    background: rgba(100, 100, 100, 0.9);
+    color: #fff;
+}
+
+@keyframes status-fade {
+    0% { opacity: 0; transform: translateY(10px); }
+    20% { opacity: 1; transform: translateY(0); }
+    80% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* ==================================
+   Arena Round/Match Display
+   ================================== */
+
+.arena-round-display {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 4rem;
+    font-weight: 900;
+    color: #ffcc00;
+    text-shadow: 0 0 40px rgba(255, 204, 0, 0.8);
+    z-index: 50;
+    pointer-events: none;
+    animation: round-announce 2s ease forwards;
+}
+
+@keyframes round-announce {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(3);
+    }
+    30% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+    70% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.8);
+    }
+}
+
+/* ==================================
+   Arena-specific Responsive Design
+   ================================== */
+
+@media (max-width: 768px) {
+    #arena-player-huds {
+        top: 70px;
+        gap: 15px;
+    }
+    
+    .arena-player-hud {
+        min-width: 150px;
+        padding: 10px 15px;
+    }
+    
+    .arena-player-badge {
+        width: 28px;
+        height: 28px;
+        font-size: 0.75rem;
+    }
+    
+    .arena-player-name {
+        font-size: 0.75rem;
+    }
+    
+    .arena-health-bar {
+        height: 12px;
+    }
+    
+    .arena-stamina-bar {
+        height: 8px;
+    }
+    
+    .arena-minimap {
+        width: 100px;
+        height: 100px;
+        bottom: 80px;
+        right: 10px;
+    }
+}
+

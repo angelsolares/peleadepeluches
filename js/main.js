@@ -9,9 +9,14 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL, CONFIG } from './config.js';
 import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animation/AnimationController.js';
+import ModeSelector, { GAME_MODES } from './modes/ModeSelector.js';
 
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
+
+// Mode Selector
+let modeSelector = null;
+let selectedGameMode = GAME_MODES.SMASH;
 
 // SFX Manager will be loaded dynamically
 let SFXManager = null;
@@ -662,10 +667,39 @@ const progressFill = document.getElementById('progress-fill');
 const animationNameDisplay = document.getElementById('animation-name');
 
 // =================================
+// Mode Selection
+// =================================
+
+/**
+ * Show mode selector and wait for user selection
+ * @returns {Promise<string>} Selected game mode
+ */
+function showModeSelector() {
+    return new Promise((resolve) => {
+        modeSelector = new ModeSelector((mode) => {
+            selectedGameMode = mode;
+            console.log(`[Game] Mode selected: ${mode}`);
+            resolve(mode);
+        });
+        modeSelector.show();
+    });
+}
+
+// =================================
 // Initialization
 // =================================
 
 async function init() {
+    // Show mode selector first
+    await showModeSelector();
+    
+    // If Arena mode was selected, redirect to arena.html
+    if (selectedGameMode === GAME_MODES.ARENA) {
+        window.location.href = 'arena.html';
+        return;
+    }
+    
+    // Continue with Smash mode initialization
     // Create scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a2e);
@@ -1465,11 +1499,11 @@ function initializeSocket() {
         console.log('[Socket] Connected to server');
         isHost = true;
         
-        // Create room as host (host is display only, not a player)
-        socket.emit('create-room', (response) => {
+        // Create room as host with selected game mode (host is display only, not a player)
+        socket.emit('create-room', { gameMode: selectedGameMode }, (response) => {
             if (response.success) {
                 roomCode = response.roomCode;
-                console.log(`[Socket] Room created: ${roomCode}`);
+                console.log(`[Socket] Room created: ${roomCode} with mode: ${selectedGameMode}`);
                 updateAnimationDisplay(`Sala: ${roomCode} - Esperando jugadores...`);
                 showRoomCode(roomCode);
             } else {

@@ -73,6 +73,7 @@ let roomCode = null;
 let isReady = false;
 let isConnected = false;
 let selectedCharacter = 'edgar'; // Default character
+let gameMode = 'smash'; // 'smash' or 'arena'
 
 // Available characters
 const CHARACTERS = {
@@ -92,10 +93,12 @@ const CHARACTERS = {
 // Track which characters are taken by other players
 let takenCharacters = {};
 
-// Input state
+// Input state (supports both Smash and Arena modes)
 const inputState = {
     left: false,
     right: false,
+    up: false,     // Used for jump in Smash, movement in Arena
+    down: false,   // Used for run in Smash, movement in Arena
     jump: false,
     run: false,
     block: false
@@ -148,6 +151,10 @@ function connectToServer() {
     socket.on('character-selected', handleCharacterSelected);
     socket.on('character-deselected', handleCharacterDeselected);
     socket.on('character-selection-update', handleCharacterSelectionUpdate);
+    
+    // Arena mode events
+    socket.on('arena-state', handleArenaState);
+    socket.on('arena-game-over', handleGameOver);
 }
 
 function updateConnectionStatus(status, text) {
@@ -390,7 +397,12 @@ function handleReadyChanged(data) {
 }
 
 function handleGameStarted(data) {
-    console.log('[Game] Game started!');
+    console.log('[Game] Game started!', data);
+    
+    // Store game mode
+    gameMode = data.gameMode || 'smash';
+    console.log('[Game] Mode:', gameMode);
+    
     showScreen('controller');
     
     // Update controller UI with player info
@@ -399,8 +411,50 @@ function handleGameStarted(data) {
         elements.controllerBadge.style.background = `linear-gradient(135deg, ${playerData.color}, var(--accent))`;
     }
     
-    updateStocks(3);
+    // Update UI based on game mode
+    updateControllerUIForMode();
+    
+    if (gameMode === 'smash') {
+        updateStocks(3);
+    }
+    
     triggerHaptic();
+}
+
+function updateControllerUIForMode() {
+    const dpadUp = document.querySelector('.dpad-up');
+    const dpadDown = document.querySelector('.dpad-down');
+    const healthLabel = document.querySelector('.health-label');
+    const stocksDisplay = elements.stocksDisplay;
+    
+    if (gameMode === 'arena') {
+        // Arena mode: D-pad controls all 4 directions
+        if (dpadUp) {
+            dpadUp.dataset.input = 'up';
+            const label = dpadUp.querySelector('.label');
+            if (label) label.remove();
+        }
+        if (dpadDown) {
+            dpadDown.dataset.input = 'down';
+            const label = dpadDown.querySelector('.label');
+            if (label) label.textContent = '';
+        }
+        
+        // Change health display for Arena mode
+        if (healthLabel) healthLabel.textContent = 'VIDA';
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+    } else {
+        // Smash mode: Up = jump, Down = run
+        if (dpadUp) {
+            dpadUp.dataset.input = 'jump';
+        }
+        if (dpadDown) {
+            dpadDown.dataset.input = 'run';
+        }
+        
+        if (healthLabel) healthLabel.textContent = 'DAÑO';
+        if (stocksDisplay) stocksDisplay.style.display = 'flex';
+    }
 }
 
 function handleGameState(data) {
@@ -408,16 +462,57 @@ function handleGameState(data) {
     const myState = data.players.find(p => p.id === socket.id);
     
     if (myState) {
-        // Update damage display
-        elements.playerDamage.textContent = `${Math.floor(myState.health)}%`;
+        if (gameMode === 'arena') {
+            // Arena mode: Show health percentage (100 = full health)
+            const healthPercent = Math.floor((myState.health / 100) * 100);
+            elements.playerDamage.textContent = `${healthPercent}%`;
+            
+            // Change color based on health
+            if (healthPercent > 60) {
+                elements.playerDamage.style.color = 'var(--secondary)';
+            } else if (healthPercent > 30) {
+                elements.playerDamage.style.color = 'var(--accent)';
+            } else {
+                elements.playerDamage.style.color = 'var(--primary)';
+            }
+        } else {
+            // Smash mode: Show damage (higher = worse)
+            elements.playerDamage.textContent = `${Math.floor(myState.health)}%`;
+            
+            // Change color based on damage
+            if (myState.health > 100) {
+                elements.playerDamage.style.color = 'var(--primary)';
+            } else if (myState.health > 50) {
+                elements.playerDamage.style.color = 'var(--accent)';
+            } else {
+                elements.playerDamage.style.color = 'var(--secondary)';
+            }
+        }
+    }
+}
+
+// Handle Arena-specific state updates
+function handleArenaState(data) {
+    const myState = data.players.find(p => p.id === socket.id);
+    
+    if (myState) {
+        // Show health percentage
+        const healthPercent = Math.floor(myState.health);
+        elements.playerDamage.textContent = `${healthPercent}%`;
         
-        // Change color based on damage
-        if (myState.health > 100) {
-            elements.playerDamage.style.color = 'var(--primary)';
-        } else if (myState.health > 50) {
+        // Change color based on health
+        if (healthPercent > 60) {
+            elements.playerDamage.style.color = 'var(--secondary)';
+        } else if (healthPercent > 30) {
             elements.playerDamage.style.color = 'var(--accent)';
         } else {
-            elements.playerDamage.style.color = 'var(--secondary)';
+            elements.playerDamage.style.color = 'var(--primary)';
+        }
+        
+        // Show eliminated state
+        if (myState.isEliminated) {
+            elements.playerDamage.textContent = 'X';
+            elements.playerDamage.style.color = 'var(--primary)';
         }
     }
 }
@@ -568,13 +663,29 @@ function handleInputEnd(inputType, btn) {
 function handleAction(action, btn) {
     btn.classList.add('pressed');
     
-    // Taunt uses a different event
-    if (action === 'taunt') {
-        socket.emit('player-taunt');
+    // Handle actions based on game mode
+    if (gameMode === 'arena') {
+        // Arena mode events
+        if (action === 'taunt') {
+            socket.emit('player-taunt');
+        } else if (action === 'grab') {
+            socket.emit('arena-grab', (response) => {
+                console.log('[Arena Grab]', response);
+            });
+        } else {
+            socket.emit('arena-attack', action, (response) => {
+                console.log('[Arena Attack]', action, response);
+            });
+        }
     } else {
-        socket.emit('player-attack', action, (response) => {
-            console.log('[Attack]', action, response);
-        });
+        // Smash mode events
+        if (action === 'taunt') {
+            socket.emit('player-taunt');
+        } else {
+            socket.emit('player-attack', action, (response) => {
+                console.log('[Attack]', action, response);
+            });
+        }
     }
     
     // Send input update with action flag
@@ -595,8 +706,12 @@ function handleBlockStart(inputType, btn) {
     btn.classList.add('pressed');
     inputState[inputType] = true;
     
-    // Emit block state to server
-    socket.emit('player-block', true);
+    // Emit block state to server (different event for Arena)
+    if (gameMode === 'arena') {
+        socket.emit('arena-block', true);
+    } else {
+        socket.emit('player-block', true);
+    }
     sendInput();
     triggerHaptic();
 }
@@ -606,7 +721,11 @@ function handleBlockEnd(inputType, btn) {
     inputState[inputType] = false;
     
     // Emit block release to server
-    socket.emit('player-block', false);
+    if (gameMode === 'arena') {
+        socket.emit('arena-block', false);
+    } else {
+        socket.emit('player-block', false);
+    }
     sendInput();
 }
 
@@ -639,6 +758,7 @@ function resetState() {
     isReady = false;
     selectedCharacter = null;
     takenCharacters = {};
+    gameMode = 'smash';
     Object.keys(inputState).forEach(key => inputState[key] = false);
     
     elements.roomCodeInput.value = '';
