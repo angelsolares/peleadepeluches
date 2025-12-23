@@ -451,7 +451,9 @@ const ANIMATION_FILES = {
     punch: 'Meshy_AI_Animation_Left_Uppercut_from_Guard_withSkin.fbx',
     kick: 'Meshy_AI_Animation_Boxing_Guard_Right_Straight_Kick_withSkin.fbx',
     hit: 'Meshy_AI_Animation_Hit_Reaction_1_withSkin.fbx',
-    fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+    fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
+    block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
+    taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx'
 };
 
 // Player colors

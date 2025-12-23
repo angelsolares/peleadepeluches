@@ -587,6 +587,12 @@ function handleKeyDown(e) {
         case 'f':
             playAnimation('fall');
             break;
+        case 'l':
+            playAnimation('block');
+            break;
+        case 't':
+            playAnimation('taunt');
+            break;
         case 'arrowleft':
             e.preventDefault();
             setMovement('left', true);
