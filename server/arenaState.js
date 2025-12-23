@@ -20,14 +20,15 @@ const ARENA_CONFIG = {
     // Health & Stamina
     MAX_HEALTH: 100,
     MAX_STAMINA: 100,
-    STAMINA_REGEN: 10,
+    STAMINA_REGEN: 5,           // Slower base regen (was 10)
+    STAMINA_REGEN_TAUNT: 25,    // Fast regen when taunting/dancing
     
-    // Stamina costs
-    PUNCH_STAMINA: 15,
-    KICK_STAMINA: 20,
-    GRAB_STAMINA: 25,
-    THROW_STAMINA: 30,
-    BLOCK_STAMINA_PER_SEC: 5,
+    // Stamina costs (increased for faster drain)
+    PUNCH_STAMINA: 20,          // Was 15
+    KICK_STAMINA: 28,           // Was 20
+    GRAB_STAMINA: 35,           // Was 25
+    THROW_STAMINA: 40,          // Was 30
+    BLOCK_STAMINA_PER_SEC: 10,  // Was 5
     
     // Damage
     PUNCH_DAMAGE: 10,
@@ -127,6 +128,8 @@ class ArenaStateManager {
             // State flags
             isAttacking: false,
             isBlocking: false,
+            isTaunting: false,
+            tauntEndTime: 0,
             isGrabbing: false,
             isGrabbed: false,
             isStunned: false,
@@ -287,11 +290,19 @@ class ArenaStateManager {
      */
     updateStamina(playerState, delta) {
         if (playerState.isBlocking) {
+            // Blocking drains stamina
             playerState.stamina = Math.max(
                 0,
                 playerState.stamina - ARENA_CONFIG.BLOCK_STAMINA_PER_SEC * delta
             );
-        } else if (!playerState.isAttacking) {
+        } else if (playerState.isTaunting) {
+            // Taunting/Dancing regenerates stamina FAST
+            playerState.stamina = Math.min(
+                ARENA_CONFIG.MAX_STAMINA,
+                playerState.stamina + ARENA_CONFIG.STAMINA_REGEN_TAUNT * delta
+            );
+        } else if (!playerState.isAttacking && !playerState.isGrabbing) {
+            // Normal slow regeneration when idle
             playerState.stamina = Math.min(
                 ARENA_CONFIG.MAX_STAMINA,
                 playerState.stamina + ARENA_CONFIG.STAMINA_REGEN * delta
@@ -730,6 +741,23 @@ class ArenaStateManager {
         
         attacker.isGrabbing = false;
         attacker.grabbing = null;
+    }
+    
+    /**
+     * Set player taunting state (for stamina boost while dancing)
+     */
+    setPlayerTaunting(socketId, roomCode, isTaunting) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState) return;
+        
+        const playerState = arenaState.players.get(socketId);
+        if (!playerState) return;
+        
+        playerState.isTaunting = isTaunting;
+        
+        if (isTaunting) {
+            console.log(`[Arena] Player ${playerState.name} is taunting (stamina boost active)`);
+        }
     }
     
     /**

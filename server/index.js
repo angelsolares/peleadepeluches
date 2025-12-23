@@ -305,15 +305,24 @@ io.on('connection', (socket) => {
     
     /**
      * Player taunt action (Hip Hop Dance!)
+     * While taunting, stamina regenerates faster
      */
     socket.on('player-taunt', () => {
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
         if (!roomCode) return;
         
+        // Update arena state for stamina boost
+        arenaStateManager.setPlayerTaunting(socket.id, roomCode, true);
+        
         // Broadcast taunt to all clients
         io.to(roomCode).emit('player-taunting', {
             playerId: socket.id
         });
+        
+        // Taunt lasts for 3 seconds for stamina boost
+        setTimeout(() => {
+            arenaStateManager.setPlayerTaunting(socket.id, roomCode, false);
+        }, 3000);
     });
     
     // ========== ARENA MODE EVENTS ==========

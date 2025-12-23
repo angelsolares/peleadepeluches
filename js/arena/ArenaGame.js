@@ -1779,7 +1779,7 @@ class ArenaGame {
     fadeOutPlayer(player) {
         if (!player.model) return;
         
-        const duration = 1500; // ms
+        const duration = 3500; // ms - longer fade out for dramatic effect
         const startTime = Date.now();
         
         const fadeOut = () => {
