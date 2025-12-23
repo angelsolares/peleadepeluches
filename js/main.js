@@ -838,17 +838,26 @@ function addPlayer(playerData) {
     player.name = playerData.name || `Player ${playerData.number}`;
     
     // Set initial position
+    let xPos = 0;
     if (playerData.position) {
         player.controller.position.set(
             playerData.position.x,
             playerData.position.y,
             playerData.position.z
         );
+        xPos = playerData.position.x;
     } else {
         // Spread players out
-        const xPos = (playerData.number - 2.5) * 2;
+        xPos = (playerData.number - 2.5) * 2;
         player.controller.position.set(xPos, 0, 0);
     }
+    
+    // Set initial facing direction: players should face each other
+    // Player on the left faces right, player on the right faces left
+    player.controller.facingRight = xPos < 0;
+    
+    // Apply the facing direction to the model immediately
+    player.model.scale.z = player.controller.facingRight ? -0.01 : 0.01;
     
     scene.add(player.model);
     players.set(playerData.id, player);
@@ -1588,11 +1597,12 @@ function onWindowResize() {
 /**
  * Check and resolve collisions between players
  * Prevents players from walking through each other
+ * Uses smooth collision to avoid shaking
  */
 function checkPlayerCollisions() {
     const playerArray = Array.from(players.values());
-    const COLLISION_RADIUS = 1.0; // Increased from 0.6 - minimum distance between players
-    const MIN_SEPARATION = 0.8;   // Absolute minimum distance to enforce
+    const COLLISION_RADIUS = 0.8; // Distance at which collision starts
+    const PUSH_STRENGTH = 0.15;   // How hard to push (smaller = smoother, less shaking)
     
     for (let i = 0; i < playerArray.length; i++) {
         for (let j = i + 1; j < playerArray.length; j++) {
@@ -1608,27 +1618,32 @@ function checkPlayerCollisions() {
             const verticalOverlap = Math.abs(dy) < 1.5;
             
             if (dist < COLLISION_RADIUS && verticalOverlap) {
-                // Calculate how much to push apart
+                // Calculate overlap amount
                 const overlap = COLLISION_RADIUS - dist;
-                const pushDir = dx === 0 ? 1 : Math.sign(dx); // Default push right if exactly overlapping
+                const pushDir = dx === 0 ? 1 : Math.sign(dx);
                 
-                // Strong push to prevent passing through - always apply
-                const pushAmount = Math.max(overlap / 2 + 0.05, 0.1);
+                // Calculate smooth push amount based on overlap
+                // More overlap = stronger push, but capped to prevent jitter
+                const pushAmount = Math.min(overlap * PUSH_STRENGTH, 0.1);
                 
-                // Apply push to both players (unless being knocked back hard)
-                if (Math.abs(p1.velocity.x) < 10) {
+                // Only push if players are trying to move into each other or standing still
+                const p1MovingToward = p1.velocity.x * pushDir > 0;
+                const p2MovingToward = p2.velocity.x * -pushDir > 0;
+                
+                // Apply gentle push
+                if (Math.abs(p1.velocity.x) < 8 && (p1MovingToward || Math.abs(p1.velocity.x) < 0.5)) {
                     p1.position.x -= pushDir * pushAmount;
+                    // Also reduce velocity toward the other player
+                    if (p1MovingToward) {
+                        p1.velocity.x *= 0.5;
+                    }
                 }
-                if (Math.abs(p2.velocity.x) < 10) {
+                if (Math.abs(p2.velocity.x) < 8 && (p2MovingToward || Math.abs(p2.velocity.x) < 0.5)) {
                     p2.position.x += pushDir * pushAmount;
-                }
-                
-                // Hard enforcement: if still too close, force separation
-                const newDist = Math.abs(p2.position.x - p1.position.x);
-                if (newDist < MIN_SEPARATION) {
-                    const forcePush = (MIN_SEPARATION - newDist) / 2 + 0.1;
-                    p1.position.x -= pushDir * forcePush;
-                    p2.position.x += pushDir * forcePush;
+                    // Also reduce velocity toward the other player
+                    if (p2MovingToward) {
+                        p2.velocity.x *= 0.5;
+                    }
                 }
             }
         }
