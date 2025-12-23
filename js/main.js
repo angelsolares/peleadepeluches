@@ -424,9 +424,9 @@ class PlayerEntity {
                        !this.animController.isBlocking && 
                        !this.animController.isTaunting;
         
-        // Base rotation is -90° (profile), idle rotation is -60° (showing more face)
+        // Base rotation is -90° (profile), idle rotation is -45° (showing more face)
         const profileRotation = -Math.PI / 2;  // 90° - full profile
-        const idleRotation = -Math.PI / 3;     // 60° - showing face toward camera
+        const idleRotation = -Math.PI / 4;     // 45° - showing face toward camera (3/4 view)
         const targetRotation = isIdle ? idleRotation : profileRotation;
         
         // Smooth interpolation for rotation
