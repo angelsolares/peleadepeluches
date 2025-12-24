@@ -198,8 +198,9 @@ class RaceGame {
         this.gameState = 'lobby'; // 'lobby', 'countdown', 'racing', 'finished'
         this.raceStartTime = 0;
         
-        this.baseModel = null;
+        this.loadedModels = {}; // Cache for loaded character models
         this.animations = {};
+        this.fbxLoader = null;
         
         this.clock = new THREE.Clock();
         
@@ -467,28 +468,41 @@ class RaceGame {
     }
     
     async loadAssets() {
-        const loader = new FBXLoader();
+        this.fbxLoader = new FBXLoader();
         const progressFill = document.getElementById('progress-fill');
         const loadingText = document.getElementById('loading-text');
         
         try {
-            // Load base model
-            loadingText.textContent = 'Cargando modelo base...';
-            progressFill.style.width = '20%';
-            
+            // Load all character models
             const characterKeys = Object.keys(CHARACTER_MODELS);
-            const firstChar = CHARACTER_MODELS[characterKeys[0]];
-            this.baseModel = await loader.loadAsync(firstChar.path);
+            const totalItems = characterKeys.length + Object.keys(ANIMATION_FILES).length;
+            let loadedItems = 0;
+            
+            for (const key of characterKeys) {
+                const charInfo = CHARACTER_MODELS[key];
+                loadingText.textContent = `Cargando ${charInfo.name}...`;
+                
+                try {
+                    this.loadedModels[key] = await this.fbxLoader.loadAsync(charInfo.path);
+                    console.log(`[Race] Loaded model: ${key}`);
+                } catch (err) {
+                    console.warn(`[Race] Failed to load model ${key}:`, err);
+                }
+                
+                loadedItems++;
+                progressFill.style.width = `${(loadedItems / totalItems) * 100}%`;
+            }
             
             // Load animations
             loadingText.textContent = 'Cargando animaciones...';
-            progressFill.style.width = '50%';
             
             for (const [name, path] of Object.entries(ANIMATION_FILES)) {
-                const anim = await loader.loadAsync(path);
+                const anim = await this.fbxLoader.loadAsync(path);
                 if (anim.animations && anim.animations.length > 0) {
                     this.animations[name] = anim.animations[0];
                 }
+                loadedItems++;
+                progressFill.style.width = `${(loadedItems / totalItems) * 100}%`;
             }
             
             progressFill.style.width = '100%';
@@ -713,9 +727,26 @@ class RaceGame {
         const characterKey = (playerData.character || 'angel').toLowerCase();
         const characterInfo = CHARACTER_MODELS[characterKey] || CHARACTER_MODELS['angel'];
         
-        // Clone model
-        const model = SkeletonUtils.clone(this.baseModel);
+        // Get the correct model for this character
+        let sourceModel = this.loadedModels[characterKey];
+        
+        // Fallback to first available model if character not found
+        if (!sourceModel) {
+            console.warn(`[Race] Model not found for ${characterKey}, using fallback`);
+            const fallbackKey = Object.keys(this.loadedModels)[0];
+            sourceModel = this.loadedModels[fallbackKey];
+        }
+        
+        if (!sourceModel) {
+            console.error('[Race] No models loaded!');
+            return;
+        }
+        
+        // Clone the correct character model
+        const model = SkeletonUtils.clone(sourceModel);
         model.scale.set(0.01, 0.01, 0.01);
+        
+        console.log(`[Race] Creating player with character: ${characterKey}`);
         
         // Create player entity
         const player = new RacePlayerEntity(
