@@ -91,18 +91,29 @@ class GameStateManager {
             player.previousY = player.position.y;
         }
         
-        // Horizontal movement
+        // Check if player is locked in an action (blocking or taunting)
+        const isLockedInAction = player.isBlocking === true || player.isTaunting === true;
+        
+        // Horizontal movement - blocked during blocking/taunting
         const currentSpeed = input.run ? this.RUN_SPEED : this.MOVE_SPEED;
         
-        if (input.left) {
-            player.velocity.x = -currentSpeed;
-            player.facingRight = false;
-        } else if (input.right) {
-            player.velocity.x = currentSpeed;
-            player.facingRight = true;
+        if (!isLockedInAction) {
+            if (input.left) {
+                player.velocity.x = -currentSpeed;
+                player.facingRight = false;
+            } else if (input.right) {
+                player.velocity.x = currentSpeed;
+                player.facingRight = true;
+            } else {
+                // Deceleration
+                player.velocity.x *= 0.8;
+                if (Math.abs(player.velocity.x) < 0.1) {
+                    player.velocity.x = 0;
+                }
+            }
         } else {
-            // Deceleration
-            player.velocity.x *= 0.8;
+            // Force stop horizontal movement when locked
+            player.velocity.x *= 0.5;
             if (Math.abs(player.velocity.x) < 0.1) {
                 player.velocity.x = 0;
             }
@@ -114,8 +125,8 @@ class GameStateManager {
         // Check if grounded on ANY platform before jump
         let isGrounded = this.checkIfGrounded(player);
         
-        // Jumping
-        if (input.jump && isGrounded) {
+        // Jumping - blocked during blocking/taunting
+        if (input.jump && isGrounded && !isLockedInAction) {
             player.velocity.y = this.JUMP_FORCE;
             isGrounded = false;
         }
@@ -539,6 +550,25 @@ class GameStateManager {
         const player = room.players.get(playerId);
         if (player) {
             player.isBlocking = isBlocking;
+        }
+    }
+    
+    /**
+     * Set player taunting state
+     * @param {string} playerId - Player's socket ID
+     * @param {string} roomCode - Room code
+     * @param {boolean} isTaunting - Whether player is taunting
+     */
+    setPlayerTaunting(playerId, roomCode, isTaunting) {
+        const room = this.lobbyManager.rooms.get(roomCode);
+        if (!room) return;
+        
+        const player = room.players.get(playerId);
+        if (player) {
+            player.isTaunting = isTaunting;
+            if (isTaunting) {
+                console.log(`[Smash] Player ${player.name} is taunting`);
+            }
         }
     }
 }

@@ -226,8 +226,11 @@ class ArenaStateManager {
      * Process player movement for 360 degrees
      */
     processPlayerMovement(playerState, delta) {
-        if (playerState.isAttacking) {
-            // Slow down while attacking (can't move)
+        // Check if player is locked in an action (attacking, blocking, or taunting)
+        const isLockedInAction = playerState.isAttacking || playerState.isBlocking || playerState.isTaunting;
+        
+        if (isLockedInAction) {
+            // Slow down while locked in action (can't move)
             playerState.velocity.x *= 0.9;
             playerState.velocity.z *= 0.9;
         } else {
