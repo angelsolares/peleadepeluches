@@ -460,6 +460,24 @@ class FlappyGame {
             this.updateRoomOverlay();
         });
         
+        this.socket.on('character-selected', (data) => {
+            console.log('[FlappyGame] Character selected:', data);
+            // Update player name when character is selected
+            const player = this.players.get(data.playerId);
+            if (player) {
+                const characterKey = data.character.toLowerCase();
+                const newName = CHARACTER_MODELS[characterKey]?.name || data.character;
+                player.name = newName;
+                
+                // Update label
+                if (player.nameLabel && player.nameLabel.element) {
+                    player.nameLabel.element.textContent = newName;
+                }
+                
+                this.updatePlayersPanel();
+            }
+        });
+        
         this.socket.on('player-left', (data) => {
             console.log('[FlappyGame] Player left:', data);
             this.removePlayer(data.id);
