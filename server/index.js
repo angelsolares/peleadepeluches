@@ -10,6 +10,7 @@ import cors from 'cors';
 import LobbyManager from './lobbyManager.js';
 import GameStateManager from './gameState.js';
 import ArenaStateManager from './arenaState.js';
+import { RaceStateManager } from './raceState.js';
 
 // Configuration
 const PORT = process.env.PORT || 3001;
@@ -35,12 +36,16 @@ const io = new Server(httpServer, {
 const lobbyManager = new LobbyManager();
 const gameStateManager = new GameStateManager(lobbyManager);
 const arenaStateManager = new ArenaStateManager(lobbyManager);
+const raceStateManager = new RaceStateManager(lobbyManager);
 
 // Game tick intervals per room
 const gameLoops = new Map();
 
 // Arena game loops (separate from smash)
 const arenaLoops = new Map();
+
+// Race game loops
+const raceLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -151,6 +156,9 @@ io.on('connection', (socket) => {
                 arenaStateManager.initializeArena(roomCode);
                 startArenaLoop(roomCode);
                 console.log(`[Socket] Arena game started in room ${roomCode}`);
+            } else if (room.gameMode === 'race') {
+                // Race mode handled by start-race event
+                console.log(`[Socket] Race room ready in ${roomCode}`);
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -446,6 +454,47 @@ io.on('connection', (socket) => {
         }
     });
     
+    // ========== RACE MODE EVENTS ==========
+    
+    /**
+     * Start race (host only)
+     */
+    socket.on('start-race', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        const room = lobbyManager.rooms.get(roomCode);
+        if (!room || room.host !== socket.id) {
+            console.log('[Race] Non-host tried to start race');
+            return;
+        }
+        
+        console.log(`[Race] Starting race in room ${roomCode}`);
+        
+        // Initialize race state
+        raceStateManager.initializeRace(roomCode);
+        
+        // Start countdown (with callback to start race loop)
+        raceStateManager.startCountdown(roomCode, io, () => {
+            startRaceLoop(roomCode);
+        });
+    });
+    
+    /**
+     * Race tap input (left/right foot)
+     */
+    socket.on('race-tap', (side) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        const result = raceStateManager.processTap(socket.id, roomCode, side);
+        
+        // Optionally send feedback to the tapper
+        if (result) {
+            socket.emit('race-tap-result', result);
+        }
+    });
+    
     // ========== COMMON EVENTS ==========
     
     /**
@@ -657,6 +706,72 @@ function stopArenaLoop(roomCode) {
         clearInterval(loop);
         arenaLoops.delete(roomCode);
         console.log(`[Arena] Stopped arena loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start race game loop for a room
+ */
+function startRaceLoop(roomCode) {
+    if (raceLoops.has(roomCode)) {
+        console.log(`[Race] Loop already exists for room ${roomCode}`);
+        return;
+    }
+    
+    const tickRate = 1000 / 30; // 30 FPS for race
+    let lastTime = Date.now();
+    
+    const loop = setInterval(() => {
+        const now = Date.now();
+        const delta = (now - lastTime) / 1000; // Delta in seconds
+        lastTime = now;
+        
+        const state = raceStateManager.processTick(roomCode, delta);
+        
+        if (state) {
+            // Send state to all clients in room
+            io.to(roomCode).emit('race-state', state);
+            
+            // Check for race finish (first player crossed)
+            if (state.finishOrder && state.finishOrder.length > 0) {
+                const latestFinisher = state.players.find(p => 
+                    p.id === state.finishOrder[state.finishOrder.length - 1] && p.finished
+                );
+                if (latestFinisher) {
+                    io.to(roomCode).emit('race-finish', {
+                        playerId: latestFinisher.id,
+                        time: latestFinisher.finishTime,
+                        position: latestFinisher.finishPosition
+                    });
+                }
+            }
+            
+            // Check for race over
+            if (state.raceOver) {
+                stopRaceLoop(roomCode);
+                const winnerInfo = raceStateManager.getWinnerInfo(roomCode);
+                if (winnerInfo) {
+                    io.to(roomCode).emit('race-winner', winnerInfo);
+                }
+                raceStateManager.endRace(roomCode);
+            }
+        }
+    }, tickRate);
+    
+    raceLoops.set(roomCode, loop);
+    console.log(`[Race] Started race loop for room ${roomCode}`);
+}
+
+/**
+ * Stop race game loop for a room
+ */
+function stopRaceLoop(roomCode) {
+    const loop = raceLoops.get(roomCode);
+    
+    if (loop) {
+        clearInterval(loop);
+        raceLoops.delete(roomCode);
+        console.log(`[Race] Stopped race loop for room ${roomCode}`);
     }
 }
 

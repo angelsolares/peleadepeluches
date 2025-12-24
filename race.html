@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carrera de Peluches - Sprint Race</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/race.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- HUD / UI Overlay -->
+        <div id="hud">
+            <h1 class="game-title">CARRERA DE PELUCHES</h1>
+            
+            <!-- Race Scoreboard (left side) -->
+            <div id="race-scoreboard">
+                <div class="scoreboard-title">🏁 POSICIONES</div>
+                <div id="race-positions">
+                    <!-- Dynamic positions will be inserted here -->
+                </div>
+            </div>
+            
+            <!-- Progress indicator (top) -->
+            <div id="race-progress">
+                <div class="progress-track">
+                    <div class="progress-start">🏁</div>
+                    <div class="progress-markers" id="progress-markers">
+                        <!-- Dynamic player markers -->
+                    </div>
+                    <div class="progress-finish">🏆</div>
+                </div>
+            </div>
+            
+            <!-- Current State Display -->
+            <div id="current-animation">
+                <span class="label">Estado:</span>
+                <span id="animation-name">Esperando jugadores...</span>
+            </div>
+        </div>
+        
+        <!-- Countdown overlay -->
+        <div id="countdown-overlay" class="hidden">
+            <div id="countdown-number">3</div>
+        </div>
+        
+        <!-- Loading screen -->
+        <div id="loading-screen">
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p id="loading-text">Cargando pista...</p>
+                <div class="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module" src="js/race/RaceGame.js"></script>
+</body>
+</html>
+

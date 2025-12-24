@@ -73,11 +73,15 @@ let roomCode = null;
 let isReady = false;
 let isConnected = false;
 let selectedCharacter = 'edgar'; // Default character
-let gameMode = 'smash'; // 'smash' or 'arena'
+let gameMode = 'smash'; // 'smash', 'arena', or 'race'
 let isGrabbing = false; // Track if player is currently grabbing someone (Arena mode)
 let isGrabbed = false; // Track if player is currently grabbed by someone (Arena mode)
 let escapeProgress = 0; // Progress towards escaping from grab (0-100)
 let escapeThreshold = 3; // Number of button presses needed to escape (3 = ~33% per press)
+
+// Race mode state
+let lastRaceTap = null; // 'left' or 'right' - track last tap for alternating
+let raceSpeed = 0; // Current speed display
 
 // Available characters
 const CHARACTERS = {
@@ -163,6 +167,49 @@ function connectToServer() {
     socket.on('arena-throw', handleArenaThrowEvent);
     socket.on('arena-grab-released', handleArenaGrabReleased);
     socket.on('arena-grab-escape', handleArenaGrabEscapeEvent);
+    
+    // Race mode events
+    socket.on('race-state', handleRaceState);
+    socket.on('race-countdown', handleRaceCountdown);
+    socket.on('race-start', handleRaceStart);
+    socket.on('race-finish', handleRaceFinish);
+    socket.on('race-winner', handleRaceWinner);
+}
+
+// Race mode event handlers
+function handleRaceState(data) {
+    if (!data || !data.players) return;
+    
+    // Find our player's speed
+    const myState = data.players.find(p => p.id === socket.id);
+    if (myState) {
+        updateRaceSpeed(myState.speed);
+    }
+}
+
+function handleRaceCountdown(data) {
+    console.log('[Race] Countdown:', data.count);
+    // Could show countdown on mobile too
+}
+
+function handleRaceStart() {
+    console.log('[Race] Race started!');
+    triggerHaptic(true);
+}
+
+function handleRaceFinish(data) {
+    console.log('[Race] Player finished:', data);
+    if (data.playerId === socket.id) {
+        triggerHaptic(true);
+    }
+}
+
+function handleRaceWinner(data) {
+    console.log('[Race] Winner:', data);
+    showGameOverScreen(
+        data.winnerId === socket.id ? '🏆 ¡GANASTE!' : '🏁 CARRERA TERMINADA',
+        `¡${data.winnerName} gana la carrera!`
+    );
 }
 
 function updateConnectionStatus(status, text) {
@@ -436,9 +483,28 @@ function updateControllerUIForMode() {
     const stocksDisplay = elements.stocksDisplay;
     const grabBtn = document.querySelector('.btn-grab');
     const runLabel = dpadDown?.querySelector('.label');
+    const controllerBody = document.querySelector('.controller-body');
+    const raceControls = document.getElementById('race-controls');
+    const controllerScreen = document.getElementById('controller-screen');
     
-    if (gameMode === 'arena') {
+    if (gameMode === 'race') {
+        // Race mode: Show only left/right foot buttons
+        if (controllerBody) controllerBody.style.display = 'none';
+        if (raceControls) raceControls.style.display = 'flex';
+        if (controllerScreen) controllerScreen.classList.add('race-mode');
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (healthLabel) healthLabel.textContent = '';
+        
+        // Setup race foot buttons
+        setupRaceControls();
+        
+        console.log('[Controller] Race mode UI configured');
+    } else if (gameMode === 'arena') {
         // Arena mode: D-pad controls all 4 directions for movement
+        if (controllerBody) controllerBody.style.display = 'flex';
+        if (raceControls) raceControls.style.display = 'none';
+        if (controllerScreen) controllerScreen.classList.remove('race-mode');
+        
         if (dpadUp) {
             dpadUp.dataset.input = 'up';
             dpadUp.dataset.originalInput = 'up';
@@ -459,6 +525,10 @@ function updateControllerUIForMode() {
         console.log('[Controller] Arena mode UI configured');
     } else {
         // Smash mode: Up = jump, Down = run
+        if (controllerBody) controllerBody.style.display = 'flex';
+        if (raceControls) raceControls.style.display = 'none';
+        if (controllerScreen) controllerScreen.classList.remove('race-mode');
+        
         if (dpadUp) {
             dpadUp.dataset.input = 'jump';
             dpadUp.dataset.originalInput = 'jump';
@@ -477,6 +547,80 @@ function updateControllerUIForMode() {
         
         console.log('[Controller] Smash mode UI configured');
     }
+}
+
+// Setup race mode controls (left/right foot buttons)
+function setupRaceControls() {
+    const leftFoot = document.getElementById('left-foot');
+    const rightFoot = document.getElementById('right-foot');
+    
+    if (leftFoot) {
+        leftFoot.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleRaceTap('left', leftFoot);
+        }, { passive: false });
+        
+        leftFoot.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            leftFoot.classList.remove('pressed');
+        }, { passive: false });
+    }
+    
+    if (rightFoot) {
+        rightFoot.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleRaceTap('right', rightFoot);
+        }, { passive: false });
+        
+        rightFoot.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            rightFoot.classList.remove('pressed');
+        }, { passive: false });
+    }
+    
+    console.log('[Race] Controls setup complete');
+}
+
+// Handle a race tap (left or right foot)
+function handleRaceTap(side, btn) {
+    btn.classList.add('pressed');
+    btn.classList.add('pulse');
+    
+    // Send tap to server
+    if (socket && socket.connected) {
+        socket.emit('race-tap', side);
+    }
+    
+    // Visual feedback
+    triggerHaptic();
+    
+    // Remove pulse class after animation
+    setTimeout(() => {
+        btn.classList.remove('pulse');
+    }, 300);
+    
+    // Update last tap for alternating indicator
+    lastRaceTap = side;
+}
+
+// Update race speed display
+function updateRaceSpeed(speed) {
+    const speedEl = document.getElementById('race-speed');
+    if (speedEl) {
+        // Convert game speed to "km/h" for display
+        const displaySpeed = Math.floor(speed * 10);
+        speedEl.textContent = `${displaySpeed} km/h`;
+        
+        // Change color based on speed
+        if (speed > 10) {
+            speedEl.style.color = '#ff3366';
+        } else if (speed > 5) {
+            speedEl.style.color = '#ff6600';
+        } else {
+            speedEl.style.color = '#00ccff';
+        }
+    }
+    raceSpeed = speed;
 }
 
 function handleGameState(data) {
@@ -1141,6 +1285,8 @@ function resetState() {
     isGrabbing = false;
     isGrabbed = false;
     escapeProgress = 0;
+    lastRaceTap = null;
+    raceSpeed = 0;
     Object.keys(inputState).forEach(key => inputState[key] = false);
     
     // Hide escape UI if visible

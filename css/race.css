@@ -1,0 +1,341 @@
+/* ==================================
+   CARRERA DE PELUCHES - Race Mode Styles
+   ================================== */
+
+/* Override title for Race mode */
+.game-title {
+    background: linear-gradient(135deg, #00ff88, #00ccff, #ff6600);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ==================================
+   Race Scoreboard (Left Side)
+   ================================== */
+
+#race-scoreboard {
+    position: absolute;
+    top: 100px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.85);
+    border: 2px solid #00ff88;
+    border-radius: 16px;
+    padding: 15px 20px;
+    min-width: 200px;
+    font-family: 'Orbitron', sans-serif;
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+}
+
+.scoreboard-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #00ff88;
+    text-align: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+#race-positions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.race-position-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.race-position-item.moving-up {
+    animation: moveUp 0.3s ease;
+    background: rgba(0, 255, 136, 0.2);
+}
+
+.race-position-item.moving-down {
+    animation: moveDown 0.3s ease;
+    background: rgba(255, 102, 0, 0.2);
+}
+
+@keyframes moveUp {
+    0% { transform: translateY(10px); opacity: 0.5; }
+    100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes moveDown {
+    0% { transform: translateY(-10px); opacity: 0.5; }
+    100% { transform: translateY(0); opacity: 1; }
+}
+
+.position-number {
+    font-size: 1.2rem;
+    font-weight: 900;
+    min-width: 30px;
+    text-align: center;
+}
+
+.position-number.first { color: #ffd700; }
+.position-number.second { color: #c0c0c0; }
+.position-number.third { color: #cd7f32; }
+.position-number.other { color: #888; }
+
+.position-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 900;
+    color: #0a0a15;
+}
+
+.position-name {
+    flex: 1;
+    font-size: 0.8rem;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.position-progress {
+    font-size: 0.7rem;
+    color: #00ccff;
+}
+
+/* ==================================
+   Race Progress Bar (Top)
+   ================================== */
+
+#race-progress {
+    position: absolute;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    max-width: 600px;
+}
+
+.progress-track {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 20px;
+    padding: 8px 15px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.progress-start, .progress-finish {
+    font-size: 1.5rem;
+}
+
+.progress-markers {
+    flex: 1;
+    height: 20px;
+    background: linear-gradient(90deg, 
+        rgba(255,255,255,0.1) 0%, 
+        rgba(255,255,255,0.05) 50%,
+        rgba(255,255,255,0.1) 100%);
+    border-radius: 10px;
+    margin: 0 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-markers::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+        90deg,
+        transparent,
+        transparent 10%,
+        rgba(255,255,255,0.1) 10%,
+        rgba(255,255,255,0.1) 10.5%
+    );
+}
+
+.player-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    transition: left 0.1s ease-out;
+    box-shadow: 0 0 10px currentColor;
+}
+
+/* ==================================
+   Countdown Overlay
+   ================================== */
+
+#countdown-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+}
+
+#countdown-overlay.hidden {
+    display: none;
+}
+
+#countdown-number {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 15rem;
+    font-weight: 900;
+    color: #00ff88;
+    text-shadow: 
+        0 0 50px rgba(0, 255, 136, 0.8),
+        0 0 100px rgba(0, 255, 136, 0.5);
+    animation: countdownPulse 1s ease-in-out;
+}
+
+#countdown-number.go {
+    color: #ff6600;
+    text-shadow: 
+        0 0 50px rgba(255, 102, 0, 0.8),
+        0 0 100px rgba(255, 102, 0, 0.5);
+}
+
+@keyframes countdownPulse {
+    0% { transform: scale(0.5); opacity: 0; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* ==================================
+   Winner Overlay
+   ================================== */
+
+#race-winner-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 10000;
+    animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.winner-content {
+    text-align: center;
+    font-family: 'Orbitron', sans-serif;
+}
+
+.winner-trophy {
+    font-size: 120px;
+    animation: trophyBounce 1s ease-in-out infinite;
+}
+
+@keyframes trophyBounce {
+    0%, 100% { transform: translateY(0) rotate(-5deg); }
+    50% { transform: translateY(-20px) rotate(5deg); }
+}
+
+.winner-title {
+    font-size: 4rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #ffd700, #ff8c00, #ffd700);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 20px 0;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.winner-name {
+    font-size: 3rem;
+    color: #00ff88;
+    text-shadow: 0 0 30px rgba(0, 255, 136, 0.7);
+    margin-bottom: 10px;
+}
+
+.winner-time {
+    font-size: 1.5rem;
+    color: #00ccff;
+    margin-bottom: 30px;
+}
+
+/* ==================================
+   Player Name Labels (3D floating)
+   ================================== */
+
+.race-player-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 4px 10px;
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 12px;
+    border: 2px solid #00ff88;
+    color: #fff;
+    white-space: nowrap;
+    text-shadow: 0 0 5px rgba(0, 255, 136, 0.5);
+}
+
+/* ==================================
+   Responsive
+   ================================== */
+
+@media (max-width: 768px) {
+    #race-scoreboard {
+        top: auto;
+        bottom: 20px;
+        left: 10px;
+        right: 10px;
+        min-width: auto;
+    }
+    
+    #race-positions {
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .race-position-item {
+        min-width: 80px;
+    }
+    
+    #race-progress {
+        width: 90%;
+    }
+    
+    #countdown-number {
+        font-size: 8rem;
+    }
+}
+

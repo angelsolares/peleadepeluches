@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pelea de Peluches - Selección de Modo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 50%, #0a0a15 100%);
+            font-family: 'Orbitron', sans-serif;
+            overflow: hidden;
+        }
+        
+        /* Animated background */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+        
+        .bg-animation::before {
+            content: '';
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 102, 0, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(0, 204, 255, 0.05) 0%, transparent 50%);
+            animation: rotate 30s linear infinite;
+        }
+        
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Floating shapes */
+        .shape {
+            position: fixed;
+            opacity: 0.1;
+            animation: float 8s ease-in-out infinite;
+        }
+        
+        .shape:nth-child(1) { top: 10%; left: 10%; animation-delay: 0s; }
+        .shape:nth-child(2) { top: 70%; left: 80%; animation-delay: 2s; }
+        .shape:nth-child(3) { top: 30%; left: 70%; animation-delay: 4s; }
+        .shape:nth-child(4) { top: 80%; left: 20%; animation-delay: 6s; }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(180deg); }
+        }
+        
+        .container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .title {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        
+        .title h1 {
+            font-size: clamp(2.5rem, 8vw, 5rem);
+            font-weight: 900;
+            background: linear-gradient(135deg, #ff3366, #ff6600, #ffcc00, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 60px rgba(255, 102, 0, 0.3);
+            animation: titlePulse 3s ease-in-out infinite;
+        }
+        
+        @keyframes titlePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+        
+        .title p {
+            font-size: 1.2rem;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 15px;
+            letter-spacing: 4px;
+        }
+        
+        .modes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            max-width: 1200px;
+            width: 100%;
+        }
+        
+        .mode-card {
+            position: relative;
+            background: rgba(20, 20, 35, 0.9);
+            border-radius: 24px;
+            padding: 40px 30px;
+            text-align: center;
+            cursor: pointer;
+            text-decoration: none;
+            color: white;
+            border: 3px solid transparent;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        
+        .mode-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, var(--card-color) 0%, transparent 50%);
+            opacity: 0.1;
+            transition: opacity 0.3s;
+        }
+        
+        .mode-card:hover {
+            transform: translateY(-10px) scale(1.02);
+            border-color: var(--card-color);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 40px var(--card-glow);
+        }
+        
+        .mode-card:hover::before {
+            opacity: 0.2;
+        }
+        
+        .mode-card.smash { --card-color: #ff3366; --card-glow: rgba(255, 51, 102, 0.3); }
+        .mode-card.arena { --card-color: #00ff88; --card-glow: rgba(0, 255, 136, 0.3); }
+        .mode-card.race { --card-color: #00ccff; --card-glow: rgba(0, 204, 255, 0.3); }
+        
+        .mode-icon {
+            font-size: 5rem;
+            margin-bottom: 20px;
+            display: block;
+        }
+        
+        .mode-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: var(--card-color);
+        }
+        
+        .mode-desc {
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.6;
+        }
+        
+        .mode-players {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.85rem;
+            color: var(--card-color);
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 0.75rem;
+            margin-top: 10px;
+        }
+        
+        .footer {
+            position: fixed;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.3);
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .modes {
+                grid-template-columns: 1fr;
+            }
+            
+            .mode-card {
+                padding: 30px 20px;
+            }
+            
+            .mode-icon {
+                font-size: 4rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    
+    <!-- Floating shapes -->
+    <div class="shape" style="font-size: 100px; color: #ff3366;">⬡</div>
+    <div class="shape" style="font-size: 80px; color: #00ff88;">◆</div>
+    <div class="shape" style="font-size: 120px; color: #00ccff;">△</div>
+    <div class="shape" style="font-size: 90px; color: #ffcc00;">○</div>
+    
+    <div class="container">
+        <div class="title">
+            <h1>PELEA DE PELUCHES</h1>
+            <p>SELECCIONA UN MODO DE JUEGO</p>
+        </div>
+        
+        <div class="modes">
+            <!-- Smash Mode -->
+            <a href="index.html" class="mode-card smash">
+                <span class="mode-icon">⚔️</span>
+                <h2 class="mode-title">SMASH</h2>
+                <p class="mode-desc">
+                    Combate 2D estilo plataformas. 
+                    Golpea, patea y lanza a tus oponentes fuera del escenario.
+                </p>
+                <div class="mode-players">
+                    👥 2-4 Jugadores
+                    <div class="badge">VISTA LATERAL</div>
+                </div>
+            </a>
+            
+            <!-- Arena Mode -->
+            <a href="arena.html" class="mode-card arena">
+                <span class="mode-icon">🤼</span>
+                <h2 class="mode-title">ARENA</h2>
+                <p class="mode-desc">
+                    Lucha libre en el ring. 
+                    Agarra, lanza y elimina a tus rivales del cuadrilátero.
+                </p>
+                <div class="mode-players">
+                    👥 2-8 Jugadores
+                    <div class="badge">VISTA AÉREA</div>
+                </div>
+            </a>
+            
+            <!-- Race Mode -->
+            <a href="race.html" class="mode-card race">
+                <span class="mode-icon">🏃</span>
+                <h2 class="mode-title">CARRERA</h2>
+                <p class="mode-desc">
+                    Sprint hacia la meta. 
+                    Alterna tus pasos lo más rápido posible para ganar.
+                </p>
+                <div class="mode-players">
+                    👥 2-8 Jugadores
+                    <div class="badge">¡NUEVO!</div>
+                </div>
+            </a>
+        </div>
+    </div>
+    
+    <div class="footer">
+        🎮 Usa tu celular como control | Escanea el QR en pantalla
+    </div>
+</body>
+</html>
+

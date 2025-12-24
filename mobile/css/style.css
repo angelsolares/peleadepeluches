@@ -890,3 +890,167 @@ body {
     }
 }
 
+/* ==================================
+   Race Mode Controller
+   ================================== */
+
+.race-controls {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 30px 20px;
+    background: linear-gradient(180deg, 
+        rgba(0, 255, 136, 0.1) 0%, 
+        rgba(10, 10, 21, 0.95) 30%,
+        rgba(10, 10, 21, 0.95) 100%
+    );
+}
+
+.race-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.race-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--secondary);
+    text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.race-speed {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 900;
+    color: var(--accent);
+    text-shadow: 0 0 30px rgba(255, 102, 0, 0.5);
+}
+
+.race-feet {
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+}
+
+.foot-btn {
+    width: 140px;
+    height: 200px;
+    border-radius: 30px;
+    border: 4px solid;
+    background: var(--panel);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    transition: all 0.08s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+
+.left-foot {
+    border-color: #00ccff;
+    color: #00ccff;
+    transform: scaleX(-1);
+}
+
+.left-foot .foot-label {
+    transform: scaleX(-1);
+}
+
+.right-foot {
+    border-color: #ff6600;
+    color: #ff6600;
+}
+
+.foot-icon {
+    font-size: 4rem;
+}
+
+.foot-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+.foot-btn:active,
+.foot-btn.pressed {
+    transform: scale(0.92);
+    box-shadow: 0 0 40px currentColor;
+}
+
+.left-foot:active,
+.left-foot.pressed {
+    background: rgba(0, 204, 255, 0.3);
+    transform: scaleX(-1) scale(0.92);
+}
+
+.right-foot:active,
+.right-foot.pressed {
+    background: rgba(255, 102, 0, 0.3);
+}
+
+.race-hint {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.race-hint span {
+    display: inline-block;
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Race mode - hide normal controls */
+.race-mode .controller-body {
+    display: none;
+}
+
+.race-mode .controller-header .game-info,
+.race-mode .controller-header .stocks-display {
+    display: none;
+}
+
+/* Animation for alternating feet */
+@keyframes footPulse {
+    0% { box-shadow: 0 0 0 0 currentColor; }
+    70% { box-shadow: 0 0 30px 10px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.foot-btn.pulse {
+    animation: footPulse 0.3s ease;
+}
+
+/* Responsive for race mode */
+@media (max-height: 600px) {
+    .foot-btn {
+        width: 120px;
+        height: 160px;
+    }
+    
+    .foot-icon {
+        font-size: 3rem;
+    }
+    
+    .race-speed {
+        font-size: 2rem;
+    }
+}
+
