@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arena de Peluches - Wrestling Ring</title>
+    <title>Pelea de Peluches - 3D Fighter</title>
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/arena.css">
 </head>
 <body>
     <div id="game-container">
@@ -13,7 +12,7 @@
         
         <!-- HUD / UI Overlay -->
         <div id="hud">
-            <h1 class="game-title">ARENA DE PELUCHES</h1>
+            <h1 class="game-title">PELEA DE PELUCHES</h1>
             
             <!-- Tournament HUD (shown during game) -->
             <div id="tournament-hud" class="hidden">
@@ -28,13 +27,33 @@
                 </div>
             </div>
             
-            <!-- Player HUD Bars (Health + Stamina) -->
-            <div id="arena-player-huds">
+            <!-- Player HUD Bars -->
+            <div id="player-huds">
                 <!-- Dynamic player HUDs will be inserted here -->
             </div>
             
-            <!-- Controls Panel HIDDEN - Controls are on mobile -->
-            <!-- Panel removed: players use their phones for controls -->
+            <!-- Controls Panel (shown in lobby/testing) -->
+            <div class="controls-panel" id="controls-panel">
+                <h3>⌨️ CONTROLES LOCALES</h3>
+                <div class="key-bindings">
+                    <div class="key-section">
+                        <span class="section-title">Movimiento</span>
+                        <div class="key-item"><span class="key">←</span><span class="key">→</span> Mover</div>
+                        <div class="key-item"><span class="key">↑</span> / <span class="key">SPACE</span> Saltar</div>
+                        <div class="key-item"><span class="key">SHIFT</span> Correr</div>
+                    </div>
+                    <div class="key-section">
+                        <span class="section-title">Ataques</span>
+                        <div class="key-item"><span class="key">J</span> Golpe</div>
+                        <div class="key-item"><span class="key">K</span> Patada</div>
+                    </div>
+                    <div class="key-section">
+                        <span class="section-title">Acciones</span>
+                        <div class="key-item"><span class="key">L</span> Bloqueo (mantener)</div>
+                        <div class="key-item"><span class="key">T</span> Taunt / Baile</div>
+                    </div>
+                </div>
+            </div>
             
             <!-- Current State Display -->
             <div id="current-animation">
@@ -70,7 +89,7 @@
         <div id="loading-screen">
             <div class="loader-content">
                 <div class="spinner"></div>
-                <p id="loading-text">Cargando arena...</p>
+                <p id="loading-text">Cargando modelo...</p>
                 <div class="progress-bar">
                     <div id="progress-fill"></div>
                 </div>
@@ -88,7 +107,6 @@
     }
     </script>
     
-    <script type="module" src="js/arena/ArenaGame.js"></script>
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>
-
