@@ -1054,8 +1054,8 @@ function createArena() {
     background.position.set(0, 5, -8);
     scene.add(background);
     
-    // === MAIN PLATFORM ===
-    const mainPlatformWidth = 14;
+    // === MAIN PLATFORM === (Sized for up to 8 players)
+    const mainPlatformWidth = 20;  // Larger to fit 8 players comfortably
     const platformDepth = 4;
     const platformHeight = 0.4;
     
@@ -1099,11 +1099,13 @@ function createArena() {
     rightEdge.position.set(mainPlatformWidth / 2, -platformHeight / 2, 0);
     scene.add(rightEdge);
     
-    // === FLOATING PLATFORMS (Smash Bros style) ===
+    // === FLOATING PLATFORMS (Smash Bros style) === (Positioned for larger stage)
     const floatingPlatformConfigs = [
-        { x: -4, y: 2.5, width: 3, color: 0xff3366 },   // Left high
-        { x: 4, y: 2.5, width: 3, color: 0x00ffcc },    // Right high
-        { x: 0, y: 4.5, width: 2.5, color: 0xffcc00 },  // Center top
+        { x: -6, y: 2.5, width: 4, color: 0xff3366 },   // Left high
+        { x: 6, y: 2.5, width: 4, color: 0x00ffcc },    // Right high
+        { x: 0, y: 4.5, width: 3.5, color: 0xffcc00 },  // Center top
+        { x: -3, y: 5.5, width: 2.5, color: 0xff66cc }, // Upper left
+        { x: 3, y: 5.5, width: 2.5, color: 0x66ccff },  // Upper right
     ];
     
     floatingPlatformConfigs.forEach(config => {
@@ -2231,12 +2233,16 @@ function resetForNextRound(data) {
     // Reset game state
     gameState = 'playing';
     
-    // Reset all players
+    // Reset all players - Support up to 8 players on larger stage
     const spawnPoints = [
-        new THREE.Vector3(-5, 2, 0),
-        new THREE.Vector3(5, 2, 0),
-        new THREE.Vector3(-3, 2, 3),
-        new THREE.Vector3(3, 2, -3)
+        new THREE.Vector3(-7, 2, 0),    // Player 1 - Far left
+        new THREE.Vector3(7, 2, 0),     // Player 2 - Far right
+        new THREE.Vector3(-4, 2, 0),    // Player 3 - Left
+        new THREE.Vector3(4, 2, 0),     // Player 4 - Right
+        new THREE.Vector3(-1, 2, 0),    // Player 5 - Center left
+        new THREE.Vector3(1, 2, 0),     // Player 6 - Center right
+        new THREE.Vector3(-6, 3.5, 0),  // Player 7 - Left platform
+        new THREE.Vector3(6, 3.5, 0),   // Player 8 - Right platform
     ];
     
     let playerIndex = 0;
@@ -3062,25 +3068,25 @@ function animate() {
  * - Smooth interpolation for elastic feel
  */
 
-// Camera configuration
+// Camera configuration - Supports up to 8 players
 const CAMERA_CONFIG = {
     // Minimum and maximum zoom distances
-    MIN_ZOOM: 8,
-    MAX_ZOOM: 25,
+    MIN_ZOOM: 10,      // Increased for better view with more players
+    MAX_ZOOM: 35,      // Increased to fit 8 players spread out
     
     // Padding around players (in world units)
-    HORIZONTAL_PADDING: 3,
-    VERTICAL_PADDING: 2,
+    HORIZONTAL_PADDING: 4,    // More padding for larger groups
+    VERTICAL_PADDING: 3,      // More vertical padding
     
     // Interpolation speeds (lower = smoother/slower)
     POSITION_LERP: 0.06,
     ZOOM_LERP: 0.04,
     
     // Vertical offset for camera target
-    LOOK_AT_OFFSET_Y: 1.0,
+    LOOK_AT_OFFSET_Y: 1.5,    // Slightly higher to see all players
     
     // Camera height offset from center
-    CAMERA_HEIGHT_OFFSET: 1.5,
+    CAMERA_HEIGHT_OFFSET: 2.0,  // Higher camera for better overview
     
     // FOV for calculations (should match camera FOV)
     FOV: 45
