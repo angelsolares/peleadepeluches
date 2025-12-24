@@ -4,20 +4,21 @@
 
 // Game Configuration
 const FLAPPY_CONFIG = {
-    gravity: -18,           // Reduced from -35 for better control
-    flapStrength: 12,       // Adjusted for balanced gameplay
-    gameSpeed: 6,           // Slightly slower for better reaction time
-    pipeGap: 6,             // Increased gap for easier passage
+    gravity: -12,           // Much gentler gravity for easier control
+    flapStrength: 10,       // Strong enough to counteract gravity
+    gameSpeed: 5,           // Slower for better reaction time
+    pipeGap: 7,             // Bigger gap for easier passage
     pipeWidth: 2,
-    pipeSpacing: 12,        // More space between pipes
+    pipeSpacing: 14,        // More space between pipes
     groundY: -8,
     ceilingY: 10,
     playerStartX: -5,
-    playerRadius: 0.6,      // Smaller hitbox
+    playerRadius: 0.5,      // Smaller hitbox for forgiveness
     countdownDuration: 3,
     maxPlayers: 4,
     tickRate: 60,
-    pipeStartX: 20          // First pipe appears further away
+    pipeStartX: 25,         // First pipe appears much further away
+    initialVelocity: 3      // Give player initial upward boost
 };
 
 class FlappyStateManager {
@@ -36,8 +37,8 @@ class FlappyStateManager {
                 character: player.character,
                 lane: lane,
                 x: FLAPPY_CONFIG.playerStartX,
-                y: 2,           // Start higher for more reaction time
-                velocity: 0,
+                y: 3,           // Start higher for more reaction time
+                velocity: FLAPPY_CONFIG.initialVelocity || 0, // Initial upward boost
                 isAlive: true,
                 distance: 0
             };
