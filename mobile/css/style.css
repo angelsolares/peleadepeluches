@@ -564,8 +564,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px;
-    gap: 40px; /* Add space between d-pad and action buttons */
+    padding: 15px 10px;
+    gap: 10px; /* Reduced gap for portrait mode */
 }
 
 /* D-Pad */
@@ -574,13 +574,13 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    margin-left: 10px;
+    margin-left: 5px;
 }
 
 .dpad {
     position: relative;
-    width: 180px;
-    height: 180px;
+    width: 160px;
+    height: 160px;
 }
 
 .dpad-btn {
@@ -654,19 +654,19 @@ body {
 .action-buttons {
     flex: 0 0 auto; /* Don't grow, don't shrink */
     display: grid;
-    grid-template-columns: repeat(3, 70px);
-    grid-template-rows: repeat(4, 70px); /* 4 rows to accommodate grab button */
-    gap: 5px;
+    grid-template-columns: repeat(3, 60px);
+    grid-template-rows: repeat(4, 60px); /* 4 rows to accommodate grab button */
+    gap: 3px;
     align-items: center;
     justify-content: center;
-    margin-right: 10px;
+    margin-right: 5px;
 }
 
 .action-btn {
-    width: 70px;
-    height: 70px;
+    width: 60px;
+    height: 60px;
     border-radius: 50%;
-    border: 3px solid;
+    border: 2px solid;
     background: var(--panel);
     cursor: pointer;
     display: flex;
@@ -873,10 +873,60 @@ body {
    Responsive
    ================================== */
 
-@media (max-height: 600px) {
+/* Portrait mode on narrow screens */
+@media (max-width: 400px) {
+    .controller-body {
+        padding: 10px 5px;
+        gap: 5px;
+    }
+    
+    .dpad-container {
+        margin-left: 0;
+    }
+    
     .dpad {
-        width: 150px;
-        height: 150px;
+        width: 130px;
+        height: 130px;
+    }
+    
+    .dpad-btn {
+        width: 45px;
+        height: 45px;
+    }
+    
+    .action-buttons {
+        grid-template-columns: repeat(3, 50px);
+        grid-template-rows: repeat(4, 50px);
+        gap: 2px;
+        margin-right: 0;
+    }
+    
+    .action-btn {
+        width: 50px;
+        height: 50px;
+        border-width: 2px;
+    }
+    
+    .btn-label {
+        font-size: 1.1rem;
+    }
+    
+    .btn-action {
+        font-size: 0.45rem;
+        letter-spacing: 0;
+    }
+}
+
+/* Slightly larger narrow screens */
+@media (min-width: 401px) and (max-width: 480px) {
+    .controller-body {
+        padding: 12px 8px;
+        gap: 8px;
+    }
+    
+    .dpad {
+        width: 145px;
+        height: 145px;
     }
     
     .dpad-btn {
@@ -886,13 +936,46 @@ body {
     
     .action-buttons {
         grid-template-columns: repeat(3, 55px);
-        grid-template-rows: repeat(4, 55px); /* 4 rows for grab button */
-        gap: 3px;
+        grid-template-rows: repeat(4, 55px);
+        gap: 2px;
+        margin-right: 2px;
     }
     
     .action-btn {
         width: 55px;
         height: 55px;
+    }
+    
+    .btn-label {
+        font-size: 1.2rem;
+    }
+    
+    .btn-action {
+        font-size: 0.5rem;
+    }
+}
+
+/* Short screens (landscape or small devices) */
+@media (max-height: 600px) {
+    .dpad {
+        width: 140px;
+        height: 140px;
+    }
+    
+    .dpad-btn {
+        width: 48px;
+        height: 48px;
+    }
+    
+    .action-buttons {
+        grid-template-columns: repeat(3, 52px);
+        grid-template-rows: repeat(4, 52px);
+        gap: 2px;
+    }
+    
+    .action-btn {
+        width: 52px;
+        height: 52px;
     }
     
     .btn-label {
