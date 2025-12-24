@@ -45,7 +45,9 @@ const CHARACTER_MODELS = {
     'mariana': { path: 'assets/Mariana.fbx', color: '#ff66cc', name: 'Mariana' },
     'sol': { path: 'assets/Sol.fbx', color: '#ffd700', name: 'Sol' },
     'yadira': { path: 'assets/Yadira.fbx', color: '#ff00ff', name: 'Yadira' },
-    'lidia': { path: 'assets/Lidia.fbx', color: '#ff8800', name: 'Lidia' }
+    'lidia': { path: 'assets/Lidia.fbx', color: '#ff8800', name: 'Lidia' },
+    'fabian': { path: 'assets/Fabian.fbx', color: '#3399ff', name: 'Fabian' },
+    'marile': { path: 'assets/Marile.fbx', color: '#ff99cc', name: 'Marile' }
 };
 
 // Animation files (same as arena)

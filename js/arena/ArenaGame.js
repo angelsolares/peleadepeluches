@@ -64,7 +64,9 @@ const CHARACTER_MODELS = {
     sol: { name: 'Sol', file: 'Sol.fbx', thumbnail: '🌞' },
     yadira: { name: 'Yadira', file: 'Yadira.fbx', thumbnail: '💃' },
     angel: { name: 'Angel', file: 'Angel.fbx', thumbnail: '😇' },
-    lidia: { name: 'Lidia', file: 'Lidia.fbx', thumbnail: '👩‍🦰' }
+    lidia: { name: 'Lidia', file: 'Lidia.fbx', thumbnail: '👩‍🦰' },
+    fabian: { name: 'Fabian', file: 'Fabian.fbx', thumbnail: '🧑‍🦲' },
+    marile: { name: 'Marile', file: 'Marile.fbx', thumbnail: '👩‍🦳' }
 };
 
 // Animation files

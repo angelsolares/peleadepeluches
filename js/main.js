@@ -691,6 +691,16 @@ const CHARACTER_MODELS = {
         name: 'Lidia',
         file: 'Lidia.fbx',
         thumbnail: '👩‍🦰'
+    },
+    fabian: {
+        name: 'Fabian',
+        file: 'Fabian.fbx',
+        thumbnail: '🧑‍🦲'
+    },
+    marile: {
+        name: 'Marile',
+        file: 'Marile.fbx',
+        thumbnail: '👩‍🦳'
     }
 };
 
