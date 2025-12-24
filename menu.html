@@ -16,7 +16,8 @@
             min-height: 100vh;
             background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 50%, #0a0a15 100%);
             font-family: 'Orbitron', sans-serif;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
         
         /* Animated background */
@@ -79,7 +80,7 @@
         
         .title {
             text-align: center;
-            margin-bottom: 60px;
+            margin-bottom: 40px;
         }
         
         .title h1 {
@@ -107,17 +108,18 @@
         
         .modes {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 30px;
-            max-width: 1200px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            max-width: 1400px;
             width: 100%;
+            padding: 0 20px;
         }
         
         .mode-card {
             position: relative;
             background: rgba(20, 20, 35, 0.9);
-            border-radius: 24px;
-            padding: 40px 30px;
+            border-radius: 20px;
+            padding: 25px 20px;
             text-align: center;
             cursor: pointer;
             text-decoration: none;
@@ -155,39 +157,40 @@
         .mode-card.flappy { --card-color: #ffcc00; --card-glow: rgba(255, 204, 0, 0.3); }
         
         .mode-icon {
-            font-size: 5rem;
-            margin-bottom: 20px;
+            font-size: 3.5rem;
+            margin-bottom: 15px;
             display: block;
         }
         
         .mode-title {
-            font-size: 1.8rem;
+            font-size: 1.3rem;
             font-weight: 700;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             color: var(--card-color);
         }
         
         .mode-desc {
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             color: rgba(255, 255, 255, 0.6);
-            line-height: 1.6;
+            line-height: 1.5;
+            min-height: 60px;
         }
         
         .mode-players {
-            margin-top: 20px;
-            padding-top: 20px;
+            margin-top: 15px;
+            padding-top: 15px;
             border-top: 1px solid rgba(255, 255, 255, 0.1);
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: var(--card-color);
         }
         
         .badge {
             display: inline-block;
-            padding: 5px 12px;
+            padding: 4px 10px;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 20px;
-            font-size: 0.75rem;
-            margin-top: 10px;
+            font-size: 0.7rem;
+            margin-top: 8px;
         }
         
         .footer {
@@ -201,17 +204,40 @@
         }
         
         /* Responsive */
+        @media (max-width: 1200px) {
+            .modes {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
         @media (max-width: 768px) {
             .modes {
                 grid-template-columns: 1fr;
+                gap: 15px;
             }
             
             .mode-card {
-                padding: 30px 20px;
+                padding: 20px 15px;
             }
             
             .mode-icon {
-                font-size: 4rem;
+                font-size: 3rem;
+            }
+            
+            .mode-title {
+                font-size: 1.2rem;
+            }
+            
+            .mode-desc {
+                min-height: auto;
+            }
+            
+            .title {
+                margin-bottom: 30px;
+            }
+            
+            .title h1 {
+                font-size: 2rem;
             }
         }
     </style>
