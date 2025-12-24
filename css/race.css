@@ -10,6 +10,11 @@
     background-clip: text;
 }
 
+/* Tournament HUD - positioned below title for Race */
+#tournament-hud {
+    top: 75px !important;
+}
+
 /* ==================================
    Race Scoreboard (Left Side)
    ================================== */

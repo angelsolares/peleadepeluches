@@ -588,7 +588,7 @@ body {
 /* Tournament HUD (during game) */
 #tournament-hud {
     position: absolute;
-    top: 20px;
+    top: 75px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
