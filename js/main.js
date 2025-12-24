@@ -237,24 +237,24 @@ class PlayerController {
     }
     
     /**
-     * Perform a punch attack
+     * Perform a punch attack (can be done in air)
      */
     punch() {
         if (!this.isAttacking && this.attackCooldown <= 0) {
             this.isAttacking = true;
-            this.attackCooldown = 1.0;
+            this.attackCooldown = 0.4; // Reduced from 1.0 for faster combat
             return true;
         }
         return false;
     }
     
     /**
-     * Perform a kick attack
+     * Perform a kick attack (can be done in air)
      */
     kick() {
         if (!this.isAttacking && this.attackCooldown <= 0) {
             this.isAttacking = true;
-            this.attackCooldown = 0.8;
+            this.attackCooldown = 0.5; // Reduced from 0.8 for faster combat
             return true;
         }
         return false;
