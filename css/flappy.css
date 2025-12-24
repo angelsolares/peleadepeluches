@@ -1,5 +1,23 @@
 /* Flappy Mode Specific Styles */
 
+/* Overlay Base Styles */
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+.overlay.hidden {
+    display: none !important;
+}
+
 /* Game Title */
 .game-title {
     position: absolute;
