@@ -1020,6 +1020,30 @@ class ArenaGame {
         this.socket.on('arena-grab-escape', (data) => this.handleArenaGrabEscape(data));
         this.socket.on('arena-elimination', (data) => this.handleArenaElimination(data));
         
+        // Tournament events - listen for round transitions
+        this.socket.on('round-starting', (data) => {
+            console.log('[Arena] Round starting:', data);
+            this.resetForNextRound(data);
+        });
+        
+        this.socket.on('round-ended', (data) => {
+            console.log('[Arena] Round ended:', data);
+            // Hide game over overlay since tournament overlay will show
+            const gameOverOverlay = document.getElementById('game-over-overlay');
+            if (gameOverOverlay) {
+                gameOverOverlay.classList.add('hidden');
+            }
+        });
+        
+        this.socket.on('tournament-ended', (data) => {
+            console.log('[Arena] Tournament ended:', data);
+            // Hide game over overlay since tournament end overlay will show
+            const gameOverOverlay = document.getElementById('game-over-overlay');
+            if (gameOverOverlay) {
+                gameOverOverlay.classList.add('hidden');
+            }
+        });
+        
         // Initialize tournament manager
         this.tournamentManager = new TournamentManager(this.socket, 'arena');
     }
@@ -1919,6 +1943,63 @@ class ArenaGame {
         if (this.bgmManager) {
             this.bgmManager.playVictory?.();
         }
+    }
+    
+    /**
+     * Reset game state for the next round in a tournament
+     */
+    resetForNextRound(data) {
+        console.log('[Arena] Resetting for next round:', data.round);
+        
+        // Hide overlays
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        const roundEndOverlay = document.getElementById('round-end-overlay');
+        const roomOverlay = document.getElementById('room-code-overlay');
+        
+        if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
+        if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
+        if (roomOverlay) roomOverlay.classList.add('hidden');
+        
+        // Reset game state
+        this.gameState = 'playing';
+        
+        // Reset all players
+        this.players.forEach((player, playerId) => {
+            // Reset health and position
+            player.health = 100;
+            player.stocks = 3;
+            player.isAlive = true;
+            player.controller?.reset?.();
+            
+            // Reset position to spawn point
+            const spawnPoints = [
+                new THREE.Vector3(-5, 0, 0),
+                new THREE.Vector3(5, 0, 0),
+                new THREE.Vector3(-3, 0, 3),
+                new THREE.Vector3(3, 0, -3)
+            ];
+            const spawnIndex = Array.from(this.players.keys()).indexOf(playerId);
+            const spawnPoint = spawnPoints[spawnIndex % spawnPoints.length];
+            
+            player.model.position.copy(spawnPoint);
+            player.model.visible = true;
+            
+            if (player.nameLabel) {
+                player.nameLabel.element.style.display = 'block';
+            }
+            
+            player.playAnimation('idle');
+        });
+        
+        // Reset HUD
+        if (this.hud) {
+            this.hud.updateAllPlayers?.(this.players);
+        }
+        
+        // Show round announcement
+        this.showRoundAnnouncement(`¡RONDA ${data.round}!`);
+        
+        console.log('[Arena] Reset complete');
     }
     
     /**

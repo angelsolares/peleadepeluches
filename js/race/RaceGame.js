@@ -597,6 +597,30 @@ class RaceGame {
             this.showWinner(data);
         });
         
+        // Tournament events - listen for round transitions
+        this.socket.on('round-starting', (data) => {
+            console.log('[Race] Round starting:', data);
+            this.resetForNextRound(data);
+        });
+        
+        this.socket.on('round-ended', (data) => {
+            console.log('[Race] Round ended:', data);
+            // Hide winner overlay since tournament overlay will show
+            const winnerOverlay = document.getElementById('winner-overlay');
+            if (winnerOverlay) {
+                winnerOverlay.classList.add('hidden');
+            }
+        });
+        
+        this.socket.on('tournament-ended', (data) => {
+            console.log('[Race] Tournament ended:', data);
+            // Hide winner overlay since tournament end overlay will show
+            const winnerOverlay = document.getElementById('winner-overlay');
+            if (winnerOverlay) {
+                winnerOverlay.classList.add('hidden');
+            }
+        });
+        
         // Initialize tournament manager
         this.tournamentManager = new TournamentManager(this.socket, 'race');
     }
@@ -1086,6 +1110,62 @@ class RaceGame {
         document.body.appendChild(overlay);
         
         document.getElementById('animation-name').textContent = `¡${data.winnerName} GANA!`;
+    }
+    
+    /**
+     * Reset game state for the next round in a tournament
+     */
+    resetForNextRound(data) {
+        console.log('[Race] Resetting for next round:', data.round);
+        
+        // Hide overlays
+        const winnerOverlay = document.getElementById('race-winner-overlay');
+        const roundEndOverlay = document.getElementById('round-end-overlay');
+        const roomOverlay = document.getElementById('room-code-overlay');
+        
+        if (winnerOverlay) winnerOverlay.remove();
+        if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
+        if (roomOverlay) roomOverlay.classList.add('hidden');
+        
+        // Reset game state
+        this.gameState = 'countdown';
+        this.raceStartTime = null;
+        
+        // Reset track elements
+        this.currentTrackPosition = 0;
+        
+        // Reset all players
+        let laneIndex = 0;
+        this.players.forEach((player, playerId) => {
+            // Reset player state
+            player.finished = false;
+            player.finishTime = null;
+            player.progress = 0;
+            player.speed = 0;
+            player.lane = laneIndex;
+            
+            // Reset position to start
+            const laneOffset = (laneIndex - (this.players.size - 1) / 2) * 3;
+            player.worldPosition.set(laneOffset, 0, 0);
+            player.model.position.copy(player.worldPosition);
+            player.model.visible = true;
+            
+            if (player.nameLabel) {
+                player.nameLabel.element.style.display = 'block';
+            }
+            
+            player.playAnimation('idle');
+            laneIndex++;
+        });
+        
+        // Reset camera
+        this.camera.position.set(0, 20, -30);
+        this.camera.lookAt(0, 0, 30);
+        
+        // Update HUD
+        document.getElementById('animation-name').textContent = `¡RONDA ${data.round}!`;
+        
+        console.log('[Race] Reset complete');
     }
     
     updateCamera() {

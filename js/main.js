@@ -1730,6 +1730,30 @@ function initializeSocket() {
     socket.on('player-block-state', handlePlayerBlockState);
     socket.on('player-taunting', handlePlayerTaunt);
     
+    // Tournament events - listen for round transitions
+    socket.on('round-starting', (data) => {
+        console.log('[Smash] Round starting:', data);
+        resetForNextRound(data);
+    });
+    
+    socket.on('round-ended', (data) => {
+        console.log('[Smash] Round ended:', data);
+        // Hide game over overlay since tournament overlay will show
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        if (gameOverOverlay) {
+            gameOverOverlay.classList.add('hidden');
+        }
+    });
+    
+    socket.on('tournament-ended', (data) => {
+        console.log('[Smash] Tournament ended:', data);
+        // Hide game over overlay since tournament end overlay will show
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        if (gameOverOverlay) {
+            gameOverOverlay.classList.add('hidden');
+        }
+    });
+    
     // Initialize tournament manager
     window.tournamentManager = new TournamentManager(socket, 'smash');
 }
@@ -2209,6 +2233,71 @@ function handleGameOver(data) {
     
     // Show game over UI
     showGameOverUI(data);
+}
+
+/**
+ * Reset game state for the next round in a tournament
+ */
+function resetForNextRound(data) {
+    console.log('[Smash] Resetting for next round:', data.round);
+    
+    // Hide overlays
+    const gameOverOverlay = document.getElementById('game-over-overlay');
+    const roundEndOverlay = document.getElementById('round-end-overlay');
+    const roomOverlay = document.getElementById('room-code-overlay');
+    
+    if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
+    if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
+    if (roomOverlay) roomOverlay.classList.add('hidden');
+    
+    // Reset game state
+    gameState = 'playing';
+    
+    // Reset all players
+    const spawnPoints = [
+        new THREE.Vector3(-5, 2, 0),
+        new THREE.Vector3(5, 2, 0),
+        new THREE.Vector3(-3, 2, 3),
+        new THREE.Vector3(3, 2, -3)
+    ];
+    
+    let playerIndex = 0;
+    players.forEach((player, playerId) => {
+        // Reset controller state
+        if (player.controller) {
+            player.controller.health = 0;
+            player.controller.stocks = 3;
+            player.controller.velocity = new THREE.Vector3();
+            player.controller.isGrounded = false;
+        }
+        
+        // Reset position
+        const spawnPoint = spawnPoints[playerIndex % spawnPoints.length];
+        player.model.position.copy(spawnPoint);
+        player.model.visible = true;
+        
+        if (player.nameLabel) {
+            player.nameLabel.element.style.display = 'block';
+        }
+        
+        player.playAnimation('idle');
+        playerIndex++;
+    });
+    
+    // Update HUD
+    if (hud) {
+        hud.updateAllPlayers?.(players);
+    }
+    
+    // BGM: Back to battle music
+    if (bgmManager) {
+        bgmManager.playBattle?.();
+    }
+    
+    // Show round announcement
+    updateAnimationDisplay(`¡RONDA ${data.round}!`);
+    
+    console.log('[Smash] Reset complete');
 }
 
 function handleGameReset(data) {
