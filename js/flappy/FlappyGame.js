@@ -778,6 +778,30 @@ class FlappyGame {
             this.showGameOver(data);
         });
         
+        // Tournament events - listen for round transitions
+        this.socket.on('round-starting', (data) => {
+            console.log('[FlappyGame] Round starting:', data);
+            this.resetForNextRound(data);
+        });
+        
+        this.socket.on('round-ended', (data) => {
+            console.log('[FlappyGame] Round ended:', data);
+            // Hide game over overlay since tournament overlay will show
+            const gameOverOverlay = document.getElementById('game-over-overlay');
+            if (gameOverOverlay) {
+                gameOverOverlay.classList.add('hidden');
+            }
+        });
+        
+        this.socket.on('tournament-ended', (data) => {
+            console.log('[FlappyGame] Tournament ended:', data);
+            // Hide game over overlay since tournament end overlay will show
+            const gameOverOverlay = document.getElementById('game-over-overlay');
+            if (gameOverOverlay) {
+                gameOverOverlay.classList.add('hidden');
+            }
+        });
+        
         this.socket.on('disconnect', () => {
             console.log('[FlappyGame] Disconnected from server');
         });
@@ -927,11 +951,16 @@ class FlappyGame {
     }
     
     showCountdown() {
+        // Hide all overlays that might be visible
         const roomOverlay = document.getElementById('room-overlay');
         const countdownOverlay = document.getElementById('countdown-overlay');
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        const roundEndOverlay = document.getElementById('round-end-overlay');
         
-        roomOverlay.classList.add('hidden');
-        countdownOverlay.classList.remove('hidden');
+        roomOverlay?.classList.add('hidden');
+        gameOverOverlay?.classList.add('hidden');
+        roundEndOverlay?.classList.add('hidden');
+        countdownOverlay?.classList.remove('hidden');
     }
     
     updateCountdown(count) {
@@ -1120,6 +1149,69 @@ class FlappyGame {
         };
         
         document.getElementById('state-text').textContent = 'FIN DEL JUEGO';
+    }
+    
+    /**
+     * Reset game state for the next round in a tournament
+     */
+    resetForNextRound(data) {
+        console.log('[FlappyGame] Resetting for next round:', data.round);
+        
+        // Hide overlays
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        const roundEndOverlay = document.getElementById('round-end-overlay');
+        
+        if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
+        if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
+        
+        // Reset game state
+        this.gameStarted = false;
+        this.gameOver = false;
+        this.currentDistance = 0;
+        
+        // Remove all pipes from the scene
+        this.pipes.forEach(pipe => {
+            if (pipe.topMesh) this.scene.remove(pipe.topMesh);
+            if (pipe.bottomMesh) this.scene.remove(pipe.bottomMesh);
+        });
+        this.pipes = [];
+        
+        // Reset all players to starting positions
+        let laneIndex = 0;
+        this.players.forEach((player, playerId) => {
+            // Reset player state
+            player.isAlive = true;
+            player.y = 0;
+            player.velocity = 0;
+            player.lastVelocity = 0;
+            player.distance = 0;
+            player.lane = laneIndex;
+            
+            // Reset position
+            const startX = -5; // GAME_CONFIG.playerStartX
+            const laneZ = (player.lane - (4 - 1) / 2) * 1.5; // GAME_CONFIG.playerSpacing
+            player.model.position.set(startX, 0, laneZ);
+            player.model.rotation.set(0, Math.PI / 2, 0);
+            
+            // Reset model visibility
+            player.model.visible = true;
+            if (player.nameLabel) {
+                player.nameLabel.element.style.display = 'block';
+            }
+            
+            laneIndex++;
+        });
+        
+        // Reset camera
+        this.camera.position.set(0, 5, 25);
+        this.camera.lookAt(0, 0, 0);
+        
+        // Reset HUD
+        document.getElementById('distance-value').textContent = '0m';
+        document.getElementById('state-text').textContent = 'Preparando siguiente ronda...';
+        this.updatePlayersPanel();
+        
+        console.log('[FlappyGame] Reset complete, waiting for countdown');
     }
     
     updateCamera() {
