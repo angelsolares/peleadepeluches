@@ -202,6 +202,10 @@ class RaceGame {
         this.gameState = 'lobby'; // 'lobby', 'countdown', 'racing', 'finished'
         this.raceStartTime = 0;
         
+        // Audio managers
+        this.bgmManager = window.BGMManager ? new window.BGMManager() : null;
+        this.sfxManager = window.SFXManager ? new window.SFXManager() : null;
+        
         this.loadedModels = {}; // Cache for loaded character models
         this.animations = {};
         this.fbxLoader = null;
@@ -1053,6 +1057,11 @@ class RaceGame {
         this.raceStartTime = Date.now();
         
         document.getElementById('animation-name').textContent = '¡CARRERA EN CURSO!';
+        
+        // Start battle BGM
+        if (this.bgmManager) {
+            this.bgmManager.playBattle();
+        }
     }
     
     handleRaceState(state) {
@@ -1084,11 +1093,21 @@ class RaceGame {
             player.finished = true;
             player.finishTime = data.time;
             console.log(`[Race] ${player.name} finished in ${data.time}ms!`);
+            
+            // Play SFX when player finishes
+            if (this.sfxManager) {
+                this.sfxManager.playKO(); // Use KO sound as finish sound
+            }
         }
     }
     
     showWinner(data) {
         this.gameState = 'finished';
+        
+        // Play victory music
+        if (this.bgmManager) {
+            this.bgmManager.playVictory();
+        }
         
         const overlay = document.createElement('div');
         overlay.id = 'race-winner-overlay';
@@ -1096,12 +1115,12 @@ class RaceGame {
             <div class="winner-content">
                 <div class="winner-trophy">🏆</div>
                 <div class="winner-title">¡GANADOR!</div>
-                <div class="winner-name">${data.winnerName}</div>
+                <div class="winner-name">${data.winnerName || 'Jugador'}</div>
                 <div class="winner-time">Tiempo: ${(data.winnerTime / 1000).toFixed(2)}s</div>
                 <div class="final-positions">
                     ${data.positions.map((p, i) => `
                         <div style="color: ${i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : '#888'}">
-                            ${i + 1}° ${p.name} - ${p.time ? (p.time / 1000).toFixed(2) + 's' : 'DNF'}
+                            ${i + 1}° ${p.name || 'Jugador'} - ${p.time ? (p.time / 1000).toFixed(2) + 's' : 'DNF'}
                         </div>
                     `).join('')}
                 </div>
@@ -1109,7 +1128,7 @@ class RaceGame {
         `;
         document.body.appendChild(overlay);
         
-        document.getElementById('animation-name').textContent = `¡${data.winnerName} GANA!`;
+        document.getElementById('animation-name').textContent = `¡${data.winnerName || 'Jugador'} GANA!`;
     }
     
     /**

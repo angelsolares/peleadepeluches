@@ -9,16 +9,16 @@ const FLAPPY_CONFIG = {
     gameSpeed: 3.5,         // Base speed - slower for casual play
     maxGameSpeed: 8,        // Maximum speed at high difficulty
     speedIncreaseRate: 0.02,// Speed increase per meter traveled
-    pipeGap: 9,             // Starting gap - large and easy
+    pipeGap: 8,             // Starting gap - slightly reduced for challenge
     minPipeGap: 5,          // Minimum gap at max difficulty
     gapDecreaseRate: 0.01,  // Gap decrease per meter
-    pipeWidth: 1.5,         // Thinner pipes
-    pipeSpacing: 20,        // Base spacing between pipes
+    pipeWidth: 2.0,         // Wider pipes for more visible collision
+    pipeSpacing: 18,        // Base spacing between pipes
     minPipeSpacing: 12,     // Minimum spacing at max difficulty
     groundY: -8,
     ceilingY: 10,
     playerStartX: -5,
-    playerRadius: 0.35,     // Small hitbox for forgiveness
+    playerRadius: 0.55,     // Larger hitbox for more accurate collision (was 0.35)
     countdownDuration: 3,
     maxPlayers: 4,
     tickRate: 60,
@@ -312,14 +312,31 @@ class FlappyStateManager {
             isAlive: player.isAlive
         }));
         
-        results.sort((a, b) => b.distance - a.distance);
+        // Separate alive and dead players
+        const alivePlayers = results.filter(p => p.isAlive);
+        const deadPlayers = results.filter(p => !p.isAlive);
         
-        // Find winner (last alive or furthest distance)
-        const winner = results.find(p => p.isAlive) || results[0];
+        // Sort dead players by distance (furthest first)
+        deadPlayers.sort((a, b) => b.distance - a.distance);
+        
+        // Combine: alive players first, then dead sorted by distance
+        const sortedResults = [...alivePlayers, ...deadPlayers];
+        
+        // Find winner: prefer alive player, if none then furthest distance
+        let winner = alivePlayers[0]; // First alive player is the winner
+        if (!winner) {
+            // Everyone died, winner is whoever traveled furthest
+            winner = deadPlayers[0];
+        }
+        
+        console.log(`[Flappy] Game ended in room ${roomCode}. Winner: ${winner?.name || 'none'} (alive: ${winner?.isAlive})`);
+        
+        // Update results to use sorted version
+        const finalResults = sortedResults;
         
         // Call callback for tournament handling if set
         if (this.onGameEndCallback) {
-            const shouldEmit = this.onGameEndCallback(roomCode, winner, results, io);
+            const shouldEmit = this.onGameEndCallback(roomCode, winner, finalResults, io);
             if (!shouldEmit) {
                 // Tournament handler will emit the appropriate events
                 return;
@@ -329,7 +346,7 @@ class FlappyStateManager {
         // Default behavior: emit game-over
         io.to(roomCode).emit('flappy-game-over', {
             winner: winner,
-            results: results
+            results: finalResults
         });
     }
     

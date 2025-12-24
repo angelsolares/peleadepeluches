@@ -387,6 +387,10 @@ class FlappyGame {
         this.pipes = [];
         this.ground = null;
         this.gameStarted = false;
+        
+        // Audio managers
+        this.bgmManager = window.BGMManager ? new window.BGMManager() : null;
+        this.sfxManager = window.SFXManager ? new window.SFXManager() : null;
         this.gameOver = false;
         this.currentDistance = 0;
         
@@ -985,6 +989,11 @@ class FlappyGame {
         this.gameOver = false;
         
         document.getElementById('state-text').textContent = '¡VOLANDO!';
+        
+        // Start battle BGM
+        if (this.bgmManager) {
+            this.bgmManager.playBattle();
+        }
     }
     
     handleFlappyState(data) {
@@ -994,6 +1003,17 @@ class FlappyGame {
         for (const [playerId, state] of Object.entries(data.players)) {
             const player = this.players.get(playerId);
             if (player) {
+                // Detect flap for SFX (check velocity jump)
+                if (state.velocity !== undefined && player.lastVelocity !== undefined) {
+                    const velocityChange = state.velocity - player.lastVelocity;
+                    if (velocityChange > 3 && state.velocity > 0) {
+                        // Play flap SFX
+                        if (this.sfxManager) {
+                            this.sfxManager.playJump();
+                        }
+                    }
+                }
+                
                 player.update(this.clock.getDelta(), state);
             }
         }
@@ -1104,6 +1124,11 @@ class FlappyGame {
             player.deathOrder = this.getDeathOrder();
             this.updatePlayersPanel();
             
+            // Play death SFX
+            if (this.sfxManager) {
+                this.sfxManager.playKO();
+            }
+            
             // Show death notification with fadeout
             this.showDeathNotification(data.name);
             
@@ -1175,6 +1200,11 @@ class FlappyGame {
     showGameOver(data) {
         this.gameOver = true;
         this.gameStarted = false;
+        
+        // Play victory music
+        if (this.bgmManager) {
+            this.bgmManager.playVictory();
+        }
         
         const overlay = document.getElementById('game-over-overlay');
         const winnerTitle = document.getElementById('winner-title');

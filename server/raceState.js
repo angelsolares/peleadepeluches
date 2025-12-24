@@ -8,14 +8,14 @@ const RACE_CONFIG = {
     TRACK_LENGTH: 100,
     MAX_PLAYERS: 8,
     
-    // Movement physics
-    TAP_BOOST: 0.8,         // Speed boost per valid alternating tap
-    MAX_SPEED: 15,          // Maximum speed
-    DECELERATION: 0.92,     // Speed decay per tick
+    // Movement physics - increased for faster races
+    TAP_BOOST: 1.5,         // Speed boost per valid alternating tap (was 0.8)
+    MAX_SPEED: 25,          // Maximum speed (was 15)
+    DECELERATION: 0.94,     // Speed decay per tick (was 0.92, higher = slower decay)
     
     // Tap validation
-    TAP_COOLDOWN: 50,       // Minimum ms between taps
-    WRONG_TAP_PENALTY: 0.3, // Speed reduction for wrong tap
+    TAP_COOLDOWN: 40,       // Minimum ms between taps (was 50)
+    WRONG_TAP_PENALTY: 0.2, // Speed reduction for wrong tap (was 0.3)
     
     // Countdown
     COUNTDOWN_DURATION: 3   // Seconds
@@ -46,13 +46,18 @@ class RaceStateManager {
         // Initialize player states
         let lane = 0;
         room.players.forEach((player, socketId) => {
-            // Use character name as display name
-            const displayName = player.characterName || 
-                (player.character ? player.character.charAt(0).toUpperCase() + player.character.slice(1) : player.name);
+            // Use character name as display name, with fallbacks
+            let displayName = player.name || 'Jugador';
+            if (player.character) {
+                displayName = player.character.charAt(0).toUpperCase() + player.character.slice(1);
+            }
+            if (player.characterName) {
+                displayName = player.characterName;
+            }
             
             raceState.players.set(socketId, {
                 id: socketId,
-                name: displayName,
+                name: displayName || `Jugador ${lane + 1}`,
                 number: player.number,
                 character: player.character,
                 

@@ -36,9 +36,12 @@
     z-index: 100;
 }
 
-/* Tournament HUD - positioned below title for Flappy */
+/* Tournament HUD - positioned top right for Flappy */
 #tournament-hud {
-    top: 75px !important;
+    top: 20px !important;
+    right: 20px !important;
+    left: auto !important;
+    transform: none !important;
 }
 
 /* Players Panel */
