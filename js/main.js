@@ -16,8 +16,7 @@ import TournamentManager from './tournament/TournamentManager.js';
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
 
-// Mode Selector
-let modeSelector = null;
+// Game mode - set directly from menu.html selection
 let selectedGameMode = GAME_MODES.SMASH;
 
 // SFX Manager will be loaded dynamically
@@ -729,36 +728,15 @@ const animationNameDisplay = document.getElementById('animation-name');
 // Mode Selection
 // =================================
 
-/**
- * Show mode selector and wait for user selection
- * @returns {Promise<string>} Selected game mode
- */
-function showModeSelector() {
-    return new Promise((resolve) => {
-        modeSelector = new ModeSelector((mode) => {
-            selectedGameMode = mode;
-            console.log(`[Game] Mode selected: ${mode}`);
-            resolve(mode);
-        });
-        modeSelector.show();
-    });
-}
-
 // =================================
 // Initialization
 // =================================
 
 async function init() {
-    // Show mode selector first
-    await showModeSelector();
+    // Smash mode is selected directly from menu.html
+    // No need for mode selector - go straight to game initialization
+    selectedGameMode = GAME_MODES.SMASH;
     
-    // If Arena mode was selected, redirect to arena.html
-    if (selectedGameMode === GAME_MODES.ARENA) {
-        window.location.href = 'arena.html';
-        return;
-    }
-    
-    // Continue with Smash mode initialization
     // Create scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a2e);
