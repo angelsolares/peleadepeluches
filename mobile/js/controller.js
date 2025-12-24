@@ -100,7 +100,8 @@ const CHARACTERS = {
     angel: { name: 'Angel', emoji: '😇' },
     lidia: { name: 'Lidia', emoji: '👩‍🦰' },
     fabian: { name: 'Fabian', emoji: '🧑‍🦲' },
-    marile: { name: 'Marile', emoji: '👩‍🦳' }
+    marile: { name: 'Marile', emoji: '👩‍🦳' },
+    gabriel: { name: 'Gabriel', emoji: '👼' }
 };
 
 // Track which characters are taken by other players

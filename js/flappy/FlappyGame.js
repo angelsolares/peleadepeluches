@@ -22,6 +22,7 @@ const CHARACTER_MODELS = {
     'fabian': { path: 'assets/Fabian.fbx', color: '#3399ff', name: 'Fabian' },
     'marile': { path: 'assets/Marile.fbx', color: '#ff99cc', name: 'Marile' },
     'mariana': { path: 'assets/Mariana.fbx', color: '#cc66ff', name: 'Mariana' },
+    'gabriel': { path: 'assets/Gabriel.fbx', color: '#66ccff', name: 'Gabriel' },
     'sol': { path: 'assets/Sol.fbx', color: '#ffcc00', name: 'Sol' },
     'yadira': { path: 'assets/Yadira.fbx', color: '#ff6699', name: 'Yadira' }
 };

@@ -66,7 +66,8 @@ const CHARACTER_MODELS = {
     angel: { name: 'Angel', file: 'Angel.fbx', thumbnail: '😇' },
     lidia: { name: 'Lidia', file: 'Lidia.fbx', thumbnail: '👩‍🦰' },
     fabian: { name: 'Fabian', file: 'Fabian.fbx', thumbnail: '🧑‍🦲' },
-    marile: { name: 'Marile', file: 'Marile.fbx', thumbnail: '👩‍🦳' }
+    marile: { name: 'Marile', file: 'Marile.fbx', thumbnail: '👩‍🦳' },
+    gabriel: { name: 'Gabriel', file: 'Gabriel.fbx', thumbnail: '👼' }
 };
 
 // Animation files
