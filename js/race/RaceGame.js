@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { SERVER_URL } from '../config.js';
 
 // Race configuration
 const RACE_CONFIG = {
@@ -34,14 +35,17 @@ const RACE_CONFIG = {
 
 // Character models (same as other modes)
 const CHARACTER_MODELS = {
-    'Angel': { path: 'assets/Angel_Animated.fbx', color: '#00ffcc', name: 'Angel' },
-    'Edgar': { path: 'assets/Edgar_Animated.fbx', color: '#ff6600', name: 'Edgar' },
-    'Hector': { path: 'assets/Hector_Animated.fbx', color: '#9966ff', name: 'Hector' },
-    'Isabella': { path: 'assets/Isabella_Animated.fbx', color: '#ff3366', name: 'Isabella' },
-    'Jesus': { path: 'assets/Jesus_Animated.fbx', color: '#66ff33', name: 'Jesus' },
-    'Katy': { path: 'assets/Katy_Animated.fbx', color: '#ffcc00', name: 'Katy' },
-    'Lia': { path: 'assets/Lia_Animated.fbx', color: '#00ccff', name: 'Lia' },
-    'Mariana': { path: 'assets/Mariana_Animated.fbx', color: '#ff66cc', name: 'Mariana' }
+    'angel': { path: 'assets/Angel.fbx', color: '#00ffcc', name: 'Angel' },
+    'edgar': { path: 'assets/Edgar_Model.fbx', color: '#ff6600', name: 'Edgar' },
+    'hector': { path: 'assets/Hector.fbx', color: '#9966ff', name: 'Hector' },
+    'isabella': { path: 'assets/Isabella_Model.fbx', color: '#ff3366', name: 'Isabella' },
+    'jesus': { path: 'assets/Jesus_Model.fbx', color: '#66ff33', name: 'Jesus' },
+    'katy': { path: 'assets/Katy.fbx', color: '#ffcc00', name: 'Katy' },
+    'lia': { path: 'assets/Lia_Model.fbx', color: '#00ccff', name: 'Lia' },
+    'mariana': { path: 'assets/Mariana.fbx', color: '#ff66cc', name: 'Mariana' },
+    'sol': { path: 'assets/Sol.fbx', color: '#ffd700', name: 'Sol' },
+    'yadira': { path: 'assets/Yadira.fbx', color: '#ff00ff', name: 'Yadira' },
+    'lidia': { path: 'assets/Lidia.fbx', color: '#ff8800', name: 'Lidia' }
 };
 
 // Animation files
@@ -468,11 +472,13 @@ class RaceGame {
     }
     
     setupSocket() {
-        const serverUrl = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3000'
-            : 'https://peleadepeluches-server.onrender.com';
+        console.log('[Race] Connecting to server:', SERVER_URL);
         
-        this.socket = io(serverUrl);
+        this.socket = io(SERVER_URL, {
+            transports: ['websocket'],
+            reconnection: true,
+            reconnectionAttempts: 5
+        });
         
         this.socket.on('connect', () => {
             console.log('[Race] Connected to server');
@@ -521,8 +527,9 @@ class RaceGame {
     createRoom() {
         // Get character from URL or random
         const urlParams = new URLSearchParams(window.location.search);
-        const character = urlParams.get('character') || 
-            Object.keys(CHARACTER_MODELS)[Math.floor(Math.random() * Object.keys(CHARACTER_MODELS).length)];
+        const characterKeys = Object.keys(CHARACTER_MODELS);
+        const character = (urlParams.get('character') || 
+            characterKeys[Math.floor(Math.random() * characterKeys.length)]).toLowerCase();
         
         this.selectedCharacter = character;
         
@@ -609,8 +616,8 @@ class RaceGame {
     async addPlayer(playerData) {
         if (this.players.has(playerData.id)) return;
         
-        const characterKey = playerData.character || 'Angel';
-        const characterInfo = CHARACTER_MODELS[characterKey] || CHARACTER_MODELS['Angel'];
+        const characterKey = (playerData.character || 'angel').toLowerCase();
+        const characterInfo = CHARACTER_MODELS[characterKey] || CHARACTER_MODELS['angel'];
         
         // Clone model
         const model = SkeletonUtils.clone(this.baseModel);
