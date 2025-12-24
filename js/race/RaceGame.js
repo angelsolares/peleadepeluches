@@ -101,7 +101,7 @@ class RacePlayerEntity {
         labelDiv.style.borderColor = this.color;
         
         this.nameLabel = new CSS2DObject(labelDiv);
-        this.nameLabel.position.set(0, -0.5, 0); // Below the character
+        this.nameLabel.position.set(0, 2.5, 0); // Above the character (scale 0.01 = ~2.5 units high)
         this.model.add(this.nameLabel);
     }
     
