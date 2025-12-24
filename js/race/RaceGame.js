@@ -643,19 +643,27 @@ class RaceGame {
             document.body.appendChild(overlay);
             
             document.getElementById('start-race-btn').addEventListener('click', () => {
-                this.emitStartRace();
+                this.startGame();
             });
         }
     }
     
-    emitStartRace() {
+    startGame() {
         if (!this.socket || !this.isHost) return;
         
-        console.log('[Race] Starting race...');
-        this.socket.emit('start-race');
+        console.log('[Race] Starting game...');
         
-        // Hide the room code overlay once race starts
-        document.getElementById('room-code-overlay')?.classList.add('hidden');
+        this.socket.emit('start-game', (response) => {
+            console.log('[Race] start-game response:', response);
+            if (response && response.success) {
+                this.gameState = 'countdown';
+                document.getElementById('room-code-overlay')?.classList.add('hidden');
+                this.updateAnimationDisplay('¡Preparándose para la carrera!');
+            } else {
+                console.error('[Race] Failed to start game:', response);
+                this.updateAnimationDisplay('Error al iniciar: ' + (response?.error || 'desconocido'));
+            }
+        });
     }
     
     updateRoomOverlay(playerCount) {

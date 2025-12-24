@@ -144,9 +144,20 @@ io.on('connection', (socket) => {
         const result = lobbyManager.startGame(roomCode);
         
         if (result.success) {
+            // Prepare players data with correct character names
+            let playersData = result.players;
+            if (room.gameMode === 'race') {
+                // For race mode, use character name as display name
+                playersData = result.players.map(p => ({
+                    ...p,
+                    name: p.characterName || (p.character ? p.character.charAt(0).toUpperCase() + p.character.slice(1) : p.name)
+                }));
+            }
+            
             // Notify all players in room
             io.to(roomCode).emit('game-started', {
                 ...result,
+                players: playersData,
                 gameMode: room.gameMode || 'smash'
             });
             
@@ -157,8 +168,14 @@ io.on('connection', (socket) => {
                 startArenaLoop(roomCode);
                 console.log(`[Socket] Arena game started in room ${roomCode}`);
             } else if (room.gameMode === 'race') {
-                // Race mode handled by start-race event
-                console.log(`[Socket] Race room ready in ${roomCode}`);
+                // Initialize race state and start countdown
+                console.log(`[Socket] Race game starting in room ${roomCode}`);
+                raceStateManager.initializeRace(roomCode);
+                
+                // Start countdown (with callback to start race loop)
+                raceStateManager.startCountdown(roomCode, io, () => {
+                    startRaceLoop(roomCode);
+                });
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -469,30 +486,18 @@ io.on('connection', (socket) => {
             return;
         }
         
-        console.log(`[Race] Starting race in room ${roomCode}`);
+        console.log(`[Race] Manual start-race called for room ${roomCode}`);
         
-        // Initialize race state
-        raceStateManager.initializeRace(roomCode);
-        
-        // Emit game-started to mobile controllers so they switch to race controls
-        // Use character name (capitalized) as the display name
-        const playersArray = Array.from(room.players.values()).map((p, index) => ({
-            id: p.id,
-            name: p.characterName || p.character?.charAt(0).toUpperCase() + p.character?.slice(1) || p.name,
-            number: p.number,
-            character: p.character,
-            color: p.color
-        }));
-        
-        io.to(roomCode).emit('game-started', {
-            gameMode: 'race',
-            players: playersArray
-        });
-        
-        // Start countdown (with callback to start race loop)
-        raceStateManager.startCountdown(roomCode, io, () => {
-            startRaceLoop(roomCode);
-        });
+        // This event is now handled by start-game for consistency
+        // But we keep it for backward compatibility
+        const raceState = raceStateManager.raceStates.get(roomCode);
+        if (!raceState) {
+            // Race not initialized yet, do it now
+            raceStateManager.initializeRace(roomCode);
+            raceStateManager.startCountdown(roomCode, io, () => {
+                startRaceLoop(roomCode);
+            });
+        }
     });
     
     /**
