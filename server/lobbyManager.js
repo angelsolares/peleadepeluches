@@ -49,7 +49,12 @@ class LobbyManager {
             state: 'lobby', // 'lobby', 'playing', 'finished'
             gameMode: gameMode, // 'smash' or 'arena'
             maxPlayers: 8, // Support up to 8 players in Arena mode
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            // Tournament state
+            tournamentRounds: 1, // Total rounds (1, 3, or 5)
+            currentRound: 1,
+            roundWinners: [], // Array of { round, winnerId, winnerName }
+            playerScores: {} // { playerName: wins }
         };
         
         this.rooms.set(roomCode, room);
@@ -445,6 +450,180 @@ class LobbyManager {
                 this.rooms.delete(code);
             }
         }
+    }
+    
+    // ========== TOURNAMENT METHODS ==========
+    
+    /**
+     * Set tournament rounds for a room
+     * @param {string} roomCode - Room code
+     * @param {number} rounds - Number of rounds (1, 3, or 5)
+     * @returns {object} Result
+     */
+    setTournamentRounds(roomCode, rounds) {
+        const room = this.rooms.get(roomCode);
+        
+        if (!room) {
+            return { success: false, error: 'Room not found' };
+        }
+        
+        if (room.state !== 'lobby') {
+            return { success: false, error: 'Cannot change rounds during game' };
+        }
+        
+        // Validate rounds (only 1, 3, or 5 allowed)
+        const validRounds = [1, 3, 5];
+        if (!validRounds.includes(rounds)) {
+            return { success: false, error: 'Invalid number of rounds' };
+        }
+        
+        room.tournamentRounds = rounds;
+        
+        console.log(`[Lobby] Room ${roomCode} set to ${rounds} rounds`);
+        
+        return {
+            success: true,
+            tournamentRounds: rounds
+        };
+    }
+    
+    /**
+     * Record round winner
+     * @param {string} roomCode - Room code
+     * @param {string} winnerId - Winner's socket ID
+     * @param {string} winnerName - Winner's name
+     * @returns {object} Result with tournament status
+     */
+    recordRoundWinner(roomCode, winnerId, winnerName) {
+        const room = this.rooms.get(roomCode);
+        
+        if (!room) {
+            return { success: false, error: 'Room not found' };
+        }
+        
+        // Record the winner for this round
+        room.roundWinners.push({
+            round: room.currentRound,
+            winnerId: winnerId,
+            winnerName: winnerName
+        });
+        
+        // Update player scores
+        if (!room.playerScores[winnerName]) {
+            room.playerScores[winnerName] = 0;
+        }
+        room.playerScores[winnerName]++;
+        
+        console.log(`[Lobby] Round ${room.currentRound} winner: ${winnerName} (Room ${roomCode})`);
+        
+        // Check if tournament is over
+        const winsNeeded = Math.ceil(room.tournamentRounds / 2);
+        const isTournamentOver = room.playerScores[winnerName] >= winsNeeded || 
+                                  room.currentRound >= room.tournamentRounds;
+        
+        // Determine tournament winner if over
+        let tournamentWinner = null;
+        if (isTournamentOver) {
+            // Find player with most wins
+            let maxWins = 0;
+            for (const [name, wins] of Object.entries(room.playerScores)) {
+                if (wins > maxWins) {
+                    maxWins = wins;
+                    tournamentWinner = name;
+                }
+            }
+        }
+        
+        return {
+            success: true,
+            currentRound: room.currentRound,
+            totalRounds: room.tournamentRounds,
+            roundWinners: room.roundWinners,
+            playerScores: room.playerScores,
+            isTournamentOver: isTournamentOver,
+            tournamentWinner: tournamentWinner
+        };
+    }
+    
+    /**
+     * Advance to next round
+     * @param {string} roomCode - Room code
+     * @returns {object} Result
+     */
+    advanceRound(roomCode) {
+        const room = this.rooms.get(roomCode);
+        
+        if (!room) {
+            return { success: false, error: 'Room not found' };
+        }
+        
+        room.currentRound++;
+        room.state = 'playing';
+        
+        // Reset player states for new round (keep character selections)
+        room.players.forEach((player) => {
+            player.health = 0;
+            player.stocks = 3;
+            player.ready = false;
+        });
+        
+        console.log(`[Lobby] Room ${roomCode} advancing to round ${room.currentRound}`);
+        
+        return {
+            success: true,
+            currentRound: room.currentRound,
+            totalRounds: room.tournamentRounds
+        };
+    }
+    
+    /**
+     * Reset tournament (for rematch)
+     * @param {string} roomCode - Room code
+     * @returns {object} Result
+     */
+    resetTournament(roomCode) {
+        const room = this.rooms.get(roomCode);
+        
+        if (!room) {
+            return { success: false, error: 'Room not found' };
+        }
+        
+        room.currentRound = 1;
+        room.roundWinners = [];
+        room.playerScores = {};
+        room.state = 'lobby';
+        
+        // Reset player states
+        room.players.forEach((player) => {
+            player.health = 0;
+            player.stocks = 3;
+            player.ready = false;
+        });
+        
+        console.log(`[Lobby] Tournament reset in room ${roomCode}`);
+        
+        return {
+            success: true,
+            room: this.getRoomInfo(roomCode)
+        };
+    }
+    
+    /**
+     * Get tournament state for a room
+     * @param {string} roomCode - Room code
+     * @returns {object|null} Tournament state
+     */
+    getTournamentState(roomCode) {
+        const room = this.rooms.get(roomCode);
+        
+        if (!room) return null;
+        
+        return {
+            tournamentRounds: room.tournamentRounds,
+            currentRound: room.currentRound,
+            roundWinners: room.roundWinners,
+            playerScores: room.playerScores
+        };
     }
 }
 

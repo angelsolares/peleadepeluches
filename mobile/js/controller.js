@@ -187,6 +187,12 @@ function connectToServer() {
     socket.on('flappy-state', handleFlappyState);
     socket.on('flappy-player-died', handleFlappyDeath);
     socket.on('flappy-game-over', handleFlappyGameOver);
+    
+    // Tournament events
+    socket.on('tournament-config', handleTournamentConfig);
+    socket.on('round-ended', handleRoundEnded);
+    socket.on('tournament-ended', handleTournamentEnded);
+    socket.on('round-starting', handleRoundStarting);
 }
 
 // Race mode event handlers
@@ -1679,6 +1685,143 @@ function setupEventListeners() {
     elements.exitBtn.addEventListener('click', () => {
         leaveRoom();
     });
+}
+
+// =================================
+// Tournament Handlers
+// =================================
+
+let tournamentState = {
+    totalRounds: 1,
+    currentRound: 1,
+    playerScores: {}
+};
+
+function handleTournamentConfig(data) {
+    console.log('[Tournament] Config received:', data);
+    tournamentState.totalRounds = data.tournamentRounds || 1;
+    tournamentState.currentRound = data.currentRound || 1;
+    updateTournamentHUD();
+}
+
+function handleRoundEnded(data) {
+    console.log('[Tournament] Round ended:', data);
+    tournamentState.currentRound = data.currentRound;
+    tournamentState.playerScores = data.playerScores || {};
+    
+    showRoundEndOverlay(data);
+}
+
+function handleTournamentEnded(data) {
+    console.log('[Tournament] Tournament ended:', data);
+    tournamentState.playerScores = data.playerScores || {};
+    
+    hideRoundEndOverlay();
+    showTournamentEndOverlay(data);
+}
+
+function handleRoundStarting(data) {
+    console.log('[Tournament] Round starting:', data);
+    tournamentState.currentRound = data.round;
+    
+    hideRoundEndOverlay();
+    updateTournamentHUD();
+}
+
+function showRoundEndOverlay(data) {
+    const overlay = document.getElementById('round-end-overlay');
+    if (!overlay) return;
+    
+    const roundNum = document.getElementById('round-num');
+    const winnerName = document.getElementById('round-winner-name');
+    const scoresEl = document.getElementById('round-mobile-scores');
+    const countdownEl = document.getElementById('round-countdown');
+    
+    if (roundNum) roundNum.textContent = data.currentRound;
+    if (winnerName) winnerName.textContent = `¡${data.roundWinner} GANA!`;
+    
+    // Build scores
+    if (scoresEl && data.playerScores) {
+        const maxWins = Math.max(...Object.values(data.playerScores), 0);
+        scoresEl.innerHTML = Object.entries(data.playerScores)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, wins]) => `
+                <div class="score-item ${wins === maxWins ? 'leader' : ''}">
+                    <span class="player-name">${name}</span>
+                    <span class="player-wins">${wins}</span>
+                </div>
+            `).join('');
+    }
+    
+    overlay.classList.remove('hidden');
+    
+    // Countdown
+    let countdown = 5;
+    if (countdownEl) countdownEl.textContent = countdown;
+    
+    const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdownEl) countdownEl.textContent = countdown;
+        if (countdown <= 0) {
+            clearInterval(countdownInterval);
+        }
+    }, 1000);
+}
+
+function hideRoundEndOverlay() {
+    const overlay = document.getElementById('round-end-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function showTournamentEndOverlay(data) {
+    const overlay = document.getElementById('tournament-end-overlay');
+    if (!overlay) return;
+    
+    const champion = document.getElementById('tournament-winner');
+    const scoresEl = document.getElementById('tournament-mobile-scores');
+    
+    if (champion) champion.textContent = `🏆 ${data.tournamentWinner} 🏆`;
+    
+    // Build final scores
+    if (scoresEl && data.playerScores) {
+        scoresEl.innerHTML = Object.entries(data.playerScores)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, wins], index) => `
+                <div class="score-item ${name === data.tournamentWinner ? 'leader' : ''}">
+                    <span class="player-name">${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''} ${name}</span>
+                    <span class="player-wins">${wins}</span>
+                </div>
+            `).join('');
+    }
+    
+    overlay.classList.remove('hidden');
+    
+    // Setup exit button
+    const exitBtn = document.getElementById('tournament-exit-btn');
+    if (exitBtn) {
+        exitBtn.onclick = () => {
+            overlay.classList.add('hidden');
+            leaveRoom();
+        };
+    }
+}
+
+function updateTournamentHUD() {
+    const hud = document.getElementById('mobile-tournament-hud');
+    if (!hud) return;
+    
+    if (tournamentState.totalRounds <= 1) {
+        hud.classList.add('hidden');
+        return;
+    }
+    
+    hud.classList.remove('hidden');
+    
+    const currentRound = document.getElementById('mobile-current-round');
+    const totalRounds = document.getElementById('mobile-total-rounds');
+    
+    if (currentRound) currentRound.textContent = tournamentState.currentRound;
+    if (totalRounds) totalRounds.textContent = tournamentState.totalRounds;
 }
 
 // =================================

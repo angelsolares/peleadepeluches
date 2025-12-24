@@ -1256,3 +1256,147 @@ body {
     }
 }
 
+/* ==================================
+   Tournament Overlays (Mobile)
+   ================================== */
+
+/* Round End Overlay */
+#round-end-overlay .overlay-content,
+#tournament-end-overlay .overlay-content {
+    background: rgba(10, 10, 21, 0.98);
+    border: 2px solid var(--accent);
+    border-radius: 20px;
+    padding: 30px 25px;
+    max-width: 90%;
+    text-align: center;
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.round-title,
+.tournament-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.3rem;
+    color: var(--secondary);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.round-winner,
+.tournament-champion {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2rem;
+    font-weight: 900;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+    margin: 15px 0;
+}
+
+.round-scores,
+.tournament-scores {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin: 15px 0;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 12px;
+}
+
+.score-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    min-width: 70px;
+}
+
+.score-item .player-name {
+    font-size: 0.85rem;
+    color: #fff;
+    margin-bottom: 5px;
+}
+
+.score-item .player-wins {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: var(--secondary);
+}
+
+.score-item.leader {
+    border: 1px solid var(--accent);
+    background: rgba(255, 204, 0, 0.1);
+}
+
+.score-item.leader .player-wins {
+    color: var(--accent);
+}
+
+.round-countdown {
+    font-size: 1rem;
+    color: var(--text-muted);
+    margin-top: 15px;
+}
+
+.round-countdown span {
+    color: var(--primary);
+    font-weight: 700;
+    font-size: 1.3rem;
+}
+
+.trophy-icon {
+    font-size: 4rem;
+    margin-bottom: 10px;
+    animation: bounce 1s ease infinite;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+/* Tournament HUD (during game) */
+.tournament-hud {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    z-index: 100;
+}
+
+.tournament-hud.hidden {
+    display: none;
+}
+
+.round-indicator {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+#tournament-exit-btn {
+    margin-top: 15px;
+    padding: 12px 30px;
+}
+

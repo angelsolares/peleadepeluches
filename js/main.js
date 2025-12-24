@@ -11,6 +11,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { SERVER_URL, CONFIG } from './config.js';
 import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animation/AnimationController.js';
 import ModeSelector, { GAME_MODES } from './modes/ModeSelector.js';
+import TournamentManager from './tournament/TournamentManager.js';
 
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
@@ -1728,6 +1729,9 @@ function initializeSocket() {
     // Block and taunt events
     socket.on('player-block-state', handlePlayerBlockState);
     socket.on('player-taunting', handlePlayerTaunt);
+    
+    // Initialize tournament manager
+    window.tournamentManager = new TournamentManager(socket, 'smash');
 }
 
 function showRoomCode(code) {
@@ -1750,6 +1754,14 @@ function showRoomCode(code) {
                 </div>
                 <p>Escanea o ingresa este código en tu celular</p>
                 <a href="${mobileUrl}" target="_blank" class="url">${mobileUrl}</a>
+                
+                <div class="rounds-selector">
+                    <span class="rounds-label">RONDAS:</span>
+                    <button class="round-btn" data-rounds="1">1</button>
+                    <button class="round-btn selected" data-rounds="3">3</button>
+                    <button class="round-btn" data-rounds="5">5</button>
+                </div>
+                
                 <button id="start-game-btn" disabled>INICIAR JUEGO</button>
                 <p class="waiting-text">Esperando jugadores...</p>
             </div>
@@ -1854,6 +1866,9 @@ function showRoomCode(code) {
         
         // Start game button
         document.getElementById('start-game-btn').addEventListener('click', startGame);
+        
+        // Rounds selector
+        setupRoundsSelector();
     } else {
         overlay.querySelector('.room-code').textContent = code;
         overlay.querySelector('.qr-code').src = qrCodeUrl;
@@ -1861,6 +1876,22 @@ function showRoomCode(code) {
         overlay.querySelector('.url').textContent = mobileUrl;
         overlay.classList.remove('hidden');
     }
+}
+
+function setupRoundsSelector() {
+    const roundBtns = document.querySelectorAll('.round-btn');
+    roundBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const rounds = parseInt(e.target.dataset.rounds);
+            
+            // Update UI
+            roundBtns.forEach(b => b.classList.remove('selected'));
+            e.target.classList.add('selected');
+            
+            // Send to server
+            socket?.emit('set-tournament-rounds', rounds);
+        });
+    });
 }
 
 function updateRoomOverlay(playerCount) {

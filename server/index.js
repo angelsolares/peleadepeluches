@@ -40,6 +40,120 @@ const arenaStateManager = new ArenaStateManager(lobbyManager);
 const raceStateManager = new RaceStateManager(lobbyManager);
 const flappyStateManager = new FlappyStateManager();
 
+// Set up flappy game end callback for tournament handling
+flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
+    const room = lobbyManager.rooms.get(roomCode);
+    
+    if (room && room.tournamentRounds > 1 && winner) {
+        const roundResult = handleRoundEndFlappy(
+            roomCode, 
+            winner.id, 
+            winner.name,
+            'flappy'
+        );
+        
+        if (roundResult.action === 'tournament-end') {
+            io.to(roomCode).emit('tournament-ended', {
+                ...roundResult,
+                gameMode: 'flappy',
+                flappyWinner: winner,
+                results: results
+            });
+            return false; // Don't emit default game-over
+        } else if (roundResult.action === 'round-end') {
+            io.to(roomCode).emit('round-ended', {
+                ...roundResult,
+                gameMode: 'flappy',
+                flappyWinner: winner,
+                results: results
+            });
+            // Start next round after 5 seconds
+            setTimeout(() => startNextRoundFlappy(roomCode), 5000);
+            return false; // Don't emit default game-over
+        }
+    }
+    
+    return true; // Emit default game-over
+});
+
+// Flappy tournament helper (defined early for callback)
+function handleRoundEndFlappy(roomCode, winnerId, winnerName, gameMode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return { action: 'none' };
+    
+    // Record round winner
+    const result = lobbyManager.recordRoundWinner(roomCode, winnerId, winnerName);
+    
+    if (!result.success) {
+        return { action: 'none' };
+    }
+    
+    if (result.isTournamentOver) {
+        return {
+            action: 'tournament-end',
+            tournamentWinner: result.tournamentWinner,
+            playerScores: result.playerScores,
+            roundWinners: result.roundWinners,
+            totalRounds: result.totalRounds
+        };
+    } else {
+        return {
+            action: 'round-end',
+            currentRound: result.currentRound,
+            totalRounds: result.totalRounds,
+            roundWinner: winnerName,
+            roundWinnerId: winnerId,
+            playerScores: result.playerScores
+        };
+    }
+}
+
+function startNextRoundFlappy(roomCode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return;
+    
+    // Advance to next round
+    const advanceResult = lobbyManager.advanceRound(roomCode);
+    if (!advanceResult.success) return;
+    
+    console.log(`[Tournament] Starting flappy round ${advanceResult.currentRound} in room ${roomCode}`);
+    
+    // Emit round-starting event
+    io.to(roomCode).emit('round-starting', {
+        round: advanceResult.currentRound,
+        totalRounds: advanceResult.totalRounds
+    });
+    
+    // Get players for the new round
+    const players = Array.from(room.players.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        number: p.number,
+        color: p.color,
+        character: p.character || 'edgar'
+    }));
+    
+    // Small delay before actually starting
+    setTimeout(() => {
+        // Reinitialize flappy game
+        flappyStateManager.initializeGame(roomCode, players);
+        flappyStateManager.startCountdown(roomCode, io);
+        
+        // Get tournament state
+        const tournamentState = lobbyManager.getTournamentState(roomCode);
+        
+        // Emit game-started for the new round
+        io.to(roomCode).emit('game-started', {
+            success: true,
+            players: players,
+            gameMode: 'flappy',
+            tournamentRounds: tournamentState?.tournamentRounds || 1,
+            currentRound: tournamentState?.currentRound || 1,
+            playerScores: tournamentState?.playerScores || {}
+        });
+    }, 1000);
+}
+
 // Game tick intervals per room
 const gameLoops = new Map();
 
@@ -125,6 +239,44 @@ io.on('connection', (socket) => {
     });
     
     /**
+     * Set tournament rounds (host only)
+     */
+    socket.on('set-tournament-rounds', (rounds, callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        
+        if (!roomCode) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Not in a room' });
+            }
+            return;
+        }
+        
+        const room = lobbyManager.rooms.get(roomCode);
+        
+        if (room.hostId !== socket.id) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Only host can set rounds' });
+            }
+            return;
+        }
+        
+        const result = lobbyManager.setTournamentRounds(roomCode, rounds);
+        
+        if (result.success) {
+            // Notify all players in room about tournament config
+            io.to(roomCode).emit('tournament-config', {
+                tournamentRounds: rounds,
+                currentRound: 1
+            });
+            console.log(`[Socket] Tournament rounds set to ${rounds} in room ${roomCode}`);
+        }
+        
+        if (typeof callback === 'function') {
+            callback(result);
+        }
+    });
+    
+    /**
      * Start the game (host only)
      */
     socket.on('start-game', (callback) => {
@@ -159,11 +311,18 @@ io.on('connection', (socket) => {
                 }));
             }
             
+            // Get tournament state
+            const tournamentState = lobbyManager.getTournamentState(roomCode);
+            
             // Notify all players in room
             io.to(roomCode).emit('game-started', {
                 ...result,
                 players: playersData,
-                gameMode: room.gameMode || 'smash'
+                gameMode: room.gameMode || 'smash',
+                // Include tournament info
+                tournamentRounds: tournamentState?.tournamentRounds || 1,
+                currentRound: tournamentState?.currentRound || 1,
+                playerScores: tournamentState?.playerScores || {}
             });
             
             // Start appropriate game loop based on mode
@@ -589,6 +748,114 @@ io.on('connection', (socket) => {
 // =================================
 
 /**
+ * Handle round/tournament end logic
+ * @param {string} roomCode - Room code
+ * @param {string} winnerId - Winner's socket ID
+ * @param {string} winnerName - Winner's name
+ * @param {string} gameMode - Game mode
+ * @returns {object} Result with next action
+ */
+function handleRoundEnd(roomCode, winnerId, winnerName, gameMode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return { action: 'none' };
+    
+    // Record round winner
+    const result = lobbyManager.recordRoundWinner(roomCode, winnerId, winnerName);
+    
+    if (!result.success) {
+        return { action: 'none' };
+    }
+    
+    if (result.isTournamentOver) {
+        // Tournament is over
+        return {
+            action: 'tournament-end',
+            tournamentWinner: result.tournamentWinner,
+            playerScores: result.playerScores,
+            roundWinners: result.roundWinners,
+            totalRounds: result.totalRounds
+        };
+    } else {
+        // More rounds to play
+        return {
+            action: 'round-end',
+            currentRound: result.currentRound,
+            totalRounds: result.totalRounds,
+            roundWinner: winnerName,
+            roundWinnerId: winnerId,
+            playerScores: result.playerScores
+        };
+    }
+}
+
+/**
+ * Start next round after delay
+ * @param {string} roomCode - Room code
+ * @param {string} gameMode - Game mode
+ */
+function startNextRound(roomCode, gameMode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return;
+    
+    // Advance to next round
+    const advanceResult = lobbyManager.advanceRound(roomCode);
+    if (!advanceResult.success) return;
+    
+    console.log(`[Tournament] Starting round ${advanceResult.currentRound} in room ${roomCode}`);
+    
+    // Emit round-starting event
+    io.to(roomCode).emit('round-starting', {
+        round: advanceResult.currentRound,
+        totalRounds: advanceResult.totalRounds
+    });
+    
+    // Get players for the new round
+    const players = Array.from(room.players.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        number: p.number,
+        color: p.color,
+        character: p.character || 'edgar'
+    }));
+    
+    // Small delay before actually starting
+    setTimeout(() => {
+        // Reinitialize game state based on mode
+        if (gameMode === 'arena') {
+            arenaStateManager.initializeArena(roomCode);
+            stopArenaLoop(roomCode);
+            startArenaLoop(roomCode);
+        } else if (gameMode === 'race') {
+            raceStateManager.initializeRace(roomCode);
+            stopRaceLoop(roomCode);
+            raceStateManager.startCountdown(roomCode, io, () => {
+                startRaceLoop(roomCode);
+            });
+        } else if (gameMode === 'flappy') {
+            flappyStateManager.initializeGame(roomCode, players);
+            flappyStateManager.startCountdown(roomCode, io);
+        } else {
+            // Smash mode
+            stopGameLoop(roomCode);
+            startGameLoop(roomCode);
+        }
+        
+        // Get tournament state
+        const tournamentState = lobbyManager.getTournamentState(roomCode);
+        
+        // Emit game-started for the new round
+        io.to(roomCode).emit('game-started', {
+            success: true,
+            players: players,
+            gameMode: gameMode,
+            tournamentRounds: tournamentState?.tournamentRounds || 1,
+            currentRound: tournamentState?.currentRound || 1,
+            playerScores: tournamentState?.playerScores || {}
+        });
+    }, 1000);
+}
+
+/**
  * Handle player disconnect/leave
  */
 function handleDisconnect(socket) {
@@ -653,7 +920,28 @@ function startGameLoop(roomCode) {
                 const gameOver = gameStateManager.checkGameOver(roomCode);
                 if (gameOver) {
                     stopGameLoop(roomCode);
-                    io.to(roomCode).emit('game-over', gameOver);
+                    
+                    // Handle tournament logic
+                    const room = lobbyManager.rooms.get(roomCode);
+                    if (room && room.tournamentRounds > 1) {
+                        const roundResult = handleRoundEnd(
+                            roomCode, 
+                            gameOver.winner?.id, 
+                            gameOver.winner?.name,
+                            'smash'
+                        );
+                        
+                        if (roundResult.action === 'tournament-end') {
+                            io.to(roomCode).emit('tournament-ended', roundResult);
+                        } else if (roundResult.action === 'round-end') {
+                            io.to(roomCode).emit('round-ended', roundResult);
+                            // Start next round after 5 seconds
+                            setTimeout(() => startNextRound(roomCode, 'smash'), 5000);
+                        }
+                    } else {
+                        // Single round, just emit game-over
+                        io.to(roomCode).emit('game-over', gameOver);
+                    }
                 }
             }
         } else {
@@ -729,7 +1017,34 @@ function startArenaLoop(roomCode) {
             const gameOver = arenaStateManager.checkGameOver(roomCode);
             if (gameOver) {
                 stopArenaLoop(roomCode);
-                io.to(roomCode).emit('arena-game-over', gameOver);
+                
+                // Handle tournament logic
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1) {
+                    const roundResult = handleRoundEnd(
+                        roomCode, 
+                        gameOver.winner?.id, 
+                        gameOver.winner?.name,
+                        'arena'
+                    );
+                    
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', {
+                            ...roundResult,
+                            gameMode: 'arena'
+                        });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', {
+                            ...roundResult,
+                            gameMode: 'arena'
+                        });
+                        // Start next round after 5 seconds
+                        setTimeout(() => startNextRound(roomCode, 'arena'), 5000);
+                    }
+                } else {
+                    // Single round, just emit game-over
+                    io.to(roomCode).emit('arena-game-over', gameOver);
+                }
             }
         } else {
             // Room no longer active
@@ -795,7 +1110,34 @@ function startRaceLoop(roomCode) {
             if (state.raceOver) {
                 stopRaceLoop(roomCode);
                 const winnerInfo = raceStateManager.getWinnerInfo(roomCode);
-                if (winnerInfo) {
+                
+                // Handle tournament logic
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1 && winnerInfo) {
+                    const roundResult = handleRoundEnd(
+                        roomCode, 
+                        winnerInfo.id, 
+                        winnerInfo.name,
+                        'race'
+                    );
+                    
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', {
+                            ...roundResult,
+                            gameMode: 'race',
+                            raceWinner: winnerInfo
+                        });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', {
+                            ...roundResult,
+                            gameMode: 'race',
+                            raceWinner: winnerInfo
+                        });
+                        // Start next round after 5 seconds
+                        setTimeout(() => startNextRound(roomCode, 'race'), 5000);
+                    }
+                } else if (winnerInfo) {
+                    // Single round, just emit race-winner
                     io.to(roomCode).emit('race-winner', winnerInfo);
                 }
                 raceStateManager.endRace(roomCode);

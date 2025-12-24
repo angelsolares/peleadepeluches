@@ -8,6 +8,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL } from '../config.js';
+import TournamentManager from '../tournament/TournamentManager.js';
 
 // Character Models Configuration
 const CHARACTER_MODELS = {
@@ -780,6 +781,9 @@ class FlappyGame {
         this.socket.on('disconnect', () => {
             console.log('[FlappyGame] Disconnected from server');
         });
+        
+        // Initialize tournament manager
+        this.tournamentManager = new TournamentManager(this.socket, 'flappy');
     }
     
     createRoom() {
@@ -818,6 +822,26 @@ class FlappyGame {
                 this.socket.emit('start-game');
             }
         };
+        
+        // Setup rounds selector
+        this.setupRoundsSelector();
+    }
+    
+    setupRoundsSelector() {
+        const roundBtns = document.querySelectorAll('.round-btn');
+        roundBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const rounds = parseInt(e.target.dataset.rounds);
+                
+                // Update UI
+                roundBtns.forEach(b => b.classList.remove('selected'));
+                e.target.classList.add('selected');
+                
+                // Send to server
+                this.tournamentRounds = rounds;
+                this.socket?.emit('set-tournament-rounds', rounds);
+            });
+        });
     }
     
     updateRoomOverlay() {

@@ -12,6 +12,7 @@ import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationController.js';
 import ArenaPlayerController from './ArenaPlayerController.js';
 import ArenaHUD from './ArenaHUD.js';
+import TournamentManager from '../tournament/TournamentManager.js';
 
 // =================================
 // Configuration
@@ -1018,6 +1019,9 @@ class ArenaGame {
         this.socket.on('arena-game-over', (data) => this.handleArenaGameOver(data));
         this.socket.on('arena-grab-escape', (data) => this.handleArenaGrabEscape(data));
         this.socket.on('arena-elimination', (data) => this.handleArenaElimination(data));
+        
+        // Initialize tournament manager
+        this.tournamentManager = new TournamentManager(this.socket, 'arena');
     }
     
     showRoomCode(code) {
@@ -1038,6 +1042,14 @@ class ArenaGame {
                     </div>
                     <p>Escanea o ingresa este código en tu celular</p>
                     <a href="${mobileUrl}" target="_blank" class="url">${mobileUrl}</a>
+                    
+                    <div class="rounds-selector">
+                        <span class="rounds-label">RONDAS:</span>
+                        <button class="round-btn" data-rounds="1">1</button>
+                        <button class="round-btn selected" data-rounds="3">3</button>
+                        <button class="round-btn" data-rounds="5">5</button>
+                    </div>
+                    
                     <button id="start-game-btn" disabled>INICIAR LUCHA</button>
                     <p class="waiting-text">Esperando luchadores...</p>
                 </div>
@@ -1081,7 +1093,27 @@ class ArenaGame {
             document.body.appendChild(overlay);
             
             document.getElementById('start-game-btn').addEventListener('click', () => this.startGame());
+            
+            // Add rounds selector listeners
+            this.setupRoundsSelector();
         }
+    }
+    
+    setupRoundsSelector() {
+        const roundBtns = document.querySelectorAll('.round-btn');
+        roundBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const rounds = parseInt(e.target.dataset.rounds);
+                
+                // Update UI
+                roundBtns.forEach(b => b.classList.remove('selected'));
+                e.target.classList.add('selected');
+                
+                // Send to server
+                this.tournamentRounds = rounds;
+                this.socket?.emit('set-tournament-rounds', rounds);
+            });
+        });
     }
     
     startGame() {

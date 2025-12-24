@@ -15,6 +15,19 @@
         <div id="hud">
             <h1 class="game-title">FLAPPY PELUCHES</h1>
             
+            <!-- Tournament HUD (shown during game) -->
+            <div id="tournament-hud" class="hidden">
+                <div class="tournament-round-display">
+                    Ronda <span id="current-round">1</span>/<span id="total-rounds">3</span>
+                </div>
+                <div class="round-indicators" id="round-indicators">
+                    <!-- Dynamic round dots -->
+                </div>
+                <div id="tournament-scores">
+                    <!-- Dynamic scores per player -->
+                </div>
+            </div>
+            
             <!-- Players Status Panel -->
             <div id="players-panel">
                 <h2>JUGADORES</h2>
@@ -42,6 +55,29 @@
             </div>
         </div>
         
+        <!-- Round End Overlay -->
+        <div id="round-end-overlay" class="hidden">
+            <h2>RONDA <span id="round-number">1</span> TERMINADA</h2>
+            <div id="round-winner">¡GANADOR!</div>
+            <div id="round-scores">
+                <!-- Dynamic scores -->
+            </div>
+            <div id="next-round-countdown">
+                Siguiente ronda en <span class="countdown-number" id="countdown-timer">5</span>...
+            </div>
+        </div>
+        
+        <!-- Tournament End Overlay -->
+        <div id="tournament-end-overlay" class="hidden">
+            <div class="champion-crown">👑</div>
+            <h1>¡TORNEO TERMINADO!</h1>
+            <div id="tournament-champion">CAMPEÓN</div>
+            <div id="tournament-final-scores">
+                <!-- Dynamic final scores -->
+            </div>
+            <button class="btn-return-menu" onclick="window.location.href='menu.html'">VOLVER AL MENÚ</button>
+        </div>
+        
         <!-- Loading screen -->
         <div id="loading-screen">
             <div class="loader-content">
@@ -66,6 +102,15 @@
                 <img id="qr-code" alt="QR Code">
                 <p>Escanea o ingresa este código en tu celular</p>
                 <a id="mobile-link" href="#" target="_blank"></a>
+                
+                <!-- Rounds Selector -->
+                <div class="rounds-selector">
+                    <span class="rounds-label">RONDAS:</span>
+                    <button class="round-btn" data-rounds="1">1</button>
+                    <button class="round-btn selected" data-rounds="3">3</button>
+                    <button class="round-btn" data-rounds="5">5</button>
+                </div>
+                
                 <button id="start-game-btn" disabled>INICIAR JUEGO</button>
                 <p id="players-waiting">Esperando jugadores...</p>
             </div>

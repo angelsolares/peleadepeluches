@@ -15,6 +15,19 @@
         <div id="hud">
             <h1 class="game-title">ARENA DE PELUCHES</h1>
             
+            <!-- Tournament HUD (shown during game) -->
+            <div id="tournament-hud" class="hidden">
+                <div class="tournament-round-display">
+                    Ronda <span id="current-round">1</span>/<span id="total-rounds">3</span>
+                </div>
+                <div class="round-indicators" id="round-indicators">
+                    <!-- Dynamic round dots -->
+                </div>
+                <div id="tournament-scores">
+                    <!-- Dynamic scores per player -->
+                </div>
+            </div>
+            
             <!-- Player HUD Bars (Health + Stamina) -->
             <div id="arena-player-huds">
                 <!-- Dynamic player HUDs will be inserted here -->
@@ -28,6 +41,29 @@
                 <span class="label">Estado:</span>
                 <span id="animation-name">Cargando...</span>
             </div>
+        </div>
+        
+        <!-- Round End Overlay -->
+        <div id="round-end-overlay" class="hidden">
+            <h2>RONDA <span id="round-number">1</span> TERMINADA</h2>
+            <div id="round-winner">¡GANADOR!</div>
+            <div id="round-scores">
+                <!-- Dynamic scores -->
+            </div>
+            <div id="next-round-countdown">
+                Siguiente ronda en <span class="countdown-number" id="countdown-number">5</span>...
+            </div>
+        </div>
+        
+        <!-- Tournament End Overlay -->
+        <div id="tournament-end-overlay" class="hidden">
+            <div class="champion-crown">👑</div>
+            <h1>¡TORNEO TERMINADO!</h1>
+            <div id="tournament-champion">CAMPEÓN</div>
+            <div id="tournament-final-scores">
+                <!-- Dynamic final scores -->
+            </div>
+            <button class="btn-return-menu" onclick="window.location.href='menu.html'">VOLVER AL MENÚ</button>
         </div>
         
         <!-- Loading screen -->

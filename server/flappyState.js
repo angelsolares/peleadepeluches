@@ -29,6 +29,11 @@ const FLAPPY_CONFIG = {
 class FlappyStateManager {
     constructor() {
         this.games = new Map(); // roomCode -> gameState
+        this.onGameEndCallback = null; // Callback for tournament handling
+    }
+    
+    setOnGameEndCallback(callback) {
+        this.onGameEndCallback = callback;
     }
     
     initializeGame(roomCode, players) {
@@ -312,6 +317,16 @@ class FlappyStateManager {
         // Find winner (last alive or furthest distance)
         const winner = results.find(p => p.isAlive) || results[0];
         
+        // Call callback for tournament handling if set
+        if (this.onGameEndCallback) {
+            const shouldEmit = this.onGameEndCallback(roomCode, winner, results, io);
+            if (!shouldEmit) {
+                // Tournament handler will emit the appropriate events
+                return;
+            }
+        }
+        
+        // Default behavior: emit game-over
         io.to(roomCode).emit('flappy-game-over', {
             winner: winner,
             results: results
