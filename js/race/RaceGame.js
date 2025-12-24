@@ -182,6 +182,9 @@ class RaceGame {
         
         this.clock = new THREE.Clock();
         
+        // Camera mode: 'dynamic', 'top', 'side'
+        this.cameraMode = 'dynamic';
+        
         this.init();
     }
     
@@ -196,6 +199,7 @@ class RaceGame {
         
         this.setupSocket();
         this.setupScoreboard();
+        this.createCameraSelector();
         
         this.hideLoading();
         this.animate();
@@ -766,6 +770,104 @@ class RaceGame {
         this.updateScoreboard();
     }
     
+    createCameraSelector() {
+        // Create camera selector UI
+        const selector = document.createElement('div');
+        selector.id = 'camera-selector';
+        selector.innerHTML = `
+            <div class="camera-label">📷 CÁMARA</div>
+            <div class="camera-buttons">
+                <button class="camera-btn active" data-mode="dynamic" title="Cámara Dinámica">
+                    <span class="cam-icon">🎬</span>
+                    <span class="cam-text">Dinámica</span>
+                </button>
+                <button class="camera-btn" data-mode="top" title="Vista Aérea">
+                    <span class="cam-icon">🔽</span>
+                    <span class="cam-text">Arriba</span>
+                </button>
+                <button class="camera-btn" data-mode="side" title="Vista Lateral">
+                    <span class="cam-icon">➡️</span>
+                    <span class="cam-text">Lateral</span>
+                </button>
+            </div>
+        `;
+        
+        // Add styles
+        const style = document.createElement('style');
+        style.textContent = `
+            #camera-selector {
+                position: fixed;
+                bottom: 100px;
+                right: 20px;
+                background: rgba(10, 10, 21, 0.9);
+                border: 2px solid #00ff88;
+                border-radius: 12px;
+                padding: 12px;
+                z-index: 50;
+                font-family: 'Orbitron', sans-serif;
+            }
+            .camera-label {
+                color: #00ff88;
+                font-size: 0.75rem;
+                text-align: center;
+                margin-bottom: 8px;
+                letter-spacing: 2px;
+            }
+            .camera-buttons {
+                display: flex;
+                gap: 6px;
+            }
+            .camera-btn {
+                background: rgba(0, 255, 136, 0.1);
+                border: 1px solid rgba(0, 255, 136, 0.3);
+                border-radius: 8px;
+                padding: 8px 12px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 4px;
+            }
+            .camera-btn:hover {
+                background: rgba(0, 255, 136, 0.2);
+                border-color: #00ff88;
+                transform: scale(1.05);
+            }
+            .camera-btn.active {
+                background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 204, 255, 0.3));
+                border-color: #00ff88;
+                box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+            }
+            .cam-icon {
+                font-size: 1.2rem;
+            }
+            .cam-text {
+                color: #fff;
+                font-size: 0.65rem;
+                letter-spacing: 1px;
+            }
+            .camera-btn.active .cam-text {
+                color: #00ff88;
+            }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(selector);
+        
+        // Add event listeners
+        selector.querySelectorAll('.camera-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update active state
+                selector.querySelectorAll('.camera-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // Change camera mode
+                this.cameraMode = btn.dataset.mode;
+                console.log('[Race] Camera mode changed to:', this.cameraMode);
+            });
+        });
+    }
+    
     updateScoreboard() {
         const container = document.getElementById('race-positions');
         if (!container) return;
@@ -904,6 +1006,7 @@ class RaceGame {
         
         // Find bounds of all players
         let minZ = Infinity, maxZ = -Infinity;
+        let minX = Infinity, maxX = -Infinity;
         let avgX = 0, avgZ = 0;
         let count = 0;
         
@@ -913,6 +1016,8 @@ class RaceGame {
                 avgZ += player.worldPosition.z;
                 minZ = Math.min(minZ, player.worldPosition.z);
                 maxZ = Math.max(maxZ, player.worldPosition.z);
+                minX = Math.min(minX, player.worldPosition.x);
+                maxX = Math.max(maxX, player.worldPosition.x);
                 count++;
             }
         });
@@ -920,34 +1025,65 @@ class RaceGame {
         if (count === 0) {
             // All finished, focus on finish line
             avgZ = RACE_CONFIG.TRACK_LENGTH;
+            avgX = 0;
         } else {
             avgX /= count;
             avgZ /= count;
         }
         
-        // Calculate camera distance based on spread
-        const spread = Math.max(maxZ - minZ, 10);
-        const targetDistance = Math.max(RACE_CONFIG.CAMERA_DISTANCE, spread * 0.8);
-        const targetHeight = Math.max(RACE_CONFIG.CAMERA_HEIGHT, spread * 0.4);
+        // Calculate spread
+        const spreadZ = Math.max(maxZ - minZ, 10);
+        const spreadX = Math.max(maxX - minX, 5);
         
-        // Camera position
-        const targetX = 0;
-        const targetY = targetHeight;
-        const targetCamZ = avgZ - targetDistance;
+        let targetX, targetY, targetCamZ;
+        let lookAtX, lookAtY, lookAtZ;
+        
+        switch (this.cameraMode) {
+            case 'top':
+                // Top-down camera (bird's eye view)
+                const topHeight = Math.max(40, spreadZ * 0.6);
+                targetX = avgX;
+                targetY = topHeight;
+                targetCamZ = avgZ;
+                lookAtX = avgX;
+                lookAtY = 0;
+                lookAtZ = avgZ;
+                break;
+                
+            case 'side':
+                // Side camera (lateral view)
+                const sideDistance = Math.max(30, spreadZ * 0.5);
+                const sideHeight = Math.max(8, spreadZ * 0.15);
+                targetX = -sideDistance; // Camera on the left side
+                targetY = sideHeight;
+                targetCamZ = avgZ;
+                lookAtX = 0;
+                lookAtY = 1;
+                lookAtZ = avgZ;
+                break;
+                
+            case 'dynamic':
+            default:
+                // Dynamic camera (original - diagonal behind)
+                const targetDistance = Math.max(RACE_CONFIG.CAMERA_DISTANCE, spreadZ * 0.8);
+                const targetHeight = Math.max(RACE_CONFIG.CAMERA_HEIGHT, spreadZ * 0.4);
+                targetX = 0;
+                targetY = targetHeight;
+                targetCamZ = avgZ - targetDistance;
+                lookAtX = avgX;
+                lookAtY = 1;
+                lookAtZ = avgZ;
+                break;
+        }
         
         // Smooth interpolation
-        this.camera.position.x = THREE.MathUtils.lerp(
-            this.camera.position.x, targetX, RACE_CONFIG.CAMERA_LERP
-        );
-        this.camera.position.y = THREE.MathUtils.lerp(
-            this.camera.position.y, targetY, RACE_CONFIG.CAMERA_LERP
-        );
-        this.camera.position.z = THREE.MathUtils.lerp(
-            this.camera.position.z, targetCamZ, RACE_CONFIG.CAMERA_LERP
-        );
+        const lerpSpeed = RACE_CONFIG.CAMERA_LERP;
+        this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetX, lerpSpeed);
+        this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetY, lerpSpeed);
+        this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCamZ, lerpSpeed);
         
-        // Look at average position
-        this.camera.lookAt(avgX, 1, avgZ);
+        // Look at target position
+        this.camera.lookAt(lookAtX, lookAtY, lookAtZ);
     }
     
     hideLoading() {
