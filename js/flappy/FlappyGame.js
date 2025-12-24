@@ -480,12 +480,21 @@ class FlappyGame {
                     // Get new model
                     const newSourceModel = this.loadedModels[characterKey];
                     if (newSourceModel) {
+                        // Remove old name label from model first (it's a child of the model)
+                        if (player.nameLabel) {
+                            if (player.model) {
+                                player.model.remove(player.nameLabel);
+                            }
+                            // Dispose the CSS2D element
+                            if (player.nameLabel.element && player.nameLabel.element.parentNode) {
+                                player.nameLabel.element.parentNode.removeChild(player.nameLabel.element);
+                            }
+                            player.nameLabel = null;
+                        }
+                        
                         // Remove old model from scene
                         if (player.model) {
                             this.scene.remove(player.model);
-                        }
-                        if (player.nameLabel) {
-                            this.scene.remove(player.nameLabel);
                         }
                         
                         // Clone new model

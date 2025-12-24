@@ -6,10 +6,15 @@
 const FLAPPY_CONFIG = {
     gravity: -6,            // Very gentle gravity - floaty feel
     flapStrength: 6,        // Proportional to gravity for smooth flight
-    gameSpeed: 3.5,         // Slower for casual play
-    pipeGap: 9,             // Very large gap - easy to pass through
+    gameSpeed: 3.5,         // Base speed - slower for casual play
+    maxGameSpeed: 8,        // Maximum speed at high difficulty
+    speedIncreaseRate: 0.02,// Speed increase per meter traveled
+    pipeGap: 9,             // Starting gap - large and easy
+    minPipeGap: 5,          // Minimum gap at max difficulty
+    gapDecreaseRate: 0.01,  // Gap decrease per meter
     pipeWidth: 1.5,         // Thinner pipes
-    pipeSpacing: 20,        // Much more space between pipes
+    pipeSpacing: 20,        // Base spacing between pipes
+    minPipeSpacing: 12,     // Minimum spacing at max difficulty
     groundY: -8,
     ceilingY: 10,
     playerStartX: -5,
@@ -117,6 +122,25 @@ class FlappyStateManager {
         const game = this.games.get(roomCode);
         if (!game || !game.gameStarted) return;
         
+        // Calculate current difficulty based on distance
+        const currentSpeed = Math.min(
+            FLAPPY_CONFIG.gameSpeed + (game.distance * FLAPPY_CONFIG.speedIncreaseRate),
+            FLAPPY_CONFIG.maxGameSpeed
+        );
+        const currentGap = Math.max(
+            FLAPPY_CONFIG.pipeGap - (game.distance * FLAPPY_CONFIG.gapDecreaseRate),
+            FLAPPY_CONFIG.minPipeGap
+        );
+        const currentSpacing = Math.max(
+            FLAPPY_CONFIG.pipeSpacing - (game.distance * 0.03),
+            FLAPPY_CONFIG.minPipeSpacing
+        );
+        
+        // Store current difficulty for pipe spawning
+        game.currentSpeed = currentSpeed;
+        game.currentGap = currentGap;
+        game.currentSpacing = currentSpacing;
+        
         let aliveCount = 0;
         
         // Update each player
@@ -144,7 +168,7 @@ class FlappyStateManager {
             
             // Check pipe collision
             for (const pipe of game.pipes) {
-                if (this.checkPipeCollision(player, pipe)) {
+                if (this.checkPipeCollision(player, pipe, game)) {
                     this.killPlayer(game, playerId, io);
                     break;
                 }
@@ -154,22 +178,22 @@ class FlappyStateManager {
             player.distance = game.distance;
         }
         
-        // Move pipes and spawn new ones
+        // Move pipes using current speed
         for (const pipe of game.pipes) {
-            pipe.x -= FLAPPY_CONFIG.gameSpeed * deltaTime;
+            pipe.x -= currentSpeed * deltaTime;
         }
         
         // Remove pipes that are off screen
         game.pipes = game.pipes.filter(pipe => pipe.x > -15);
         
-        // Spawn new pipes
+        // Spawn new pipes with dynamic spacing
         if (game.pipes.length === 0 || 
-            game.pipes[game.pipes.length - 1].x < FLAPPY_CONFIG.pipeStartX - FLAPPY_CONFIG.pipeSpacing) {
+            game.pipes[game.pipes.length - 1].x < FLAPPY_CONFIG.pipeStartX - currentSpacing) {
             this.spawnPipe(game);
         }
         
         // Update game distance
-        game.distance += FLAPPY_CONFIG.gameSpeed * deltaTime;
+        game.distance += currentSpeed * deltaTime;
         
         // Emit game state
         io.to(roomCode).emit('flappy-state', {
@@ -192,23 +216,28 @@ class FlappyStateManager {
     }
     
     spawnPipe(game) {
+        // Use dynamic gap based on current difficulty
+        const currentGap = game.currentGap || FLAPPY_CONFIG.pipeGap;
+        const currentSpacing = game.currentSpacing || FLAPPY_CONFIG.pipeSpacing;
+        
         // Calculate gap position (random within safe bounds)
-        const minGapY = FLAPPY_CONFIG.groundY + FLAPPY_CONFIG.pipeGap / 2 + 2;
-        const maxGapY = FLAPPY_CONFIG.ceilingY - FLAPPY_CONFIG.pipeGap / 2 - 2;
+        const minGapY = FLAPPY_CONFIG.groundY + currentGap / 2 + 2;
+        const maxGapY = FLAPPY_CONFIG.ceilingY - currentGap / 2 - 2;
         const gapY = minGapY + Math.random() * (maxGapY - minGapY);
         
         const pipeX = game.pipes.length === 0 
             ? FLAPPY_CONFIG.pipeStartX 
-            : game.pipes[game.pipes.length - 1].x + FLAPPY_CONFIG.pipeSpacing;
+            : game.pipes[game.pipes.length - 1].x + currentSpacing;
         
         game.pipes.push({
             id: game.nextPipeId++,
             x: pipeX,
-            gapY: gapY
+            gapY: gapY,
+            gapSize: currentGap  // Store the gap size for this specific pipe
         });
     }
     
-    checkPipeCollision(player, pipe) {
+    checkPipeCollision(player, pipe, game) {
         const playerX = FLAPPY_CONFIG.playerStartX;
         const playerY = player.y;
         const radius = FLAPPY_CONFIG.playerRadius;
@@ -221,9 +250,12 @@ class FlappyStateManager {
             return false; // Not within pipe X range
         }
         
+        // Use the pipe's individual gap size (for progressive difficulty)
+        const pipeGapSize = pipe.gapSize || FLAPPY_CONFIG.pipeGap;
+        
         // Check if player is within gap
-        const gapTop = pipe.gapY + FLAPPY_CONFIG.pipeGap / 2;
-        const gapBottom = pipe.gapY - FLAPPY_CONFIG.pipeGap / 2;
+        const gapTop = pipe.gapY + pipeGapSize / 2;
+        const gapBottom = pipe.gapY - pipeGapSize / 2;
         
         if (playerY - radius < gapBottom || playerY + radius > gapTop) {
             return true; // Hit pipe
