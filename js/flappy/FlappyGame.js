@@ -20,7 +20,10 @@ const CHARACTER_MODELS = {
     'lia': { path: 'assets/Lia_Model.fbx', color: '#ff8844', name: 'Lia' },
     'lidia': { path: 'assets/Lidia.fbx', color: '#ff8800', name: 'Lidia' },
     'fabian': { path: 'assets/Fabian.fbx', color: '#3399ff', name: 'Fabian' },
-    'marile': { path: 'assets/Marile.fbx', color: '#ff99cc', name: 'Marile' }
+    'marile': { path: 'assets/Marile.fbx', color: '#ff99cc', name: 'Marile' },
+    'mariana': { path: 'assets/Mariana.fbx', color: '#cc66ff', name: 'Mariana' },
+    'sol': { path: 'assets/Sol.fbx', color: '#ffcc00', name: 'Sol' },
+    'yadira': { path: 'assets/Yadira.fbx', color: '#ff6699', name: 'Yadira' }
 };
 
 // Animation Files
