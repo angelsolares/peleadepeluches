@@ -456,7 +456,9 @@ class FlappyGame {
         
         this.socket.on('player-joined', (data) => {
             console.log('[FlappyGame] Player joined:', data);
-            this.addPlayer(data);
+            // Extract player data from the event
+            const playerData = data.player || data;
+            this.addPlayer(playerData);
             this.updateRoomOverlay();
         });
         
@@ -469,12 +471,26 @@ class FlappyGame {
                 const newName = CHARACTER_MODELS[characterKey]?.name || data.character;
                 player.name = newName;
                 
+                // Also update the character model if different
+                const newModel = this.loadedModels[characterKey];
+                if (newModel && player.model) {
+                    // Update character info for when game starts
+                    player.character = characterKey;
+                }
+                
                 // Update label
                 if (player.nameLabel && player.nameLabel.element) {
                     player.nameLabel.element.textContent = newName;
                 }
                 
                 this.updatePlayersPanel();
+            } else {
+                // Store pending character selection for when player is added
+                if (!this.pendingCharacters) this.pendingCharacters = new Map();
+                this.pendingCharacters.set(data.playerId, {
+                    character: data.character,
+                    name: CHARACTER_MODELS[data.character.toLowerCase()]?.name || data.character
+                });
             }
         });
         
@@ -573,7 +589,17 @@ class FlappyGame {
     addPlayer(playerData) {
         if (this.players.has(playerData.id)) return;
         
-        const characterKey = (playerData.character || 'angel').toLowerCase();
+        // Check for pending character selection
+        let characterKey = (playerData.character || 'angel').toLowerCase();
+        let playerName = playerData.characterName || playerData.name || CHARACTER_MODELS[characterKey]?.name || 'Player';
+        
+        if (this.pendingCharacters && this.pendingCharacters.has(playerData.id)) {
+            const pending = this.pendingCharacters.get(playerData.id);
+            characterKey = pending.character.toLowerCase();
+            playerName = pending.name;
+            this.pendingCharacters.delete(playerData.id);
+        }
+        
         let sourceModel = this.loadedModels[characterKey];
         
         if (!sourceModel) {
@@ -584,7 +610,8 @@ class FlappyGame {
         const player = new FlappyPlayerEntity(
             {
                 id: playerData.id,
-                name: playerData.characterName || playerData.name || CHARACTER_MODELS[characterKey]?.name || 'Player',
+                name: playerName,
+                character: characterKey,
                 lane: this.players.size
             },
             sourceModel,
@@ -594,6 +621,7 @@ class FlappyGame {
         
         this.players.set(playerData.id, player);
         this.updatePlayersPanel();
+        console.log(`[FlappyGame] Added player: ${playerName} (${characterKey})`);
     }
     
     removePlayer(playerId) {
