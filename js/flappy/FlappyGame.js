@@ -59,10 +59,12 @@ class FlappyPlayerEntity {
         this.name = playerData.name;
         this.lane = playerData.lane || 0;
         this.color = LANE_COLORS[this.lane] || '#ffffff';
+        this.scene = scene;
         
         this.isAlive = true;
         this.y = 0;
         this.velocity = 0;
+        this.lastVelocity = 0;  // Track velocity changes for flap detection
         this.distance = 0;
         
         // Clone model
@@ -106,6 +108,140 @@ class FlappyPlayerEntity {
         
         // Create name label
         this.createNameLabel(scene);
+        
+        // Create particle system for flap effect
+        this.createParticleSystem(scene);
+    }
+    
+    createParticleSystem(scene) {
+        // Create particle geometry
+        const particleCount = 30;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const velocities = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+        const sizes = new Float32Array(particleCount);
+        const lifetimes = new Float32Array(particleCount);
+        
+        // Parse player color
+        const colorObj = new THREE.Color(this.color);
+        
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = 0;
+            positions[i * 3 + 1] = 0;
+            positions[i * 3 + 2] = 0;
+            
+            velocities[i * 3] = 0;
+            velocities[i * 3 + 1] = 0;
+            velocities[i * 3 + 2] = 0;
+            
+            colors[i * 3] = colorObj.r;
+            colors[i * 3 + 1] = colorObj.g;
+            colors[i * 3 + 2] = colorObj.b;
+            
+            sizes[i] = 0;
+            lifetimes[i] = 0;
+        }
+        
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        
+        // Store velocities and lifetimes separately
+        this.particleVelocities = velocities;
+        this.particleLifetimes = lifetimes;
+        this.particleCount = particleCount;
+        this.activeParticles = 0;
+        
+        // Create particle material with glow effect
+        const material = new THREE.PointsMaterial({
+            size: 0.3,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            sizeAttenuation: true
+        });
+        
+        this.particles = new THREE.Points(geometry, material);
+        scene.add(this.particles);
+    }
+    
+    emitFlapParticles() {
+        if (!this.particles || !this.isAlive) return;
+        
+        const positions = this.particles.geometry.attributes.position.array;
+        const colors = this.particles.geometry.attributes.color.array;
+        const sizes = this.particles.geometry.attributes.size.array;
+        
+        // Get player position
+        const px = this.model.position.x;
+        const py = this.model.position.y;
+        const pz = this.model.position.z;
+        
+        // Emit particles from behind and below the player
+        for (let i = 0; i < this.particleCount; i++) {
+            // Reset particle at player position with offset
+            positions[i * 3] = px - 0.5 - Math.random() * 0.5;  // Behind player
+            positions[i * 3 + 1] = py - 0.3 + (Math.random() - 0.5) * 0.3;  // Below player
+            positions[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.5;
+            
+            // Random velocity (mostly backward and down)
+            this.particleVelocities[i * 3] = -2 - Math.random() * 3;  // Backward
+            this.particleVelocities[i * 3 + 1] = -1 - Math.random() * 2;  // Down
+            this.particleVelocities[i * 3 + 2] = (Math.random() - 0.5) * 2;  // Side spread
+            
+            // Bright colors (yellow/orange/white)
+            const brightness = 0.7 + Math.random() * 0.3;
+            colors[i * 3] = 1.0;  // R
+            colors[i * 3 + 1] = 0.6 + Math.random() * 0.4;  // G
+            colors[i * 3 + 2] = Math.random() * 0.3;  // B
+            
+            sizes[i] = 0.2 + Math.random() * 0.3;
+            this.particleLifetimes[i] = 0.5 + Math.random() * 0.3;  // Lifetime in seconds
+        }
+        
+        this.particles.geometry.attributes.position.needsUpdate = true;
+        this.particles.geometry.attributes.color.needsUpdate = true;
+        this.particles.geometry.attributes.size.needsUpdate = true;
+        this.activeParticles = this.particleCount;
+    }
+    
+    updateParticles(deltaTime) {
+        if (!this.particles || this.activeParticles === 0) return;
+        
+        const positions = this.particles.geometry.attributes.position.array;
+        const sizes = this.particles.geometry.attributes.size.array;
+        
+        let stillActive = 0;
+        
+        for (let i = 0; i < this.particleCount; i++) {
+            if (this.particleLifetimes[i] <= 0) continue;
+            
+            // Update lifetime
+            this.particleLifetimes[i] -= deltaTime;
+            
+            if (this.particleLifetimes[i] <= 0) {
+                sizes[i] = 0;
+                continue;
+            }
+            
+            stillActive++;
+            
+            // Update position based on velocity
+            positions[i * 3] += this.particleVelocities[i * 3] * deltaTime;
+            positions[i * 3 + 1] += this.particleVelocities[i * 3 + 1] * deltaTime;
+            positions[i * 3 + 2] += this.particleVelocities[i * 3 + 2] * deltaTime;
+            
+            // Fade out size based on remaining lifetime
+            const lifeRatio = this.particleLifetimes[i] / 0.5;
+            sizes[i] *= 0.95;  // Shrink over time
+        }
+        
+        this.particles.geometry.attributes.position.needsUpdate = true;
+        this.particles.geometry.attributes.size.needsUpdate = true;
+        this.activeParticles = stillActive;
     }
     
     createNameLabel(scene) {
@@ -172,12 +308,35 @@ class FlappyPlayerEntity {
             this.isAlive = serverState.isAlive;
             this.distance = serverState.distance || 0;
             
-            // Tilt based on velocity
+            // Detect flap (significant positive velocity change)
             if (serverState.velocity !== undefined) {
+                const velocityChange = serverState.velocity - this.lastVelocity;
+                
+                // If velocity jumped up significantly, it's a flap!
+                if (velocityChange > 3 && serverState.velocity > 0) {
+                    this.emitFlapParticles();
+                    
+                    // Speed up animation on flap
+                    if (this.currentAction) {
+                        this.currentAction.timeScale = 2.0;
+                        setTimeout(() => {
+                            if (this.currentAction) {
+                                this.currentAction.timeScale = 1.0;
+                            }
+                        }, 200);
+                    }
+                }
+                
+                this.lastVelocity = serverState.velocity;
+                
+                // Tilt based on velocity
                 const tiltAngle = THREE.MathUtils.clamp(serverState.velocity * 0.05, -0.5, 0.5);
                 this.model.rotation.z = THREE.MathUtils.lerp(this.model.rotation.z, -tiltAngle, 0.1);
             }
         }
+        
+        // Update particles
+        this.updateParticles(deltaTime);
         
         // Handle death visual
         if (!this.isAlive) {
@@ -197,6 +356,12 @@ class FlappyPlayerEntity {
         scene.remove(this.model);
         if (this.mixer) {
             this.mixer.stopAllAction();
+        }
+        // Clean up particles
+        if (this.particles) {
+            scene.remove(this.particles);
+            this.particles.geometry.dispose();
+            this.particles.material.dispose();
         }
     }
 }

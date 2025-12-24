@@ -183,8 +183,8 @@ class FlappyStateManager {
             pipe.x -= currentSpeed * deltaTime;
         }
         
-        // Remove pipes that are off screen
-        game.pipes = game.pipes.filter(pipe => pipe.x > -15);
+        // Remove pipes that are far off screen (let them stay visible longer)
+        game.pipes = game.pipes.filter(pipe => pipe.x > -30);
         
         // Spawn new pipes with dynamic spacing
         if (game.pipes.length === 0 || 
