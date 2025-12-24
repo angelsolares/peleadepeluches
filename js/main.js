@@ -1759,8 +1759,8 @@ function showRoomCode(code) {
                 
                 <div class="rounds-selector">
                     <span class="rounds-label">RONDAS:</span>
-                    <button class="round-btn" data-rounds="1">1</button>
-                    <button class="round-btn selected" data-rounds="3">3</button>
+                    <button class="round-btn selected" data-rounds="1">1</button>
+                    <button class="round-btn" data-rounds="3">3</button>
                     <button class="round-btn" data-rounds="5">5</button>
                 </div>
                 
