@@ -1251,6 +1251,17 @@ class ArenaGame {
             // Play attack animation
             player.playAnimation(data.attackType);
             
+            // Create attack trail VFX
+            if (this.vfxManager && player.model) {
+                const pos = player.model.position.clone();
+                pos.y += 1;
+                const direction = player.controller?.facingAngle ? 
+                    Math.sign(Math.sin(player.controller.facingAngle)) || 1 : 1;
+                const color = data.attackType === 'punch' ? 0xff6600 : 0x00ff88;
+                this.vfxManager.createAttackTrail?.(pos, data.attackType, direction, color);
+                this.vfxManager.createChargeGlow?.(player.model, color);
+            }
+            
             // Play sound effect
             if (this.sfxManager) {
                 if (data.attackType === 'punch') {
@@ -1290,8 +1301,19 @@ class ArenaGame {
                     if (this.vfxManager && target.model) {
                         const hitPosition = target.model.position.clone();
                         hitPosition.y += 1;
-                        this.vfxManager.createHitSparks?.(hitPosition, 0xff3366, hit.damage / 10);
-                        this.vfxManager.createDamageNumber?.(hitPosition, hit.damage, hit.blocked ? 0x00bfff : 0xff3366);
+                        
+                        if (hit.blocked) {
+                            // Block VFX - blue shield sparks
+                            this.vfxManager.createBlockShield?.(hitPosition, 0x00bfff);
+                            this.vfxManager.createBlockSparks?.(hitPosition);
+                            this.vfxManager.createDamageNumber?.(hitPosition, hit.damage, 0x00bfff);
+                        } else {
+                            // Normal hit VFX - red sparks
+                            this.vfxManager.createHitSparks?.(hitPosition, 0xff3366, hit.damage / 10);
+                            this.vfxManager.createImpactRing?.(hitPosition, 0xff3366);
+                            this.vfxManager.createDamageNumber?.(hitPosition, hit.damage, 0xff3366);
+                            this.vfxManager.createCharacterFlash?.(target.model, 100);
+                        }
                     }
                     
                     // Play hit sound
@@ -1332,6 +1354,22 @@ class ArenaGame {
             grabber.grabbedEntity = victim; // Store the entity reference for position updates
             victim.controller.isGrabbed = true;
             victim.controller.grabbedBy = grabber.controller;
+            
+            // Create grab VFX - purple energy effect
+            if (this.vfxManager && grabber.model && victim.model) {
+                const grabPos = grabber.model.position.clone();
+                grabPos.y += 1;
+                
+                // Purple grab sparks
+                this.vfxManager.createHitSparks?.(grabPos, 0x9966ff, 1.5);
+                
+                // Impact ring at grab point
+                this.vfxManager.createImpactRing?.(grabPos, 0x9966ff);
+                
+                // Flash both characters
+                this.vfxManager.createCharacterFlash?.(grabber.model, 150);
+                this.vfxManager.createCharacterFlash?.(victim.model, 150);
+            }
             
             // Play grab animation on grabber (held pose)
             grabber.playAnimation('grab');
@@ -1540,6 +1578,39 @@ class ArenaGame {
             
             // Play fall animation
             player.playAnimation('fall');
+            
+            // Create dramatic elimination VFX
+            if (this.vfxManager && player.model) {
+                const pos = player.model.position.clone();
+                pos.y += 1;
+                
+                // Multiple bursts of red particles
+                for (let i = 0; i < 5; i++) {
+                    setTimeout(() => {
+                        if (this.vfxManager) {
+                            const burstPos = pos.clone();
+                            burstPos.x += (Math.random() - 0.5) * 2;
+                            burstPos.y += (Math.random() - 0.5) * 2;
+                            this.vfxManager.createHitSparks?.(burstPos, 0xff0000, 2);
+                        }
+                    }, i * 80);
+                }
+                
+                // Large impact ring
+                this.vfxManager.createImpactRing?.(pos, 0xff3366);
+                
+                // Character flash
+                this.vfxManager.createCharacterFlash?.(player.model, 300);
+                
+                // Ground shockwave
+                setTimeout(() => {
+                    if (this.vfxManager) {
+                        const groundPos = player.model.position.clone();
+                        groundPos.y = 0.5;
+                        this.vfxManager.createLandingImpact?.(groundPos, 2.5);
+                    }
+                }, 200);
+            }
             
             // Start fade out effect
             this.fadeOutPlayer(player);
@@ -2012,6 +2083,13 @@ class ArenaGame {
             player.controller.isBlocking = data.isBlocking;
             if (data.isBlocking) {
                 player.playAnimation('block');
+                
+                // Create shield VFX when starting to block
+                if (this.vfxManager && player.model) {
+                    const pos = player.model.position.clone();
+                    pos.y += 1;
+                    this.vfxManager.createBlockShield?.(pos, 0x00bfff);
+                }
             } else {
                 player.playAnimation('idle');
             }
@@ -2026,6 +2104,28 @@ class ArenaGame {
         const player = this.players.get(data.playerId);
         if (player) {
             player.playAnimation('taunt');
+            
+            // Create taunt VFX - sparkles around player
+            if (this.vfxManager && player.model) {
+                const pos = player.model.position.clone();
+                pos.y += 1.5;
+                // Create colorful sparkles
+                this.vfxManager.createHitSparks?.(pos, 0xffcc00, 1.5);
+                
+                // Create expanding rings at feet
+                const footPos = player.model.position.clone();
+                footPos.y += 0.1;
+                this.vfxManager.createImpactRing?.(footPos, 0xffcc00);
+                
+                // Second wave of sparkles after delay
+                setTimeout(() => {
+                    if (this.vfxManager && player.model) {
+                        const pos2 = player.model.position.clone();
+                        pos2.y += 1.5;
+                        this.vfxManager.createHitSparks?.(pos2, 0xff66cc, 1.2);
+                    }
+                }, 500);
+            }
             
             // Play taunt sound
             if (this.sfxManager) {
@@ -2314,6 +2414,10 @@ class ArenaGame {
         
         const delta = this.clock.getDelta();
         
+        // Track time for dust effects
+        if (!this.lastDustTime) this.lastDustTime = 0;
+        this.lastDustTime += delta;
+        
         // Update all players
         this.players.forEach(player => {
             player.update(delta);
@@ -2321,10 +2425,28 @@ class ArenaGame {
             // Update thrown player effects
             this.updateThrownPlayer(player, delta);
             
+            // Create dust clouds when running (every 0.15 seconds)
+            if (this.vfxManager && player.model && player.controller) {
+                const isMoving = player.controller.velocity && 
+                    (Math.abs(player.controller.velocity.x) > 0.5 || 
+                     Math.abs(player.controller.velocity.z) > 0.5);
+                const isRunning = isMoving && player.controller.input?.run;
+                
+                if (isRunning && this.lastDustTime > 0.15) {
+                    const footPos = player.model.position.clone();
+                    footPos.y = 0.5;
+                    const direction = Math.sign(player.controller.velocity.x) || 1;
+                    this.vfxManager.createDustCloud?.(footPos, direction);
+                }
+            }
+            
             if (this.hud) {
                 this.hud.updatePlayer(player);
             }
         });
+        
+        // Reset dust timer
+        if (this.lastDustTime > 0.15) this.lastDustTime = 0;
         
         // Update grabbed player positions (make them follow their grabber)
         this.updateGrabbedPlayerPositions();
