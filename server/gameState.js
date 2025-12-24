@@ -14,17 +14,20 @@ class GameStateManager {
         this.GROUND_Y = 0;
         this.ARENA_RADIUS = 4.5;
         
-        // Stage platforms (same as client)
+        // Stage platforms (synced with client - js/main.js createArena)
+        // Must match floatingPlatformConfigs + main platform
         this.platforms = [
-            { x: 0, y: 0, width: 14, isMainGround: true },   // Main ground
-            { x: -4, y: 2.6, width: 4, isMainGround: false }, // Left floating
-            { x: 4, y: 2.6, width: 4, isMainGround: false },  // Right floating
-            { x: 0, y: 4.6, width: 5, isMainGround: false }   // Top floating
+            { x: 0, y: 0, width: 20, isMainGround: true },      // Main ground (20 units for 8 players)
+            { x: -6, y: 2.6, width: 4, isMainGround: false },   // Left high (y: 2.5 + 0.1)
+            { x: 6, y: 2.6, width: 4, isMainGround: false },    // Right high
+            { x: 0, y: 4.6, width: 3.5, isMainGround: false },  // Center top
+            { x: -3, y: 5.6, width: 2.5, isMainGround: false }, // Upper left
+            { x: 3, y: 5.6, width: 2.5, isMainGround: false }   // Upper right
         ];
         
-        // Stage boundaries
-        this.STAGE_LEFT = -8;
-        this.STAGE_RIGHT = 8;
+        // Stage boundaries (expanded for larger stage)
+        this.STAGE_LEFT = -12;
+        this.STAGE_RIGHT = 12;
         
         // Pending attacks (for active frames system)
         // Map<roomCode, Array<{attackerId, attackType, timestamp, processed}>>
