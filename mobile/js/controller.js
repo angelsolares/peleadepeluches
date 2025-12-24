@@ -189,7 +189,66 @@ function handleRaceState(data) {
 
 function handleRaceCountdown(data) {
     console.log('[Race] Countdown:', data.count);
-    // Could show countdown on mobile too
+    showRaceCountdown(data.count);
+}
+
+function showRaceCountdown(count) {
+    let overlay = document.getElementById('race-countdown-overlay');
+    
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'race-countdown-overlay';
+        overlay.innerHTML = `<div class="countdown-number"></div>`;
+        
+        const style = document.createElement('style');
+        style.textContent = `
+            #race-countdown-overlay {
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex; align-items: center; justify-content: center;
+                z-index: 9999;
+            }
+            #race-countdown-overlay .countdown-number {
+                font-family: 'Orbitron', sans-serif;
+                font-size: 10rem; font-weight: 900;
+                color: #00ff88;
+                text-shadow: 0 0 50px rgba(0, 255, 136, 0.8);
+                animation: countPulse 0.5s ease-out;
+            }
+            #race-countdown-overlay .countdown-number.go {
+                color: #ff6600;
+                text-shadow: 0 0 50px rgba(255, 102, 0, 0.8);
+            }
+            @keyframes countPulse {
+                0% { transform: scale(2); opacity: 0; }
+                100% { transform: scale(1); opacity: 1; }
+            }
+            #race-countdown-overlay.hidden { display: none; }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(overlay);
+    }
+    
+    const numberEl = overlay.querySelector('.countdown-number');
+    overlay.classList.remove('hidden');
+    
+    if (count > 0) {
+        numberEl.textContent = count;
+        numberEl.classList.remove('go');
+    } else {
+        numberEl.textContent = '¡GO!';
+        numberEl.classList.add('go');
+        triggerHaptic(true);
+        
+        setTimeout(() => {
+            overlay.classList.add('hidden');
+        }, 800);
+    }
+    
+    // Re-trigger animation
+    numberEl.style.animation = 'none';
+    numberEl.offsetHeight;
+    numberEl.style.animation = 'countPulse 0.5s ease-out';
 }
 
 function handleRaceStart() {

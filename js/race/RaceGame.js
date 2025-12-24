@@ -504,8 +504,29 @@ class RaceGame {
         });
         
         this.socket.on('game-started', (data) => {
-            console.log('[Race] Game started via game-started event');
-            // The host will emit start-race after this
+            console.log('[Race] Game started!', data);
+            
+            // Clear existing players and add all from server
+            this.players.forEach((player, id) => {
+                if (player.model && player.model.parent) {
+                    player.model.parent.remove(player.model);
+                }
+                player.dispose();
+            });
+            this.players.clear();
+            
+            // Add all players with their correct characters
+            if (data.players) {
+                data.players.forEach((playerData, index) => {
+                    this.addPlayer({
+                        ...playerData,
+                        lane: index
+                    });
+                });
+            }
+            
+            // Hide room code overlay
+            document.getElementById('room-code-overlay')?.classList.add('hidden');
         });
         
         // Race-specific events

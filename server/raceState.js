@@ -46,9 +46,13 @@ class RaceStateManager {
         // Initialize player states
         let lane = 0;
         room.players.forEach((player, socketId) => {
+            // Use character name as display name
+            const displayName = player.characterName || 
+                (player.character ? player.character.charAt(0).toUpperCase() + player.character.slice(1) : player.name);
+            
             raceState.players.set(socketId, {
                 id: socketId,
-                name: player.name,
+                name: displayName,
                 number: player.number,
                 character: player.character,
                 

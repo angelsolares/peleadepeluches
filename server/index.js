@@ -474,6 +474,21 @@ io.on('connection', (socket) => {
         // Initialize race state
         raceStateManager.initializeRace(roomCode);
         
+        // Emit game-started to mobile controllers so they switch to race controls
+        // Use character name (capitalized) as the display name
+        const playersArray = Array.from(room.players.values()).map((p, index) => ({
+            id: p.id,
+            name: p.characterName || p.character?.charAt(0).toUpperCase() + p.character?.slice(1) || p.name,
+            number: p.number,
+            character: p.character,
+            color: p.color
+        }));
+        
+        io.to(roomCode).emit('game-started', {
+            gameMode: 'race',
+            players: playersArray
+        });
+        
         // Start countdown (with callback to start race loop)
         raceStateManager.startCountdown(roomCode, io, () => {
             startRaceLoop(roomCode);
