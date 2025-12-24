@@ -7,11 +7,17 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import LobbyManager from './lobbyManager.js';
 import GameStateManager from './gameState.js';
 import ArenaStateManager from './arenaState.js';
 import { RaceStateManager } from './raceState.js';
 import { FlappyStateManager } from './flappyState.js';
+
+// ES Module dirname support
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Configuration
 const PORT = process.env.PORT || 3001;
@@ -21,6 +27,11 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from parent directory (project root)
+const projectRoot = path.join(__dirname, '..');
+app.use('/assets', express.static(path.join(projectRoot, 'assets')));
+app.use('/mobile', express.static(path.join(projectRoot, 'mobile')));
 
 // Create HTTP server
 const httpServer = createServer(app);
