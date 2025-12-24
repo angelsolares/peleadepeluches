@@ -289,5 +289,5 @@ class RaceStateManager {
     }
 }
 
-module.exports = { RaceStateManager, RACE_CONFIG };
+export { RaceStateManager, RACE_CONFIG };
 
