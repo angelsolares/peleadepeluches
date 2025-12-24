@@ -485,24 +485,30 @@ class RaceGame {
             this.createRoom();
         });
         
-        this.socket.on('room-created', (data) => {
-            console.log('[Race] Room created:', data);
-            this.roomCode = data.roomCode;
-            this.isHost = true;
-            this.showRoomCode(data.roomCode);
+        this.socket.on('disconnect', () => {
+            console.log('[Race] Disconnected from server');
+            this.updateAnimationDisplay('Desconectado del servidor');
         });
         
+        // Game events
         this.socket.on('player-joined', (data) => {
             console.log('[Race] Player joined:', data);
             this.addPlayer(data.player);
-            this.updateStartButton();
+            this.updateRoomOverlay(data.room?.playerCount || this.players.size);
         });
         
         this.socket.on('player-left', (data) => {
             console.log('[Race] Player left:', data);
             this.removePlayer(data.playerId);
+            this.updateRoomOverlay(this.players.size);
         });
         
+        this.socket.on('game-started', (data) => {
+            console.log('[Race] Game started via game-started event');
+            // The host will emit start-race after this
+        });
+        
+        // Race-specific events
         this.socket.on('race-state', (state) => {
             this.handleRaceState(state);
         });
@@ -533,10 +539,28 @@ class RaceGame {
         
         this.selectedCharacter = character;
         
+        // Use callback like Arena does
         this.socket.emit('create-room', { 
             gameMode: 'race',
             character: character
+        }, (response) => {
+            console.log('[Race] create-room response:', response);
+            if (response && response.success) {
+                this.roomCode = response.roomCode;
+                this.isHost = true;
+                console.log(`[Race] Room created: ${this.roomCode}`);
+                this.updateAnimationDisplay(`Sala: ${this.roomCode} - Esperando corredores...`);
+                this.showRoomCode(this.roomCode);
+            } else {
+                console.error('[Race] Failed to create room:', response);
+                this.updateAnimationDisplay('Error al crear sala');
+            }
         });
+    }
+    
+    updateAnimationDisplay(text) {
+        const el = document.getElementById('animation-name');
+        if (el) el.textContent = text;
     }
     
     showRoomCode(code) {
@@ -598,18 +622,30 @@ class RaceGame {
             document.body.appendChild(overlay);
             
             document.getElementById('start-race-btn').addEventListener('click', () => {
-                this.socket.emit('start-race');
+                this.emitStartRace();
             });
         }
     }
     
-    updateStartButton() {
-        const btn = document.getElementById('start-race-btn');
-        const waitingText = document.querySelector('.waiting-text');
+    emitStartRace() {
+        if (!this.socket || !this.isHost) return;
         
-        if (btn && this.players.size >= 1) {
-            btn.disabled = false;
-            if (waitingText) waitingText.textContent = `${this.players.size} corredor(es) listo(s)`;
+        console.log('[Race] Starting race...');
+        this.socket.emit('start-race');
+        
+        // Hide the room code overlay once race starts
+        document.getElementById('room-code-overlay')?.classList.add('hidden');
+    }
+    
+    updateRoomOverlay(playerCount) {
+        const btn = document.getElementById('start-race-btn');
+        const text = document.querySelector('#room-code-overlay .waiting-text');
+        
+        if (btn && text) {
+            btn.disabled = playerCount < 1;
+            text.textContent = playerCount > 0 
+                ? `${playerCount} corredor${playerCount > 1 ? 'es' : ''} listo${playerCount > 1 ? 's' : ''}`
+                : 'Esperando corredores...';
         }
     }
     
