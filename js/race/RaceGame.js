@@ -48,10 +48,9 @@ const CHARACTER_MODELS = {
     'lidia': { path: 'assets/Lidia.fbx', color: '#ff8800', name: 'Lidia' }
 };
 
-// Animation files
+// Animation files (same as arena)
 const ANIMATION_FILES = {
-    idle: 'assets/Meshy_AI_Animation_Idle_withSkin.fbx',
-    walk: 'assets/Meshy_AI_Animation_Walk_withSkin.fbx',
+    walk: 'assets/Meshy_AI_Animation_Walking_withSkin.fbx',
     run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx'
 };
 
@@ -102,15 +101,18 @@ class RacePlayerEntity {
         labelDiv.style.borderColor = this.color;
         
         this.nameLabel = new CSS2DObject(labelDiv);
-        this.nameLabel.position.set(0, 2.5, 0);
+        this.nameLabel.position.set(0, 3.5, 0); // Higher to not cover character
         this.model.add(this.nameLabel);
     }
     
     playAnimation(name) {
-        if (!this.mixer || !this.animations[name]) return;
+        // Map 'idle' to 'walk' with slow speed since we don't have idle animation
+        const actualName = name === 'idle' ? 'walk' : name;
+        
+        if (!this.mixer || !this.animations[actualName]) return;
         if (this.currentAnimation === name) return;
         
-        const newAction = this.mixer.clipAction(this.animations[name]);
+        const newAction = this.mixer.clipAction(this.animations[actualName]);
         
         if (this.currentAction) {
             this.currentAction.fadeOut(0.2);
@@ -122,9 +124,11 @@ class RacePlayerEntity {
         
         // Adjust speed based on animation
         if (name === 'run') {
-            newAction.timeScale = 1.5;
+            newAction.timeScale = 1.8; // Fast running animation
         } else if (name === 'walk') {
-            newAction.timeScale = 1.2;
+            newAction.timeScale = 1.0;
+        } else if (name === 'idle') {
+            newAction.timeScale = 0.3; // Very slow walk = idle
         }
         
         this.currentAction = newAction;
