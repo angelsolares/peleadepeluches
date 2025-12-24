@@ -1101,8 +1101,75 @@ class FlappyGame {
         const player = this.players.get(data.playerId);
         if (player) {
             player.isAlive = false;
+            player.deathOrder = this.getDeathOrder();
             this.updatePlayersPanel();
+            
+            // Show death notification with fadeout
+            this.showDeathNotification(data.name);
+            
+            // Fade out the player model
+            this.fadeOutPlayer(player);
         }
+    }
+    
+    getDeathOrder() {
+        // Count how many players have died so far
+        let deadCount = 0;
+        this.players.forEach(p => {
+            if (!p.isAlive) deadCount++;
+        });
+        return deadCount;
+    }
+    
+    showDeathNotification(playerName) {
+        // Create death notification element
+        const notification = document.createElement('div');
+        notification.className = 'death-notification';
+        notification.innerHTML = `
+            <span class="death-icon">💀</span>
+            <span class="death-text">${playerName} ha caído!</span>
+        `;
+        
+        // Add to game container
+        const container = document.getElementById('game-container');
+        container.appendChild(notification);
+        
+        // Animate in
+        requestAnimationFrame(() => {
+            notification.classList.add('show');
+        });
+        
+        // Remove after animation
+        setTimeout(() => {
+            notification.classList.add('fade-out');
+            setTimeout(() => {
+                notification.remove();
+            }, 500);
+        }, 2000);
+    }
+    
+    fadeOutPlayer(player) {
+        if (!player.model) return;
+        
+        // Fade out the model over 1 second
+        let opacity = 1;
+        const fadeInterval = setInterval(() => {
+            opacity -= 0.05;
+            if (opacity <= 0) {
+                clearInterval(fadeInterval);
+                player.model.visible = false;
+                if (player.nameLabel) {
+                    player.nameLabel.element.style.display = 'none';
+                }
+            } else {
+                player.model.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material.opacity = opacity;
+                        child.material.transparent = true;
+                    }
+                });
+            }
+        }, 50);
     }
     
     showGameOver(data) {
@@ -1116,7 +1183,10 @@ class FlappyGame {
         
         overlay.classList.remove('hidden');
         
-        if (data.winner) {
+        if (data.winner && data.winner.isAlive) {
+            winnerTitle.textContent = '👑 ¡SOBREVIVIENTE!';
+            winnerName.textContent = data.winner.name;
+        } else if (data.winner) {
             winnerTitle.textContent = '🏆 ¡GANADOR!';
             winnerName.textContent = data.winner.name;
         } else {
@@ -1124,20 +1194,26 @@ class FlappyGame {
             winnerName.textContent = '';
         }
         
-        // Display final scores
+        // Display results - sorted by survival (alive first, then by distance)
         finalScores.innerHTML = '';
         if (data.results) {
-            const sortedResults = data.results.sort((a, b) => b.distance - a.distance);
+            // Sort: alive players first, then by distance (for those who died)
+            const sortedResults = data.results.sort((a, b) => {
+                if (a.isAlive && !b.isAlive) return -1;
+                if (!a.isAlive && b.isAlive) return 1;
+                return b.distance - a.distance; // Higher distance = survived longer
+            });
             
             sortedResults.forEach((result, index) => {
                 const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}°`;
+                const status = result.isAlive ? '👑 Sobreviviente' : `💀 ${Math.floor(result.distance)}m`;
                 
                 const item = document.createElement('div');
-                item.className = 'final-score-item';
+                item.className = `final-score-item ${result.isAlive ? 'survivor' : 'eliminated'}`;
                 item.innerHTML = `
                     <span class="rank">${medal}</span>
                     <span class="name">${result.name}</span>
-                    <span class="distance">${Math.floor(result.distance)}m</span>
+                    <span class="status">${status}</span>
                 `;
                 finalScores.appendChild(item);
             });

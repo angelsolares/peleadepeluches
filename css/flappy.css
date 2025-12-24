@@ -365,6 +365,35 @@
     color: #ff6600;
 }
 
+.final-score-item .status {
+    font-size: 0.9rem;
+    min-width: 120px;
+    text-align: right;
+}
+
+.final-score-item.survivor {
+    background: rgba(0, 255, 136, 0.15);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.final-score-item.survivor .name {
+    color: #00ff88;
+    font-weight: bold;
+}
+
+.final-score-item.survivor .status {
+    color: #ffcc00;
+}
+
+.final-score-item.eliminated {
+    background: rgba(255, 51, 102, 0.1);
+    border: 1px solid rgba(255, 51, 102, 0.2);
+}
+
+.final-score-item.eliminated .status {
+    color: #ff6666;
+}
+
 #play-again-btn {
     font-family: 'Orbitron', monospace;
     font-size: 1.2rem;
@@ -389,6 +418,56 @@
     0% { transform: rotate(0deg) scale(1); opacity: 1; }
     50% { transform: rotate(180deg) scale(1.2); }
     100% { transform: rotate(360deg) scale(0); opacity: 0; }
+}
+
+/* Death Notification */
+.death-notification {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.5);
+    background: rgba(0, 0, 0, 0.9);
+    border: 3px solid #ff3366;
+    border-radius: 20px;
+    padding: 25px 50px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    z-index: 150;
+    opacity: 0;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 40px rgba(255, 51, 102, 0.5);
+}
+
+.death-notification.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.death-notification.fade-out {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+}
+
+.death-notification .death-icon {
+    font-size: 3rem;
+    animation: shake 0.5s ease;
+}
+
+.death-notification .death-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #ff3366;
+    text-shadow: 0 0 20px rgba(255, 51, 102, 0.8);
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-10px); }
+    40% { transform: translateX(10px); }
+    60% { transform: translateX(-10px); }
+    80% { transform: translateX(10px); }
 }
 
 /* Responsive */

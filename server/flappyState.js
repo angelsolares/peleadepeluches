@@ -208,15 +208,15 @@ class FlappyStateManager {
         });
         
         // Check for game over
+        const totalPlayers = Object.keys(game.players).length;
+        
         if (aliveCount === 0) {
+            // Everyone died
             this.endGame(roomCode, io);
-        } else if (aliveCount === 1 && Object.keys(game.players).length > 1) {
-            // Last player standing wins after a delay
-            if (!game.lastStandingTime) {
-                game.lastStandingTime = Date.now();
-            } else if (Date.now() - game.lastStandingTime > 3000) {
-                this.endGame(roomCode, io);
-            }
+        } else if (aliveCount === 1 && totalPlayers > 1) {
+            // Last player standing wins! End game immediately
+            console.log(`[Flappy] Last player standing in room ${roomCode}!`);
+            this.endGame(roomCode, io);
         }
     }
     
