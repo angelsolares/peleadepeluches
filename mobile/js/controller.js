@@ -72,7 +72,7 @@ let playerData = null;
 let roomCode = null;
 let isReady = false;
 let isConnected = false;
-let selectedCharacter = 'edgar'; // Default character
+let selectedCharacter = null; // No character selected by default
 let gameMode = 'smash'; // 'smash', 'arena', or 'race'
 let isGrabbing = false; // Track if player is currently grabbing someone (Arena mode)
 let isGrabbed = false; // Track if player is currently grabbed by someone (Arena mode)
@@ -500,7 +500,7 @@ function showScreen(screenName) {
 
 function joinRoom() {
     const code = elements.roomCodeInput.value.trim().toUpperCase();
-    const name = CHARACTERS[selectedCharacter]?.name || 'Jugador';
+    const name = 'Jugador'; // Generic name until character is selected
     
     if (code.length !== 4) {
         showError('Ingresa un código de 4 letras');
@@ -555,6 +555,9 @@ function updateLobbyUI(room) {
             elements.playerStatus.textContent = 'Selecciona tu personaje';
         }
     }
+    
+    // Disable ready button if no character selected
+    elements.readyBtn.disabled = !selectedCharacter;
     
     // Build taken characters map from room players
     takenCharacters = {};
