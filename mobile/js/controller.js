@@ -260,15 +260,50 @@ function handleRaceFinish(data) {
     console.log('[Race] Player finished:', data);
     if (data.playerId === socket.id) {
         triggerHaptic(true);
+        // Show finish notification
+        const position = data.position || 1;
+        const medal = position === 1 ? '🥇' : position === 2 ? '🥈' : position === 3 ? '🥉' : `#${position}`;
+        const time = data.time ? `${(data.time / 1000).toFixed(2)}s` : '';
+        
+        // Create temporary finish notification
+        const notification = document.createElement('div');
+        notification.className = 'race-finish-notification';
+        notification.innerHTML = `
+            <div class="finish-medal">${medal}</div>
+            <div class="finish-text">¡LLEGASTE ${position === 1 ? 'PRIMERO' : position === 2 ? 'SEGUNDO' : position === 3 ? 'TERCERO' : `#${position}`}!</div>
+            <div class="finish-time">${time}</div>
+        `;
+        document.body.appendChild(notification);
+        
+        // Remove after 3 seconds
+        setTimeout(() => notification.remove(), 3000);
     }
 }
 
 function handleRaceWinner(data) {
     console.log('[Race] Winner:', data);
-    showGameOverScreen(
-        data.winnerId === socket.id ? '🏆 ¡GANASTE!' : '🏁 CARRERA TERMINADA',
-        `¡${data.winnerName} gana la carrera!`
-    );
+    
+    const isWinner = data.winnerId === socket.id;
+    
+    // Show game over overlay
+    elements.gameOverOverlay.classList.remove('hidden');
+    elements.gameOverTitle.textContent = isWinner ? '🏆 ¡GANASTE!' : '🏁 FIN DE CARRERA';
+    elements.gameOverTitle.style.color = isWinner ? 'var(--secondary)' : 'var(--accent)';
+    
+    // Show winner info and positions
+    let message = `🥇 ${data.winnerName} gana la carrera!`;
+    if (data.positions && data.positions.length > 0) {
+        message += '\n\n📊 POSICIONES:\n';
+        data.positions.forEach((p, i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}°`;
+            const time = p.time ? `${(p.time / 1000).toFixed(2)}s` : 'DNF';
+            message += `${medal} ${p.name} - ${time}\n`;
+        });
+    }
+    elements.gameOverMessage.textContent = message;
+    elements.gameOverMessage.style.whiteSpace = 'pre-line';
+    
+    triggerHaptic(true);
 }
 
 function updateConnectionStatus(status, text) {
