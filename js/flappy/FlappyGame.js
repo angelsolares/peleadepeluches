@@ -467,21 +467,89 @@ class FlappyGame {
         
         this.socket.on('character-selected', (data) => {
             console.log('[FlappyGame] Character selected:', data);
-            // Update player name when character is selected
+            const characterKey = data.character.toLowerCase();
+            const newName = CHARACTER_MODELS[characterKey]?.name || data.character;
+            
+            // Update player if already exists
             const player = this.players.get(data.playerId);
             if (player) {
-                const characterKey = data.character.toLowerCase();
-                const newName = CHARACTER_MODELS[characterKey]?.name || data.character;
-                player.name = newName;
-                
-                // Also update the character model if different
-                const newModel = this.loadedModels[characterKey];
-                if (newModel && player.model) {
-                    // Update character info for when game starts
-                    player.character = characterKey;
+                // Check if character changed
+                if (player.character !== characterKey) {
+                    console.log(`[FlappyGame] Changing character from ${player.character} to ${characterKey}`);
+                    
+                    // Get new model
+                    const newSourceModel = this.loadedModels[characterKey];
+                    if (newSourceModel) {
+                        // Remove old model from scene
+                        if (player.model) {
+                            this.scene.remove(player.model);
+                        }
+                        if (player.nameLabel) {
+                            this.scene.remove(player.nameLabel);
+                        }
+                        
+                        // Clone new model
+                        const newModel = SkeletonUtils.clone(newSourceModel);
+                        newModel.scale.set(0.01, 0.01, 0.01);
+                        
+                        // Keep same position
+                        const startX = GAME_CONFIG.playerStartX;
+                        const laneZ = (player.lane - (GAME_CONFIG.maxPlayers - 1) / 2) * GAME_CONFIG.playerSpacing;
+                        newModel.position.set(startX, 0, laneZ);
+                        newModel.rotation.y = Math.PI / 2;
+                        
+                        // Apply materials
+                        newModel.traverse((child) => {
+                            if (child.isMesh && child.material) {
+                                const mat = child.material.clone();
+                                mat.transparent = false;
+                                mat.opacity = 1.0;
+                                mat.depthWrite = true;
+                                mat.depthTest = true;
+                                child.material = mat;
+                            }
+                        });
+                        
+                        this.scene.add(newModel);
+                        player.model = newModel;
+                        
+                        // Setup new animation mixer
+                        player.mixer = new THREE.AnimationMixer(newModel);
+                        player.currentAction = null;
+                        
+                        // Play flying animation
+                        if (this.animations.flying) {
+                            const action = player.mixer.clipAction(this.animations.flying);
+                            action.setLoop(THREE.LoopRepeat);
+                            action.play();
+                            player.currentAction = action;
+                        }
+                        
+                        // Recreate name label
+                        const labelDiv = document.createElement('div');
+                        labelDiv.className = 'player-name-label';
+                        labelDiv.textContent = newName;
+                        labelDiv.style.cssText = `
+                            color: white;
+                            font-family: 'Bangers', cursive;
+                            font-size: 16px;
+                            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+                            background: rgba(0,0,0,0.5);
+                            padding: 2px 8px;
+                            border-radius: 4px;
+                            white-space: nowrap;
+                        `;
+                        const nameLabel = new CSS2DObject(labelDiv);
+                        nameLabel.position.set(0, 250, 0);
+                        newModel.add(nameLabel);
+                        player.nameLabel = nameLabel;
+                    }
                 }
                 
-                // Update label
+                player.name = newName;
+                player.character = characterKey;
+                
+                // Update label text
                 if (player.nameLabel && player.nameLabel.element) {
                     player.nameLabel.element.textContent = newName;
                 }
@@ -492,7 +560,7 @@ class FlappyGame {
                 if (!this.pendingCharacters) this.pendingCharacters = new Map();
                 this.pendingCharacters.set(data.playerId, {
                     character: data.character,
-                    name: CHARACTER_MODELS[data.character.toLowerCase()]?.name || data.character
+                    name: newName
                 });
             }
         });
