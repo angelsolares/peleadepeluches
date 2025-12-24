@@ -105,21 +105,31 @@ class RacePlayerEntity {
         this.model.add(this.nameLabel);
     }
     
-    playAnimation(name) {
+    playAnimation(name, forceRestart = false) {
         // Map 'idle' to 'walk' with slow speed since we don't have idle animation
         const actualName = name === 'idle' ? 'walk' : name;
         
         if (!this.mixer || !this.animations[actualName]) return;
-        if (this.currentAnimation === name) return;
+        
+        // Don't restart if already playing the same animation (unless forced)
+        if (this.currentAnimation === name && !forceRestart) {
+            return; // Already playing this animation, let it loop
+        }
         
         const newAction = this.mixer.clipAction(this.animations[actualName]);
         
-        if (this.currentAction) {
-            this.currentAction.fadeOut(0.2);
+        // Only transition if it's a different animation
+        if (this.currentAction && this.currentAction !== newAction) {
+            this.currentAction.fadeOut(0.3);
+            newAction.reset();
+            newAction.fadeIn(0.3);
+        } else if (!this.currentAction) {
+            newAction.reset();
         }
         
-        newAction.reset();
-        newAction.fadeIn(0.2);
+        // Set loop mode to ensure smooth looping
+        newAction.setLoop(THREE.LoopRepeat, Infinity);
+        newAction.clampWhenFinished = false;
         newAction.play();
         
         // Adjust speed based on animation
@@ -140,13 +150,24 @@ class RacePlayerEntity {
             this.mixer.update(delta);
         }
         
-        // Update animation based on speed
+        // Determine target animation based on speed with hysteresis to prevent flickering
+        let targetAnimation;
         if (this.speed < RACE_CONFIG.IDLE_THRESHOLD) {
-            this.playAnimation('idle');
+            targetAnimation = 'idle';
         } else if (this.speed < RACE_CONFIG.WALK_THRESHOLD) {
-            this.playAnimation('walk');
+            // Add hysteresis: if currently running, stay running until speed drops more
+            if (this.currentAnimation === 'run' && this.speed > RACE_CONFIG.WALK_THRESHOLD * 0.7) {
+                targetAnimation = 'run';
+            } else {
+                targetAnimation = 'walk';
+            }
         } else {
-            this.playAnimation('run');
+            targetAnimation = 'run';
+        }
+        
+        // Only change animation if target is different
+        if (targetAnimation !== this.currentAnimation) {
+            this.playAnimation(targetAnimation);
         }
     }
     
