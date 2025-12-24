@@ -2,23 +2,23 @@
  * FlappyStateManager - Server-side state management for Flappy mode
  */
 
-// Game Configuration
+// Game Configuration - Balanced for fun multiplayer gameplay
 const FLAPPY_CONFIG = {
-    gravity: -12,           // Much gentler gravity for easier control
-    flapStrength: 10,       // Strong enough to counteract gravity
-    gameSpeed: 5,           // Slower for better reaction time
-    pipeGap: 7,             // Bigger gap for easier passage
-    pipeWidth: 2,
-    pipeSpacing: 14,        // More space between pipes
+    gravity: -6,            // Very gentle gravity - floaty feel
+    flapStrength: 6,        // Proportional to gravity for smooth flight
+    gameSpeed: 3.5,         // Slower for casual play
+    pipeGap: 9,             // Very large gap - easy to pass through
+    pipeWidth: 1.5,         // Thinner pipes
+    pipeSpacing: 20,        // Much more space between pipes
     groundY: -8,
     ceilingY: 10,
     playerStartX: -5,
-    playerRadius: 0.5,      // Smaller hitbox for forgiveness
+    playerRadius: 0.35,     // Small hitbox for forgiveness
     countdownDuration: 3,
     maxPlayers: 4,
     tickRate: 60,
-    pipeStartX: 25,         // First pipe appears much further away
-    initialVelocity: 3      // Give player initial upward boost
+    pipeStartX: 40,         // First pipe very far away - time to get used to controls
+    initialVelocity: 4      // Strong initial upward boost
 };
 
 class FlappyStateManager {
