@@ -238,6 +238,11 @@ class GameStateManager {
             return null;
         }
         
+        // Don't allow attacks while blocking or taunting
+        if (attacker.isBlocking || attacker.isTaunting) {
+            return null;
+        }
+        
         // Attack timing properties (reduced for faster animations)
         const attackTiming = {
             punch: { activeFrameDelay: 75 },   // ms until hit check (2x faster anim)
