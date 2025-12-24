@@ -101,7 +101,7 @@ class RacePlayerEntity {
         labelDiv.style.borderColor = this.color;
         
         this.nameLabel = new CSS2DObject(labelDiv);
-        this.nameLabel.position.set(0, 3.5, 0); // Higher to not cover character
+        this.nameLabel.position.set(0, -0.5, 0); // Below the character
         this.model.add(this.nameLabel);
     }
     
@@ -710,11 +710,26 @@ class RaceGame {
         
         player.worldPosition.set(laneX, 0, 0);
         
-        // Enable shadows
+        // Enable shadows and fix transparency
         model.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
+                
+                // Fix transparency - make character fully opaque
+                if (child.material) {
+                    if (!Array.isArray(child.material)) {
+                        child.material = child.material.clone();
+                    }
+                    
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach(mat => {
+                        mat.transparent = false;
+                        mat.opacity = 1.0;
+                        mat.depthWrite = true;
+                        mat.depthTest = true;
+                    });
+                }
             }
         });
         
