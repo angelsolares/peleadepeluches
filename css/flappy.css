@@ -1,0 +1,390 @@
+/* Flappy Mode Specific Styles */
+
+/* Game Title */
+.game-title {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Orbitron', monospace;
+    font-size: 2.5rem;
+    font-weight: 900;
+    color: #ffcc00;
+    text-shadow: 
+        0 0 10px rgba(255, 204, 0, 0.8),
+        0 0 20px rgba(255, 204, 0, 0.5),
+        3px 3px 0 #ff6600;
+    letter-spacing: 4px;
+    z-index: 100;
+}
+
+/* Players Panel */
+#players-panel {
+    position: absolute;
+    top: 100px;
+    left: 20px;
+    background: rgba(10, 10, 21, 0.9);
+    border: 2px solid #00ffcc;
+    border-radius: 15px;
+    padding: 15px;
+    min-width: 200px;
+    z-index: 100;
+}
+
+#players-panel h2 {
+    font-family: 'Orbitron', monospace;
+    font-size: 1rem;
+    color: #00ffcc;
+    margin: 0 0 10px 0;
+    text-align: center;
+    text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+}
+
+#players-status {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.player-slot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border-left: 4px solid var(--player-color, #666);
+    transition: all 0.3s ease;
+}
+
+.player-slot.alive {
+    border-left-color: #00ff88;
+    background: rgba(0, 255, 136, 0.1);
+}
+
+.player-slot.dead {
+    border-left-color: #ff3366;
+    background: rgba(255, 51, 102, 0.1);
+    opacity: 0.6;
+}
+
+.player-slot .player-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.8rem;
+    color: #0a0a15;
+}
+
+.player-slot .player-name {
+    flex: 1;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.9rem;
+    color: white;
+}
+
+.player-slot .player-status-icon {
+    font-size: 1.2rem;
+}
+
+.player-slot.alive .player-status-icon::after {
+    content: '🐦';
+}
+
+.player-slot.dead .player-status-icon::after {
+    content: '💀';
+}
+
+/* Score Display */
+#score-display {
+    position: absolute;
+    top: 100px;
+    right: 20px;
+    background: rgba(10, 10, 21, 0.9);
+    border: 2px solid #ff6600;
+    border-radius: 15px;
+    padding: 15px 25px;
+    text-align: center;
+    z-index: 100;
+}
+
+#score-display .label {
+    display: block;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.8rem;
+    color: #ff6600;
+    margin-bottom: 5px;
+}
+
+#distance-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 2rem;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 0 10px rgba(255, 102, 0, 0.5);
+}
+
+/* Survivors Display */
+#survivors-display {
+    position: absolute;
+    top: 200px;
+    right: 20px;
+    background: rgba(10, 10, 21, 0.9);
+    border: 2px solid #00ffcc;
+    border-radius: 15px;
+    padding: 15px 25px;
+    text-align: center;
+    z-index: 100;
+}
+
+#survivors-display .label {
+    display: block;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+    color: #00ffcc;
+    margin-bottom: 5px;
+}
+
+#survivors-count {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #00ff88;
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+/* Current State */
+#current-state {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 10, 21, 0.9);
+    border: 2px solid #ffcc00;
+    border-radius: 30px;
+    padding: 15px 40px;
+    z-index: 100;
+}
+
+#current-state .label {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.9rem;
+    color: #ffcc00;
+    margin-right: 10px;
+}
+
+#state-text {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #00ff88;
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+/* Room Overlay */
+#room-overlay .room-content {
+    background: linear-gradient(135deg, rgba(10, 10, 21, 0.98), rgba(26, 26, 46, 0.98));
+    border: 3px solid #ffcc00;
+    border-radius: 20px;
+    padding: 40px;
+    text-align: center;
+    max-width: 400px;
+    box-shadow: 0 0 50px rgba(255, 204, 0, 0.3);
+}
+
+#room-overlay h2 {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.8rem;
+    color: #ffcc00;
+    margin-bottom: 20px;
+    text-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+}
+
+#room-code-display {
+    font-family: 'Orbitron', monospace;
+    font-size: 3rem;
+    font-weight: bold;
+    color: white;
+    letter-spacing: 10px;
+    margin: 20px 0;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+}
+
+#qr-code {
+    width: 180px;
+    height: 180px;
+    margin: 20px auto;
+    border: 3px solid white;
+    border-radius: 10px;
+}
+
+#room-overlay p {
+    color: #888;
+    margin: 10px 0;
+}
+
+#mobile-link {
+    display: block;
+    color: #00ffcc;
+    font-size: 0.9rem;
+    margin: 10px 0 20px;
+    word-break: break-all;
+}
+
+#start-game-btn {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.2rem;
+    font-weight: bold;
+    padding: 15px 40px;
+    background: linear-gradient(135deg, #ffcc00, #ff6600);
+    color: #0a0a15;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 20px;
+}
+
+#start-game-btn:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px rgba(255, 204, 0, 0.5);
+}
+
+#start-game-btn:disabled {
+    background: #444;
+    color: #888;
+    cursor: not-allowed;
+}
+
+#players-waiting {
+    color: #00ffcc;
+    font-family: 'Orbitron', monospace;
+    margin-top: 15px;
+}
+
+/* Countdown */
+#countdown-overlay {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+#countdown-number {
+    font-family: 'Orbitron', monospace;
+    font-size: 15rem;
+    font-weight: 900;
+    color: #ffcc00;
+    text-shadow: 0 0 50px rgba(255, 204, 0, 0.8);
+    animation: countdownPulse 0.5s ease-out;
+}
+
+@keyframes countdownPulse {
+    0% { transform: scale(2); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* Game Over */
+#game-over-overlay .game-over-content {
+    background: linear-gradient(135deg, rgba(10, 10, 21, 0.98), rgba(26, 26, 46, 0.98));
+    border: 3px solid #00ff88;
+    border-radius: 20px;
+    padding: 40px;
+    text-align: center;
+    max-width: 450px;
+    box-shadow: 0 0 50px rgba(0, 255, 136, 0.3);
+}
+
+#winner-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 2.5rem;
+    color: #ffcc00;
+    margin-bottom: 20px;
+    text-shadow: 0 0 20px rgba(255, 204, 0, 0.8);
+}
+
+#winner-name {
+    font-family: 'Orbitron', monospace;
+    font-size: 2rem;
+    color: #00ff88;
+    margin-bottom: 30px;
+    text-shadow: 0 0 15px rgba(0, 255, 136, 0.5);
+}
+
+#final-scores {
+    margin: 20px 0;
+    text-align: left;
+}
+
+.final-score-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    margin: 5px 0;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    font-family: 'Orbitron', monospace;
+}
+
+.final-score-item .rank {
+    font-size: 1.5rem;
+    width: 40px;
+}
+
+.final-score-item .name {
+    flex: 1;
+    color: white;
+}
+
+.final-score-item .distance {
+    color: #ff6600;
+}
+
+#play-again-btn {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.2rem;
+    font-weight: bold;
+    padding: 15px 40px;
+    background: linear-gradient(135deg, #00ffcc, #00ff88);
+    color: #0a0a15;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 20px;
+}
+
+#play-again-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px rgba(0, 255, 204, 0.5);
+}
+
+/* Death Animation */
+@keyframes playerDeath {
+    0% { transform: rotate(0deg) scale(1); opacity: 1; }
+    50% { transform: rotate(180deg) scale(1.2); }
+    100% { transform: rotate(360deg) scale(0); opacity: 0; }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .game-title {
+        font-size: 1.5rem;
+    }
+    
+    #players-panel {
+        min-width: 150px;
+        padding: 10px;
+    }
+    
+    #score-display, #survivors-display {
+        padding: 10px 15px;
+    }
+    
+    #distance-value {
+        font-size: 1.5rem;
+    }
+}
+

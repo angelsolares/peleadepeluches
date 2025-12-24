@@ -1109,3 +1109,150 @@ body {
     margin-top: 10px;
 }
 
+/* ==================================
+   Flappy Mode Controller
+   ================================== */
+
+.flappy-controls {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 30px 20px;
+    background: linear-gradient(180deg, 
+        rgba(135, 206, 235, 0.2) 0%, 
+        rgba(10, 10, 21, 0.95) 30%,
+        rgba(10, 10, 21, 0.95) 100%
+    );
+}
+
+.flappy-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.flappy-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #ffcc00;
+    text-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+}
+
+.flappy-distance {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    font-weight: 900;
+    color: #ff6600;
+    text-shadow: 0 0 30px rgba(255, 102, 0, 0.5);
+}
+
+.flappy-tap-area {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+    width: 100%;
+}
+
+.flap-btn {
+    width: 80%;
+    max-width: 300px;
+    height: 250px;
+    border-radius: 50px;
+    border: 5px solid #ffcc00;
+    background: linear-gradient(135deg, rgba(255, 204, 0, 0.2), rgba(255, 102, 0, 0.2));
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    transition: all 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    box-shadow: 0 0 30px rgba(255, 204, 0, 0.3);
+}
+
+.flap-icon {
+    font-size: 6rem;
+    animation: birdFloat 1s ease-in-out infinite;
+}
+
+@keyframes birdFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+.flap-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #ffcc00;
+    text-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+}
+
+.flap-btn:active,
+.flap-btn.pressed {
+    transform: scale(0.95);
+    background: linear-gradient(135deg, rgba(255, 204, 0, 0.4), rgba(255, 102, 0, 0.4));
+    box-shadow: 0 0 60px rgba(255, 204, 0, 0.6);
+}
+
+.flap-btn.flap .flap-icon {
+    animation: flapWings 0.2s ease;
+}
+
+@keyframes flapWings {
+    0% { transform: scale(1) rotate(0deg); }
+    50% { transform: scale(1.2) rotate(-10deg); }
+    100% { transform: scale(1) rotate(0deg); }
+}
+
+.flappy-hint {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.flappy-hint span {
+    display: inline-block;
+    padding: 10px 20px;
+    background: rgba(255, 204, 0, 0.1);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 204, 0, 0.3);
+}
+
+/* Flappy mode - hide normal controls */
+.flappy-mode .controller-body {
+    display: none;
+}
+
+.flappy-mode .controller-header .game-info,
+.flappy-mode .controller-header .stocks-display {
+    display: none;
+}
+
+/* Responsive for flappy mode */
+@media (max-height: 600px) {
+    .flap-btn {
+        height: 180px;
+    }
+    
+    .flap-icon {
+        font-size: 4rem;
+    }
+    
+    .flappy-distance {
+        font-size: 2rem;
+    }
+}
+

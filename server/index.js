@@ -11,6 +11,7 @@ import LobbyManager from './lobbyManager.js';
 import GameStateManager from './gameState.js';
 import ArenaStateManager from './arenaState.js';
 import { RaceStateManager } from './raceState.js';
+import { FlappyStateManager } from './flappyState.js';
 
 // Configuration
 const PORT = process.env.PORT || 3001;
@@ -37,6 +38,7 @@ const lobbyManager = new LobbyManager();
 const gameStateManager = new GameStateManager(lobbyManager);
 const arenaStateManager = new ArenaStateManager(lobbyManager);
 const raceStateManager = new RaceStateManager(lobbyManager);
+const flappyStateManager = new FlappyStateManager();
 
 // Game tick intervals per room
 const gameLoops = new Map();
@@ -46,6 +48,9 @@ const arenaLoops = new Map();
 
 // Race game loops
 const raceLoops = new Map();
+
+// Flappy game loops
+const flappyLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -176,6 +181,11 @@ io.on('connection', (socket) => {
                 raceStateManager.startCountdown(roomCode, io, () => {
                     startRaceLoop(roomCode);
                 });
+            } else if (room.gameMode === 'flappy') {
+                // Initialize flappy state and start countdown
+                console.log(`[Socket] Flappy game starting in room ${roomCode}`);
+                flappyStateManager.initializeGame(roomCode, result.players);
+                flappyStateManager.startCountdown(roomCode, io);
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -515,6 +525,18 @@ io.on('connection', (socket) => {
         }
     });
     
+    // ========== FLAPPY MODE EVENTS ==========
+    
+    /**
+     * Flappy tap (flap wings)
+     */
+    socket.on('flappy-tap', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        flappyStateManager.processFlap(roomCode, socket.id);
+    });
+    
     // ========== COMMON EVENTS ==========
     
     /**
@@ -576,6 +598,9 @@ function handleDisconnect(socket) {
         if (result.roomClosed) {
             // Room was closed (host left)
             stopGameLoop(result.roomCode);
+            stopArenaLoop(result.roomCode);
+            stopRaceLoop(result.roomCode);
+            stopFlappyLoop(result.roomCode);
             
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
@@ -793,6 +818,23 @@ function stopRaceLoop(roomCode) {
         raceLoops.delete(roomCode);
         console.log(`[Race] Stopped race loop for room ${roomCode}`);
     }
+}
+
+/**
+ * Start flappy game loop for a room (called by FlappyStateManager)
+ */
+function startFlappyLoop(roomCode) {
+    // Flappy loop is started inside FlappyStateManager.startGame()
+    // This function exists for consistency but is not directly used
+    console.log(`[Flappy] Game loop handled by FlappyStateManager for room ${roomCode}`);
+}
+
+/**
+ * Stop flappy game loop for a room
+ */
+function stopFlappyLoop(roomCode) {
+    flappyStateManager.removeGame(roomCode);
+    console.log(`[Flappy] Stopped flappy game for room ${roomCode}`);
 }
 
 // =================================

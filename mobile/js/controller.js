@@ -83,6 +83,9 @@ let escapeThreshold = 3; // Number of button presses needed to escape (3 = ~33% 
 let lastRaceTap = null; // 'left' or 'right' - track last tap for alternating
 let raceSpeed = 0; // Current speed display
 
+// Flappy mode state
+let flappyAlive = true;
+
 // Available characters
 const CHARACTERS = {
     edgar: { name: 'Edgar', emoji: '👦' },
@@ -176,6 +179,13 @@ function connectToServer() {
     socket.on('race-start', handleRaceStart);
     socket.on('race-finish', handleRaceFinish);
     socket.on('race-winner', handleRaceWinner);
+    
+    // Flappy mode events
+    socket.on('flappy-countdown', handleFlappyCountdown);
+    socket.on('flappy-start', handleFlappyStart);
+    socket.on('flappy-state', handleFlappyState);
+    socket.on('flappy-player-died', handleFlappyDeath);
+    socket.on('flappy-game-over', handleFlappyGameOver);
 }
 
 // Race mode event handlers
@@ -302,6 +312,155 @@ function handleRaceWinner(data) {
             message += `${medal} ${p.name} - ${time}\n`;
         });
     }
+    elements.gameOverMessage.textContent = message;
+    elements.gameOverMessage.style.whiteSpace = 'pre-line';
+    
+    triggerHaptic(true);
+}
+
+// =================================
+// Flappy Mode Event Handlers
+// =================================
+
+function handleFlappyCountdown(data) {
+    console.log('[Flappy] Countdown:', data.count);
+    showFlappyCountdown(data.count);
+}
+
+function showFlappyCountdown(count) {
+    let overlay = document.getElementById('flappy-countdown-overlay');
+    
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'flappy-countdown-overlay';
+        overlay.innerHTML = `<div class="countdown-number"></div>`;
+        
+        const style = document.createElement('style');
+        style.textContent = `
+            #flappy-countdown-overlay {
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: linear-gradient(135deg, rgba(135, 206, 235, 0.9), rgba(255, 204, 0, 0.8));
+                display: flex; align-items: center; justify-content: center;
+                z-index: 9999;
+            }
+            #flappy-countdown-overlay .countdown-number {
+                font-family: 'Orbitron', sans-serif;
+                font-size: 12rem; font-weight: 900;
+                color: #ff6600;
+                text-shadow: 0 0 50px rgba(255, 102, 0, 0.8), 4px 4px 0 #ffcc00;
+                animation: flappyCountPulse 0.5s ease-out;
+            }
+            @keyframes flappyCountPulse {
+                0% { transform: scale(2) rotate(-10deg); opacity: 0; }
+                100% { transform: scale(1) rotate(0); opacity: 1; }
+            }
+            #flappy-countdown-overlay.hidden { display: none; }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(overlay);
+    }
+    
+    const numberEl = overlay.querySelector('.countdown-number');
+    overlay.classList.remove('hidden');
+    
+    if (count > 0) {
+        numberEl.textContent = count;
+    } else {
+        numberEl.textContent = '¡VUELA!';
+        triggerHaptic(true);
+        
+        setTimeout(() => {
+            overlay.classList.add('hidden');
+        }, 800);
+    }
+    
+    // Re-trigger animation
+    numberEl.style.animation = 'none';
+    numberEl.offsetHeight;
+    numberEl.style.animation = 'flappyCountPulse 0.5s ease-out';
+}
+
+function handleFlappyStart() {
+    console.log('[Flappy] Game started!');
+    flappyAlive = true;
+    triggerHaptic(true);
+}
+
+function handleFlappyState(data) {
+    if (!data || !data.players) return;
+    
+    // Find our player state
+    const myState = data.players[socket.id];
+    if (myState) {
+        flappyAlive = myState.isAlive;
+        
+        // Update distance display
+        const distEl = document.getElementById('flappy-distance');
+        if (distEl) {
+            distEl.textContent = `${Math.floor(myState.distance || 0)}m`;
+        }
+    }
+}
+
+function handleFlappyDeath(data) {
+    console.log('[Flappy] Player died:', data);
+    
+    if (data.playerId === socket.id) {
+        flappyAlive = false;
+        triggerHaptic(true);
+        
+        // Show death notification
+        const notification = document.createElement('div');
+        notification.className = 'flappy-death-notification';
+        notification.innerHTML = `
+            <div class="death-icon">💀</div>
+            <div class="death-text">¡CAÍSTE!</div>
+            <div class="death-distance">${Math.floor(data.distance || 0)}m</div>
+        `;
+        notification.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(255, 0, 0, 0.9); border-radius: 20px; padding: 30px;
+            text-align: center; z-index: 9999; animation: deathPopIn 0.5s ease-out;
+        `;
+        
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes deathPopIn {
+                0% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+                100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            }
+            .death-icon { font-size: 4rem; margin-bottom: 10px; }
+            .death-text { font-family: 'Orbitron', sans-serif; font-size: 2rem; color: white; }
+            .death-distance { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; color: #ffcc00; margin-top: 10px; }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.remove(), 2000);
+    }
+}
+
+function handleFlappyGameOver(data) {
+    console.log('[Flappy] Game over:', data);
+    
+    const isWinner = data.winner && data.winner.id === socket.id;
+    
+    // Show game over overlay
+    elements.gameOverOverlay.classList.remove('hidden');
+    elements.gameOverTitle.textContent = isWinner ? '🏆 ¡GANASTE!' : '🐦 FIN DEL VUELO';
+    elements.gameOverTitle.style.color = isWinner ? 'var(--secondary)' : 'var(--accent)';
+    
+    // Show results
+    let message = data.winner ? `🥇 ${data.winner.name} voló más lejos!` : '¡Todos cayeron!';
+    
+    if (data.results && data.results.length > 0) {
+        message += '\n\n📊 RESULTADOS:\n';
+        data.results.forEach((p, i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}°`;
+            message += `${medal} ${p.name} - ${Math.floor(p.distance)}m\n`;
+        });
+    }
+    
     elements.gameOverMessage.textContent = message;
     elements.gameOverMessage.style.whiteSpace = 'pre-line';
     
@@ -581,13 +740,32 @@ function updateControllerUIForMode() {
     const runLabel = dpadDown?.querySelector('.label');
     const controllerBody = document.querySelector('.controller-body');
     const raceControls = document.getElementById('race-controls');
+    const flappyControls = document.getElementById('flappy-controls');
     const controllerScreen = document.getElementById('controller-screen');
     
-    if (gameMode === 'race') {
+    // Hide all special controls first
+    if (raceControls) raceControls.style.display = 'none';
+    if (flappyControls) flappyControls.style.display = 'none';
+    
+    if (gameMode === 'flappy') {
+        // Flappy mode: Show single TAP button
+        if (controllerBody) controllerBody.style.display = 'none';
+        if (flappyControls) flappyControls.style.display = 'flex';
+        if (controllerScreen) controllerScreen.classList.add('flappy-mode');
+        if (controllerScreen) controllerScreen.classList.remove('race-mode');
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (healthLabel) healthLabel.textContent = '';
+        
+        // Setup flappy tap button
+        setupFlappyControls();
+        
+        console.log('[Controller] Flappy mode UI configured');
+    } else if (gameMode === 'race') {
         // Race mode: Show only left/right foot buttons
         if (controllerBody) controllerBody.style.display = 'none';
         if (raceControls) raceControls.style.display = 'flex';
         if (controllerScreen) controllerScreen.classList.add('race-mode');
+        if (controllerScreen) controllerScreen.classList.remove('flappy-mode');
         if (stocksDisplay) stocksDisplay.style.display = 'none';
         if (healthLabel) healthLabel.textContent = '';
         
@@ -697,6 +875,59 @@ function handleRaceTap(side, btn) {
     
     // Update last tap for alternating indicator
     lastRaceTap = side;
+}
+
+// Setup flappy mode controls (single TAP button)
+function setupFlappyControls() {
+    const flapBtn = document.getElementById('flap-btn');
+    
+    if (flapBtn) {
+        // Remove old listeners
+        flapBtn.replaceWith(flapBtn.cloneNode(true));
+        const newFlapBtn = document.getElementById('flap-btn');
+        
+        newFlapBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleFlappyTap(newFlapBtn);
+        }, { passive: false });
+        
+        newFlapBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            newFlapBtn.classList.remove('pressed');
+        }, { passive: false });
+        
+        // Mouse events for testing
+        newFlapBtn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            handleFlappyTap(newFlapBtn);
+        });
+        newFlapBtn.addEventListener('mouseup', () => {
+            newFlapBtn.classList.remove('pressed');
+        });
+    }
+    
+    console.log('[Flappy] Controls setup complete');
+}
+
+// Handle flappy tap (flap wings)
+function handleFlappyTap(btn) {
+    if (!flappyAlive) return;
+    
+    btn.classList.add('pressed');
+    btn.classList.add('flap');
+    
+    // Send tap to server
+    if (socket && socket.connected) {
+        socket.emit('flappy-tap');
+    }
+    
+    // Visual feedback
+    triggerHaptic();
+    
+    // Remove flap class after animation
+    setTimeout(() => {
+        btn.classList.remove('flap');
+    }, 200);
 }
 
 // Update race speed display
@@ -1383,6 +1614,7 @@ function resetState() {
     escapeProgress = 0;
     lastRaceTap = null;
     raceSpeed = 0;
+    flappyAlive = true;
     Object.keys(inputState).forEach(key => inputState[key] = false);
     
     // Hide escape UI if visible

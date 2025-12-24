@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pelea de Peluches - Flappy</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/flappy.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- HUD / UI Overlay -->
+        <div id="hud">
+            <h1 class="game-title">FLAPPY PELUCHES</h1>
+            
+            <!-- Players Status Panel -->
+            <div id="players-panel">
+                <h2>JUGADORES</h2>
+                <div id="players-status">
+                    <!-- Dynamic player slots will be inserted here -->
+                </div>
+            </div>
+            
+            <!-- Score/Distance Display -->
+            <div id="score-display">
+                <span class="label">DISTANCIA</span>
+                <span id="distance-value">0m</span>
+            </div>
+            
+            <!-- Survivors Counter -->
+            <div id="survivors-display">
+                <span class="label">SUPERVIVIENTES</span>
+                <span id="survivors-count">0/0</span>
+            </div>
+            
+            <!-- Current State Display -->
+            <div id="current-state">
+                <span class="label">Estado:</span>
+                <span id="state-text">Cargando...</span>
+            </div>
+        </div>
+        
+        <!-- Loading screen -->
+        <div id="loading-screen">
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p id="loading-text">Cargando recursos...</p>
+                <div class="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Countdown Overlay -->
+        <div id="countdown-overlay" class="overlay hidden">
+            <div id="countdown-number">3</div>
+        </div>
+        
+        <!-- Room Code Overlay -->
+        <div id="room-overlay" class="overlay hidden">
+            <div class="room-content">
+                <h2>🐦 FLAPPY PELUCHES</h2>
+                <div id="room-code-display"></div>
+                <img id="qr-code" alt="QR Code">
+                <p>Escanea o ingresa este código en tu celular</p>
+                <a id="mobile-link" href="#" target="_blank"></a>
+                <button id="start-game-btn" disabled>INICIAR JUEGO</button>
+                <p id="players-waiting">Esperando jugadores...</p>
+            </div>
+        </div>
+        
+        <!-- Game Over Overlay -->
+        <div id="game-over-overlay" class="overlay hidden">
+            <div class="game-over-content">
+                <h2 id="winner-title">¡GANADOR!</h2>
+                <div id="winner-name"></div>
+                <div id="final-scores"></div>
+                <button id="play-again-btn">JUGAR DE NUEVO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script type="module" src="js/flappy/FlappyGame.js"></script>
+</body>
+</html>
+
