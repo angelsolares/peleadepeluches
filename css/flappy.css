@@ -12,10 +12,19 @@
     align-items: center;
     z-index: 1000;
     background: rgba(0, 0, 0, 0.7);
+    pointer-events: auto;
 }
 
 .overlay.hidden {
     display: none !important;
+}
+
+.overlay .room-content {
+    pointer-events: auto;
+}
+
+.overlay .room-content * {
+    pointer-events: auto;
 }
 
 /* Game Title */
@@ -364,11 +373,18 @@
     color: #ffcc00;
     cursor: pointer;
     transition: all 0.2s ease;
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 1001;
 }
 
 .speed-btn-inline:hover {
     background: rgba(255, 204, 0, 0.35);
     transform: scale(1.05);
+}
+
+.speed-btn-inline:active {
+    transform: scale(0.95);
 }
 
 .speed-btn-inline.selected {
