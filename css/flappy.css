@@ -280,9 +280,11 @@
     background: linear-gradient(135deg, rgba(10, 10, 21, 0.98), rgba(26, 26, 46, 0.98));
     border: 3px solid #ffcc00;
     border-radius: 20px;
-    padding: 40px;
+    padding: 30px 40px;
     text-align: center;
-    max-width: 400px;
+    max-width: 450px;
+    max-height: 90vh;
+    overflow-y: auto;
     box-shadow: 0 0 50px rgba(255, 204, 0, 0.3);
 }
 
@@ -305,11 +307,12 @@
 }
 
 #qr-code {
-    width: 180px;
-    height: 180px;
-    margin: 20px auto;
+    width: 200px;
+    height: 200px;
+    margin: 15px auto;
     border: 3px solid white;
     border-radius: 10px;
+    display: block;
 }
 
 #room-overlay p {
@@ -321,8 +324,57 @@
     display: block;
     color: #00ffcc;
     font-size: 0.9rem;
-    margin: 10px 0 20px;
+    margin: 10px 0 15px;
     word-break: break-all;
+}
+
+/* Speed Control Inline (inside room overlay) */
+.speed-control-inline {
+    margin: 15px 0;
+    padding: 12px 15px;
+    background: rgba(255, 204, 0, 0.1);
+    border: 2px solid #ffcc00;
+    border-radius: 12px;
+}
+
+.speed-control-inline .speed-label {
+    display: block;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.8rem;
+    color: #ffcc00;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.speed-buttons-inline {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.speed-btn-inline {
+    background: rgba(255, 204, 0, 0.15);
+    border: 2px solid #ffcc00;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-family: 'Orbitron', monospace;
+    font-size: 1rem;
+    font-weight: bold;
+    color: #ffcc00;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.speed-btn-inline:hover {
+    background: rgba(255, 204, 0, 0.35);
+    transform: scale(1.05);
+}
+
+.speed-btn-inline.selected {
+    background: #ffcc00;
+    color: #000;
+    box-shadow: 0 0 15px rgba(255, 204, 0, 0.6);
 }
 
 #start-game-btn {
