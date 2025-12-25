@@ -32,6 +32,12 @@ app.use(express.json());
 const projectRoot = path.join(__dirname, '..');
 app.use('/assets', express.static(path.join(projectRoot, 'assets')));
 app.use('/mobile', express.static(path.join(projectRoot, 'mobile')));
+app.use('/css', express.static(path.join(projectRoot, 'css')));
+app.use('/js', express.static(path.join(projectRoot, 'js')));
+app.use('/bgm', express.static(path.join(projectRoot, 'bgm')));
+app.use('/sfx', express.static(path.join(projectRoot, 'sfx')));
+app.use('/Meshy_AI_biped', express.static(path.join(projectRoot, 'Meshy_AI_biped')));
+app.use(express.static(projectRoot)); // Serve HTML files from root
 
 // Create HTTP server
 const httpServer = createServer(app);

@@ -28,7 +28,8 @@ const FLAPPY_CONFIG = {
 
 class FlappyStateManager {
     constructor() {
-        this.games = new Map(); // roomCode -> gameState
+        this.games = new Map();
+        this.pendingSpeedMultipliers = new Map(); // Store speed multipliers before game starts // roomCode -> gameState
         this.onGameEndCallback = null; // Callback for tournament handling
     }
     
@@ -55,6 +56,10 @@ class FlappyStateManager {
             lane++;
         }
         
+        // Check for pending speed multiplier
+        const pendingMultiplier = this.pendingSpeedMultipliers.get(roomCode) || 1;
+        this.pendingSpeedMultipliers.delete(roomCode); // Clear pending
+        
         const gameState = {
             roomCode,
             players: playerStates,
@@ -65,7 +70,7 @@ class FlappyStateManager {
             gameOver: false,
             lastPipeX: FLAPPY_CONFIG.pipeStartX,
             startTime: null,
-            speedMultiplier: 1 // Speed multiplier controlled by host (1, 1.5, or 2)
+            speedMultiplier: pendingMultiplier // Apply pending or default to 1
         };
         
         this.games.set(roomCode, gameState);
@@ -78,17 +83,21 @@ class FlappyStateManager {
      * @param {number} multiplier - Speed multiplier (1, 1.5, or 2)
      */
     setSpeedMultiplier(roomCode, multiplier) {
-        const game = this.games.get(roomCode);
-        if (!game) return false;
-        
         // Validate multiplier
         const validMultipliers = [1, 1.5, 2];
         if (!validMultipliers.includes(multiplier)) {
             return false;
         }
         
-        game.speedMultiplier = multiplier;
-        console.log(`[Flappy] Speed multiplier set to x${multiplier} for room ${roomCode}`);
+        const game = this.games.get(roomCode);
+        if (game) {
+            // Game exists - set multiplier directly
+            game.speedMultiplier = multiplier;
+        } else {
+            // Game doesn't exist yet - store as pending
+            this.pendingSpeedMultipliers.set(roomCode, multiplier);
+        }
+        
         return true;
     }
     
