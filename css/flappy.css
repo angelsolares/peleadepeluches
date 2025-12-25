@@ -203,10 +203,15 @@
     padding: 12px 20px;
     text-align: center;
     z-index: 100;
+    pointer-events: auto;
 }
 
 #speed-control.hidden {
     display: none;
+}
+
+#speed-control .speed-buttons {
+    pointer-events: auto;
 }
 
 #speed-control .label {
@@ -235,11 +240,16 @@
     color: #ffcc00;
     cursor: pointer;
     transition: all 0.2s ease;
+    pointer-events: auto !important;
 }
 
 .speed-btn:hover {
     background: rgba(255, 204, 0, 0.3);
     transform: scale(1.05);
+}
+
+.speed-btn:active {
+    transform: scale(0.95);
 }
 
 .speed-btn.selected {
