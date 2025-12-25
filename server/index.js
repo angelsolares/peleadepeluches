@@ -719,6 +719,46 @@ io.on('connection', (socket) => {
         flappyStateManager.processFlap(roomCode, socket.id);
     });
     
+    /**
+     * Set Flappy speed multiplier (host only)
+     */
+    socket.on('flappy-set-speed', (multiplier, callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Not in a room' });
+            }
+            return;
+        }
+        
+        const room = lobbyManager.rooms.get(roomCode);
+        if (!room) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Room not found' });
+            }
+            return;
+        }
+        
+        // Only host can change speed
+        if (room.hostId !== socket.id) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Only host can change speed' });
+            }
+            return;
+        }
+        
+        const success = flappyStateManager.setSpeedMultiplier(roomCode, multiplier);
+        
+        if (success) {
+            // Broadcast speed change to all players in the room
+            io.to(roomCode).emit('flappy-speed-changed', { speed: multiplier });
+        }
+        
+        if (typeof callback === 'function') {
+            callback({ success, speed: multiplier });
+        }
+    });
+    
     // ========== COMMON EVENTS ==========
     
     /**

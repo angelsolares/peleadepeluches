@@ -394,6 +394,10 @@ class FlappyGame {
         this.gameOver = false;
         this.currentDistance = 0;
         
+        // Host controls
+        this.isHost = true; // Host creates the room
+        this.currentSpeedMultiplier = 1;
+        
         // Character selection from URL
         this.selectedCharacter = this.getCharacterFromURL() || 'angel';
         
@@ -810,8 +814,76 @@ class FlappyGame {
             console.log('[FlappyGame] Disconnected from server');
         });
         
+        // Speed change event from server
+        this.socket.on('flappy-speed-changed', (data) => {
+            console.log('[FlappyGame] Speed changed:', data.speed);
+            this.currentSpeedMultiplier = data.speed;
+            this.updateSpeedDisplay(data.speed);
+        });
+        
         // Initialize tournament manager
         this.tournamentManager = new TournamentManager(this.socket, 'flappy');
+    }
+    
+    /**
+     * Setup speed control buttons (host only)
+     */
+    setupSpeedControls() {
+        if (!this.isHost) return;
+        
+        const speedControl = document.getElementById('speed-control');
+        if (!speedControl) return;
+        
+        // Show speed control for host
+        speedControl.classList.remove('hidden');
+        
+        const speedButtons = speedControl.querySelectorAll('.speed-btn');
+        speedButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const speed = parseFloat(btn.dataset.speed);
+                this.setSpeed(speed);
+                
+                // Update button states
+                speedButtons.forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+            });
+        });
+    }
+    
+    /**
+     * Set game speed (host only)
+     */
+    setSpeed(multiplier) {
+        if (!this.isHost || !this.socket) return;
+        
+        this.socket.emit('flappy-set-speed', multiplier, (response) => {
+            if (response && response.success) {
+                console.log('[FlappyGame] Speed set to:', multiplier);
+            } else {
+                console.warn('[FlappyGame] Failed to set speed:', response?.error);
+            }
+        });
+    }
+    
+    /**
+     * Update speed display UI
+     */
+    updateSpeedDisplay(speed) {
+        const display = document.getElementById('current-speed-display');
+        if (display) {
+            display.textContent = `x${speed}`;
+        }
+        
+        // Update button selection
+        const speedButtons = document.querySelectorAll('.speed-btn');
+        speedButtons.forEach(btn => {
+            const btnSpeed = parseFloat(btn.dataset.speed);
+            if (btnSpeed === speed) {
+                btn.classList.add('selected');
+            } else {
+                btn.classList.remove('selected');
+            }
+        });
     }
     
     createRoom() {
@@ -853,6 +925,9 @@ class FlappyGame {
         
         // Setup rounds selector
         this.setupRoundsSelector();
+        
+        // Setup speed controls (host only)
+        this.setupSpeedControls();
     }
     
     setupRoundsSelector() {

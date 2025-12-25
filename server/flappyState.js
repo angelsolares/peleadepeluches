@@ -64,11 +64,40 @@ class FlappyStateManager {
             gameStarted: false,
             gameOver: false,
             lastPipeX: FLAPPY_CONFIG.pipeStartX,
-            startTime: null
+            startTime: null,
+            speedMultiplier: 1 // Speed multiplier controlled by host (1, 1.5, or 2)
         };
         
         this.games.set(roomCode, gameState);
         return gameState;
+    }
+    
+    /**
+     * Set speed multiplier (host only)
+     * @param {string} roomCode - Room code
+     * @param {number} multiplier - Speed multiplier (1, 1.5, or 2)
+     */
+    setSpeedMultiplier(roomCode, multiplier) {
+        const game = this.games.get(roomCode);
+        if (!game) return false;
+        
+        // Validate multiplier
+        const validMultipliers = [1, 1.5, 2];
+        if (!validMultipliers.includes(multiplier)) {
+            return false;
+        }
+        
+        game.speedMultiplier = multiplier;
+        console.log(`[Flappy] Speed multiplier set to x${multiplier} for room ${roomCode}`);
+        return true;
+    }
+    
+    /**
+     * Get current speed multiplier
+     */
+    getSpeedMultiplier(roomCode) {
+        const game = this.games.get(roomCode);
+        return game ? game.speedMultiplier : 1;
     }
     
     startCountdown(roomCode, io) {
@@ -128,10 +157,12 @@ class FlappyStateManager {
         if (!game || !game.gameStarted) return;
         
         // Calculate current difficulty based on distance
-        const currentSpeed = Math.min(
+        // Apply speed multiplier from host
+        const baseSpeed = Math.min(
             FLAPPY_CONFIG.gameSpeed + (game.distance * FLAPPY_CONFIG.speedIncreaseRate),
             FLAPPY_CONFIG.maxGameSpeed
         );
+        const currentSpeed = baseSpeed * (game.speedMultiplier || 1);
         const currentGap = Math.max(
             FLAPPY_CONFIG.pipeGap - (game.distance * FLAPPY_CONFIG.gapDecreaseRate),
             FLAPPY_CONFIG.minPipeGap

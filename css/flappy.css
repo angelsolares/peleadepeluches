@@ -179,6 +179,70 @@
     font-family: 'Orbitron', monospace;
     font-size: 1.5rem;
     font-weight: bold;
+    color: white;
+    text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+}
+
+/* Speed Control (Host only) */
+#speed-control {
+    position: absolute;
+    top: 290px;
+    right: 20px;
+    background: rgba(10, 10, 21, 0.9);
+    border: 2px solid #ffcc00;
+    border-radius: 15px;
+    padding: 12px 20px;
+    text-align: center;
+    z-index: 100;
+}
+
+#speed-control.hidden {
+    display: none;
+}
+
+#speed-control .label {
+    display: block;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+    color: #ffcc00;
+    margin-bottom: 8px;
+}
+
+.speed-buttons {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+
+.speed-btn {
+    background: rgba(255, 204, 0, 0.1);
+    border: 2px solid #ffcc00;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: #ffcc00;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.speed-btn:hover {
+    background: rgba(255, 204, 0, 0.3);
+    transform: scale(1.05);
+}
+
+.speed-btn.selected {
+    background: #ffcc00;
+    color: #000;
+    box-shadow: 0 0 15px rgba(255, 204, 0, 0.6);
+}
+
+#current-speed-display {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.5rem;
+    font-weight: bold;
     color: #00ff88;
     text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
