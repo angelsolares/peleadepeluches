@@ -330,11 +330,20 @@ class PaintGame {
             }
         });
 
+        // Add Name Label
+        const div = document.createElement('div');
+        div.className = 'paint-player-name-label';
+        div.textContent = data.name || `P${data.number}`;
+        div.style.color = data.color;
+        const label = new CSS2DObject(div);
+        label.position.set(0, 220, 0); // Position above character head
+        model.add(label);
+
         this.scene.add(model);
         
         const animController = new AnimationController(model, this.baseAnimations);
         
-        return { model, animController };
+        return { model, animController, label };
     }
 
     updateGrid(gridData, players) {

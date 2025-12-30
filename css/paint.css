@@ -103,6 +103,21 @@
     color: #ffcc00;
 }
 
+.paint-player-name-label {
+    color: white;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    text-shadow: 0 0 10px rgba(0,0,0,0.8);
+    padding: 2px 10px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 5px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+    text-transform: uppercase;
+    pointer-events: none;
+}
+
 @keyframes slideIn {
     from { transform: translateX(50px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
