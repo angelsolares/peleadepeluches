@@ -361,7 +361,6 @@ class BalloonGame {
             this.socket.emit('start-game');
         };
     }
-    }
 
     hideRoomUI() {
         document.getElementById('balloon-room-overlay')?.remove();
