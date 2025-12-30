@@ -491,7 +491,8 @@ class TugGame {
             '.rhythm-hud',
             '#tug-game-status',
             '#tug-countdown',
-            '#tug-timer'
+            '#tug-timer',
+            '.tug-player-name-label' // Clear player labels from previous game
         ];
         
         elementsToRemove.forEach(selector => {
