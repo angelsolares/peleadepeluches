@@ -963,6 +963,35 @@ function updateControllerUIForMode() {
         if (stocksDisplay) stocksDisplay.style.display = 'none';
         
         console.log('[Controller] Tag mode UI configured');
+    } else if (gameMode === 'paint') {
+        // Paint mode: D-pad for 4-way movement + Run
+        if (controllerBody) controllerBody.style.display = 'flex';
+        if (raceControls) raceControls.style.display = 'none';
+        if (flappyControls) flappyControls.style.display = 'none';
+        if (controllerScreen) {
+            controllerScreen.classList.add('paint-mode');
+            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode');
+        }
+        
+        if (dpadUp) {
+            dpadUp.dataset.input = 'up';
+            dpadUp.dataset.originalInput = 'up';
+        }
+        if (dpadDown) {
+            dpadDown.dataset.input = 'down';
+            dpadDown.dataset.originalInput = 'down';
+            if (runLabel) runLabel.style.display = 'block';
+        }
+        
+        // Show action buttons but maybe only for running? 
+        // Actually, let's just use the D-pad and keep it simple.
+        const actionButtons = document.querySelector('.action-buttons');
+        if (actionButtons) actionButtons.style.display = 'none';
+        
+        if (healthLabel) healthLabel.textContent = 'PINTA!';
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        
+        console.log('[Controller] Paint mode UI configured');
     } else if (gameMode === 'arena') {
         // Arena mode: D-pad controls all 4 directions for movement
         if (controllerBody) controllerBody.style.display = 'flex';

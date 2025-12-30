@@ -16,6 +16,7 @@ import { RaceStateManager } from './raceState.js';
 import { FlappyStateManager } from './flappyState.js';
 import TagStateManager from './tagState.js';
 import TugStateManager from './tugState.js';
+import PaintStateManager from './paintState.js';
 
 // ES Module dirname support
 const __filename = fileURLToPath(import.meta.url);
@@ -60,6 +61,7 @@ const raceStateManager = new RaceStateManager(lobbyManager);
 const flappyStateManager = new FlappyStateManager();
 const tagStateManager = new TagStateManager(lobbyManager);
 const tugStateManager = new TugStateManager(lobbyManager);
+const paintStateManager = new PaintStateManager(lobbyManager);
 
 // Set up flappy game end callback for tournament handling
 flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
@@ -192,6 +194,9 @@ const tagLoops = new Map();
 
 // Tug game loops
 const tugLoops = new Map();
+
+// Paint game loops
+const paintLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -382,6 +387,11 @@ io.on('connection', (socket) => {
                 tugStateManager.initializeTug(roomCode);
                 startTugLoop(roomCode);
                 console.log(`[Socket] Tug game started in room ${roomCode}`);
+            } else if (room.gameMode === 'paint') {
+                // Initialize paint state
+                paintStateManager.initializePaint(roomCode);
+                startPaintLoop(roomCode);
+                console.log(`[Socket] Paint game started in room ${roomCode}`);
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -937,6 +947,10 @@ function startNextRound(roomCode, gameMode) {
             tagStateManager.initializeTag(roomCode);
             stopTagLoop(roomCode);
             startTagLoop(roomCode);
+        } else if (gameMode === 'paint') {
+            paintStateManager.initializePaint(roomCode);
+            stopPaintLoop(roomCode);
+            startPaintLoop(roomCode);
         } else {
             // Smash mode
             stopGameLoop(roomCode);
@@ -973,6 +987,7 @@ function handleDisconnect(socket) {
             stopFlappyLoop(result.roomCode);
             stopTagLoop(result.roomCode);
             stopTugLoop(result.roomCode);
+            stopPaintLoop(result.roomCode);
             
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
@@ -1306,6 +1321,72 @@ function stopTugLoop(roomCode) {
         clearInterval(loop);
         tugLoops.delete(roomCode);
         console.log(`[Tug] Stopped tug loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start paint game loop for a room
+ */
+function startPaintLoop(roomCode) {
+    stopPaintLoop(roomCode);
+    
+    const tickRate = 1000 / 60;
+    
+    const loop = setInterval(() => {
+        const state = paintStateManager.processTick(roomCode);
+        
+        if (state) {
+            io.to(roomCode).emit('paint-state', state);
+            
+            if (state.roundState === 'finished') {
+                stopPaintLoop(roomCode);
+                
+                // Handle tournament logic
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1) {
+                    const roundResult = handleRoundEnd(
+                        roomCode, 
+                        state.winner.id,
+                        state.winner.name,
+                        'paint'
+                    );
+                    
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', {
+                            ...roundResult,
+                            gameMode: 'paint',
+                            paintResults: state.results
+                        });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', {
+                            ...roundResult,
+                            gameMode: 'paint',
+                            paintResults: state.results
+                        });
+                        setTimeout(() => startNextRound(roomCode, 'paint'), 5000);
+                    }
+                } else {
+                    io.to(roomCode).emit('paint-game-over', state);
+                }
+            }
+        } else {
+            stopPaintLoop(roomCode);
+        }
+    }, tickRate);
+    
+    paintLoops.set(roomCode, loop);
+    console.log(`[Paint] Started paint loop for room ${roomCode}`);
+}
+
+/**
+ * Stop paint game loop for a room
+ */
+function stopPaintLoop(roomCode) {
+    const loop = paintLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        paintLoops.delete(roomCode);
+        console.log(`[Paint] Stopped paint loop for room ${roomCode}`);
     }
 }
 

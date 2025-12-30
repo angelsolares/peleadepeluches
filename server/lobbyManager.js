@@ -78,6 +78,9 @@ class LobbyManager {
      * @returns {object} Join result
      */
     joinRoom(roomCode, socketId, playerName) {
+        if (!roomCode) {
+            return { success: false, error: 'Room code is required' };
+        }
         const room = this.rooms.get(roomCode.toUpperCase());
         
         if (!room) {

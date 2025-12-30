@@ -7,7 +7,8 @@ export const GAME_MODES = {
     SMASH: 'smash',
     ARENA: 'arena',
     TAG: 'tag',
-    TUG: 'tug'
+    TUG: 'tug',
+    PAINT: 'paint'
 };
 
 export const MODE_CONFIG = {
@@ -62,6 +63,19 @@ export const MODE_CONFIG = {
             'Bonus de remontada'
         ],
         color: '#9966ff'
+    },
+    [GAME_MODES.PAINT]: {
+        id: 'paint',
+        name: 'Pinta el Piso',
+        description: 'Territorio - ¡Pinta el suelo con tu color!',
+        icon: '🎨',
+        features: [
+            '2-8 jugadores',
+            'Sistema de estela',
+            'Borra pintura rival',
+            'Control de área %'
+        ],
+        color: '#ffffff'
     }
 };
 

@@ -1535,6 +1535,11 @@ body {
     display: none;
 }
 
+/* Paint Mode specific styles */
+.paint-mode .controller-header .stocks-display {
+    display: none;
+}
+
 /* ==================================
    Tournament Overlays (Mobile)
    ================================== */

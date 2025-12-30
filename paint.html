@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pelea de Peluches - Pinta el Piso</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/paint.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- HUD / UI Overlay -->
+        <div id="hud">
+            <h1 class="game-title">PINTA EL PISO</h1>
+            
+            <div id="timer-display">
+                TIEMPO: <span id="time-left">01:30</span>
+            </div>
+
+            <!-- Territory Percentages -->
+            <div id="paint-scores">
+                <!-- Dynamic scores will be inserted here -->
+            </div>
+            
+            <!-- Tournament HUD (shown during game) -->
+            <div id="tournament-hud" class="hidden">
+                <div class="tournament-round-display">
+                    Ronda <span id="current-round">1</span>/<span id="total-rounds">3</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Game Over / Results Overlay -->
+        <div id="results-overlay" class="hidden">
+            <h2 id="winner-text">¡GANADOR!</h2>
+            <div id="final-rankings">
+                <!-- Dynamic results -->
+            </div>
+            <div id="next-round-countdown" class="hidden">
+                Siguiente ronda en <span class="countdown-number" id="countdown-number">5</span>...
+            </div>
+            <button id="btn-return-menu" class="btn-return-menu hidden" onclick="window.location.href='index.html'">VOLVER AL MENÚ</button>
+        </div>
+        
+        <!-- Loading screen -->
+        <div id="loading-screen">
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p id="loading-text">Cargando territorio...</p>
+                <div class="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <!-- Socket.IO -->
+    <script src="/socket.io/socket.io.js"></script>
+    
+    <script type="module" src="js/paint/PaintGame.js"></script>
+</body>
+</html>
+
