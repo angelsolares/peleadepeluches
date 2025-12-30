@@ -287,14 +287,14 @@ class TugGame {
         const ropeMat = new THREE.MeshPhongMaterial({ color: 0x8b4513 }); // Brownish
         this.rope = new THREE.Mesh(ropeGeo, ropeMat);
         this.rope.rotation.z = Math.PI / 2;
-        this.rope.position.y = 1.5;
+        this.rope.position.y = 1.2; // Lowered to align with character hands
         this.scene.add(this.rope);
 
         // Marker (the flag on the rope)
         const markerGeo = new THREE.BoxGeometry(0.5, 1, 0.5);
         const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
         this.marker = new THREE.Mesh(markerGeo, markerMat);
-        this.marker.position.y = 1.5;
+        this.marker.position.y = 1.2; // Lowered to match rope
         this.scene.add(this.marker);
     }
 
@@ -428,9 +428,10 @@ class TugGame {
             const teamPlayers = teams[team];
             const pIdx = teamPlayers.findIndex(tp => tp.id === p.id);
             const x = (team === 'left' ? -1 : 1) * (TUG_CONFIG.SIDE_OFFSET + pIdx * TUG_CONFIG.PLAYER_SPACING);
-            const z = (pIdx % 2 === 0 ? 1 : -1) * 1.5; // Staggered
+            const z = (pIdx % 2 === 0 ? 1 : -1) * 0.8; // Closer to the rope (was 1.5)
             entity.model.position.set(x, 0, z);
-            entity.model.rotation.y = (team === 'left' ? 1 : -1) * Math.PI / 2;
+            // Swapped signs: Left team faces X+, Right team faces X-
+            entity.model.rotation.y = (team === 'left' ? -1 : 1) * Math.PI / 2;
         });
     }
 
