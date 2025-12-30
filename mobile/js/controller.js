@@ -92,6 +92,9 @@ let tugNextPulse = 0;
 let tugPulseInterval = 1500; // ms
 let tugRhythmStart = 0;
 
+// Balloon state
+let balloonProgress = 0;
+
 // Available characters
 const CHARACTERS = {
     edgar: { name: 'Edgar', emoji: '👦' },
@@ -202,6 +205,10 @@ function connectToServer() {
     // Tug mode events
     socket.on('tug-state', handleTugState);
     socket.on('tug-game-over', handleGameOver);
+    
+    // Balloon mode events
+    socket.on('balloon-state', handleBalloonState);
+    socket.on('balloon-game-over', handleGameOver);
     
     // Tournament events
     socket.on('tournament-config', handleTournamentConfig);
@@ -613,6 +620,25 @@ function handleTugState(data) {
     }
 }
 
+function handleBalloonState(data) {
+    if (!data || !data.players) return;
+    
+    const myState = data.players.find(p => p.id === socket.id);
+    if (myState) {
+        balloonProgress = myState.balloonSize;
+        const fill = document.getElementById('balloon-progress-fill');
+        if (fill) {
+            fill.style.width = `${balloonProgress}%`;
+            // Visual feedback for high progress
+            if (balloonProgress > 80) {
+                fill.style.background = 'linear-gradient(90deg, #ff66ff, #ff0000)';
+            } else {
+                fill.style.background = 'linear-gradient(90deg, #9966ff, #ff66ff)';
+            }
+        }
+    }
+}
+
 function updateConnectionStatus(status, text) {
     const statusEl = elements.connectionStatus;
     statusEl.className = 'connection-status ' + status;
@@ -891,14 +917,29 @@ function updateControllerUIForMode() {
     const raceControls = document.getElementById('race-controls');
     const flappyControls = document.getElementById('flappy-controls');
     const tugControls = document.getElementById('tug-controls');
+    const balloonControls = document.getElementById('balloon-controls');
     const controllerScreen = document.getElementById('controller-screen');
     
     // Hide all special controls first
     if (raceControls) raceControls.style.display = 'none';
     if (flappyControls) flappyControls.style.display = 'none';
     if (tugControls) tugControls.style.display = 'none';
+    if (balloonControls) balloonControls.style.display = 'none';
     
-    if (gameMode === 'tug') {
+    if (gameMode === 'balloon') {
+        // Balloon mode
+        if (controllerBody) controllerBody.style.display = 'none';
+        if (balloonControls) balloonControls.style.display = 'flex';
+        if (controllerScreen) {
+            controllerScreen.classList.add('balloon-mode');
+            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode');
+        }
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (healthLabel) healthLabel.textContent = '';
+        
+        setupBalloonControls();
+        console.log('[Controller] Balloon mode UI configured');
+    } else if (gameMode === 'tug') {
         // Tug of War mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (tugControls) tugControls.style.display = 'flex';
@@ -1158,6 +1199,43 @@ function setupTugControls() {
     }
     
     console.log('[Tug] Controls setup complete');
+}
+
+// Setup Balloon mode controls
+function setupBalloonControls() {
+    const inflateBtn = document.getElementById('balloon-inflate-btn');
+    
+    if (inflateBtn) {
+        // Remove old listeners
+        inflateBtn.replaceWith(inflateBtn.cloneNode(true));
+        const newInflateBtn = document.getElementById('balloon-inflate-btn');
+        
+        const handleInflate = (e) => {
+            if (e) e.preventDefault();
+            if (gameMode !== 'balloon') return;
+            
+            newInflateBtn.classList.add('pressed');
+            newInflateBtn.classList.add('pulse');
+            
+            // Send inflate action to server
+            if (socket && socket.connected) {
+                socket.emit('balloon-inflate');
+            }
+            
+            triggerHaptic();
+            
+            setTimeout(() => {
+                newInflateBtn.classList.remove('pulse');
+            }, 200);
+        };
+        
+        newInflateBtn.addEventListener('touchstart', handleInflate, { passive: false });
+        newInflateBtn.addEventListener('touchend', () => newInflateBtn.classList.remove('pressed'), { passive: false });
+        newInflateBtn.addEventListener('mousedown', handleInflate);
+        newInflateBtn.addEventListener('mouseup', () => newInflateBtn.classList.remove('pressed'));
+    }
+    
+    console.log('[Balloon] Controls setup complete');
 }
 
 // Client-side rhythm animation for the Tug of War bar
@@ -1888,6 +1966,7 @@ function resetState() {
     lastRaceTap = null;
     raceSpeed = 0;
     flappyAlive = true;
+    balloonProgress = 0;
     Object.keys(inputState).forEach(key => inputState[key] = false);
     
     // Hide escape UI if visible

@@ -8,7 +8,8 @@ export const GAME_MODES = {
     ARENA: 'arena',
     TAG: 'tag',
     TUG: 'tug',
-    PAINT: 'paint'
+    PAINT: 'paint',
+    BALLOON: 'balloon'
 };
 
 export const MODE_CONFIG = {
@@ -76,6 +77,19 @@ export const MODE_CONFIG = {
             'Control de área %'
         ],
         color: '#ffffff'
+    },
+    [GAME_MODES.BALLOON]: {
+        id: 'balloon',
+        name: 'Infla el Globo',
+        description: '¡Sé el primero en inflar tu globo al máximo!',
+        icon: '🎈',
+        features: [
+            'Inflado por bombeo móvil',
+            'Física de globos 3D',
+            'Competencia frenética',
+            '¡Cuidado con que explote!'
+        ],
+        color: '#ff66ff'
     }
 };
 

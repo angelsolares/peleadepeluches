@@ -1,0 +1,377 @@
+/**
+ * BALLOON GAME - Balloon Game Mode
+ * Three.js based balloon inflating game
+ */
+
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { SERVER_URL, CONFIG } from '../config.js';
+import { AnimationController } from '../animation/AnimationController.js';
+
+const BALLOON_CONFIG = {
+    CAMERA_HEIGHT: 15,
+    CAMERA_DISTANCE: 25,
+    PLAYER_SPACING: 6,
+    MAX_BALLOON_SCALE: 2.5,
+    MIN_BALLOON_SCALE: 0.2
+};
+
+const CHARACTER_MODELS = {
+    edgar: { name: 'Edgar', file: 'Edgar_Model.fbx' },
+    isabella: { name: 'Isabella', file: 'Isabella_Model.fbx' },
+    jesus: { name: 'Jesus', file: 'Jesus_Model.fbx' },
+    lia: { name: 'Lia', file: 'Lia_Model.fbx' },
+    hector: { name: 'Hector', file: 'Hector.fbx' },
+    katy: { name: 'Katy', file: 'Katy.fbx' },
+    mariana: { name: 'Mariana', file: 'Mariana.fbx' },
+    sol: { name: 'Sol', file: 'Sol.fbx' },
+    yadira: { name: 'Yadira', file: 'Yadira.fbx' },
+    angel: { name: 'Angel', file: 'Angel.fbx' },
+    lidia: { name: 'Lidia', file: 'Lidia.fbx' },
+    fabian: { name: 'Fabian', file: 'Fabian.fbx' },
+    marile: { name: 'Marile', file: 'Marile.fbx' },
+    gabriel: { name: 'Gabriel', file: 'Gabriel.fbx' }
+};
+
+const ANIMATION_FILES = {
+    idle: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
+    pump: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx',
+    win: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
+    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+};
+
+class BalloonPlayerEntity {
+    constructor(id, number, color, baseModel, baseAnimations) {
+        this.id = id;
+        this.number = number;
+        this.color = color;
+        this.name = `Player ${number}`;
+        
+        this.model = SkeletonUtils.clone(baseModel);
+        this.model.scale.set(0.01, 0.01, 0.01);
+        
+        this.applyColorTint(color);
+        
+        this.nameLabel = this.createNameLabel(color);
+        this.model.add(this.nameLabel);
+        
+        this.animController = new AnimationController(this.model, baseAnimations);
+        
+        // Create Balloon
+        this.balloon = this.createBalloon(color);
+        this.model.add(this.balloon);
+        this.balloon.position.set(0, 200, 50); // Relative to model head area
+        
+        this.lastSize = 0;
+        this.isPumping = false;
+        this.pumpEndTime = 0;
+    }
+    
+    createBalloon(color) {
+        const geometry = new THREE.SphereGeometry(60, 32, 32);
+        // Deform sphere to look like a balloon
+        const positions = geometry.attributes.position;
+        for (let i = 0; i < positions.count; i++) {
+            const y = positions.getY(i);
+            if (y < 0) {
+                const factor = 1 + (y / 60) * 0.3;
+                positions.setX(i, positions.getX(i) * factor);
+                positions.setZ(i, positions.getZ(i) * factor);
+            }
+        }
+        
+        const material = new THREE.MeshPhongMaterial({
+            color: color,
+            shininess: 100,
+            transparent: true,
+            opacity: 0.9
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.scale.set(0.1, 0.1, 0.1);
+        return mesh;
+    }
+    
+    createNameLabel(color) {
+        const div = document.createElement('div');
+        div.className = 'balloon-player-name-label';
+        div.textContent = this.name;
+        div.style.color = color;
+        const label = new CSS2DObject(div);
+        label.position.set(0, 250, 0);
+        return label;
+    }
+    
+    applyColorTint(color) {
+        const tintColor = new THREE.Color(color);
+        this.model.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.material = child.material.clone();
+                if (child.material.emissive) {
+                    child.material.emissive = tintColor;
+                    child.material.emissiveIntensity = 0.2;
+                }
+            }
+        });
+    }
+
+    update(delta, state) {
+        if (state) {
+            if (state.balloonSize > this.lastSize + 0.5) {
+                this.isPumping = true;
+                this.pumpEndTime = Date.now() + 300;
+            }
+            this.lastSize = state.balloonSize;
+            
+            // Update balloon scale
+            const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + (state.balloonSize / 100) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
+            this.balloon.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+        }
+
+        if (this.isPumping && Date.now() > this.pumpEndTime) {
+            this.isPumping = false;
+        }
+
+        let animName = 'idle';
+        if (this.isPumping) animName = 'pump';
+        
+        this.animController.update(delta, animName);
+    }
+}
+
+class BalloonGame {
+    constructor() {
+        this.players = new Map();
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.labelRenderer = null;
+        this.clock = new THREE.Clock();
+        this.socket = null;
+        this.roomCode = null;
+        this.gameStarted = false;
+        
+        this.baseModels = {};
+        this.baseAnimations = {};
+        
+        this.init();
+    }
+
+    async init() {
+        this.setupScene();
+        this.setupLights();
+        this.createArena();
+        
+        await this.loadAssets();
+        this.connectToServer();
+        this.animate();
+        
+        window.addEventListener('resize', () => this.onWindowResize());
+    }
+
+    setupScene() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x0a0a15);
+        this.scene.fog = new THREE.Fog(0x0a0a15, 30, 100);
+
+        this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        this.camera.position.set(0, BALLOON_CONFIG.CAMERA_HEIGHT, BALLOON_CONFIG.CAMERA_DISTANCE);
+        this.camera.lookAt(0, 5, 0);
+
+        this.renderer = new THREE.WebGLRenderer({ 
+            canvas: document.getElementById('game-canvas'),
+            antialias: true 
+        });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.shadowMap.enabled = true;
+
+        this.labelRenderer = new CSS2DRenderer();
+        this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        this.labelRenderer.domElement.style.position = 'absolute';
+        this.labelRenderer.domElement.style.top = '0px';
+        this.labelRenderer.domElement.style.pointerEvents = 'none';
+        document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
+    }
+
+    setupLights() {
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        this.scene.add(directionalLight);
+        
+        const spotLight = new THREE.SpotLight(0xffffff, 1);
+        spotLight.position.set(0, 30, 0);
+        spotLight.angle = Math.PI / 4;
+        this.scene.add(spotLight);
+    }
+
+    createArena() {
+        // Party Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshPhongMaterial({ color: 0x1a1a2e });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        this.scene.add(floor);
+
+        // Grid lines for party look
+        const grid = new THREE.GridHelper(100, 20, 0x4444ff, 0x222244);
+        grid.position.y = 0.05;
+        this.scene.add(grid);
+    }
+
+    async loadAssets() {
+        const loader = new FBXLoader();
+        
+        // Load all character models
+        const modelPromises = Object.entries(CHARACTER_MODELS).map(async ([id, data]) => {
+            try {
+                const model = await loader.loadAsync(`assets/${data.file}`);
+                this.baseModels[id] = model;
+            } catch (e) {
+                console.warn(`Failed to load model ${id}:`, e);
+            }
+        });
+        
+        await Promise.all(modelPromises);
+        
+        for (const [name, file] of Object.entries(ANIMATION_FILES)) {
+            try {
+                const anim = await loader.loadAsync(`assets/${file}`);
+                this.baseAnimations[name] = anim.animations[0];
+            } catch (e) {
+                console.warn(`Failed to load animation ${name}:`, e);
+            }
+        }
+
+        document.getElementById('loading-screen')?.classList.add('hidden');
+    }
+
+    connectToServer() {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+        script.onload = () => {
+            this.socket = io(SERVER_URL);
+            this.socket.on('connect', () => {
+                this.socket.emit('create-room', { gameMode: 'balloon' }, (response) => {
+                    if (response.success) {
+                        this.roomCode = response.roomCode;
+                        this.showRoomUI(this.roomCode);
+                    }
+                });
+            });
+
+            this.socket.on('game-started', (data) => {
+                this.gameStarted = true;
+                this.hideRoomUI();
+                this.setupPlayers(data.players);
+            });
+
+            this.socket.on('balloon-state', (state) => this.updateGameState(state));
+            this.socket.on('balloon-game-over', (data) => this.showGameOver(data));
+        };
+        document.head.appendChild(script);
+    }
+
+    showRoomUI(code) {
+        const overlay = document.createElement('div');
+        overlay.id = 'balloon-room-overlay';
+        overlay.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(10, 10, 21, 0.95); border: 4px solid #ff66ff; border-radius: 24px;
+            padding: 40px; text-align: center; font-family: 'Orbitron', sans-serif; z-index: 100;
+        `;
+        overlay.innerHTML = `
+            <h1 style="color: #ff66ff; margin-bottom: 20px;">INFLA EL GLOBO</h1>
+            <div style="font-size: 4rem; color: white; letter-spacing: 10px; margin-bottom: 20px;">${code}</div>
+            <p style="color: rgba(255,255,255,0.6);">¡Prepara tus pulmones!</p>
+            <div id="player-count" style="margin: 20px 0; font-size: 1.2rem; color: white;">Jugadores: 0 / 8</div>
+            <button id="start-btn" style="
+                padding: 15px 40px; background: #ff66ff; border: none; border-radius: 12px;
+                color: white; font-family: 'Orbitron'; font-size: 1.2rem; cursor: pointer;
+            " disabled>ESPERANDO JUGADORES...</button>
+        `;
+        document.body.appendChild(overlay);
+
+        this.socket.on('player-joined', (data) => {
+            const count = data.room.playerCount;
+            document.getElementById('player-count').textContent = `Jugadores: ${count} / 8`;
+            const btn = document.getElementById('start-btn');
+            if (count >= 1) {
+                btn.disabled = false;
+                btn.textContent = '¡INICIAR FIESTA!';
+            }
+        });
+
+        document.getElementById('start-btn').onclick = () => this.socket.emit('start-game');
+    }
+
+    hideRoomUI() {
+        document.getElementById('balloon-room-overlay')?.remove();
+    }
+
+    setupPlayers(playersData) {
+        const total = playersData.length;
+        const startX = -(total - 1) * BALLOON_CONFIG.PLAYER_SPACING / 2;
+        
+        playersData.forEach((p, idx) => {
+            const characterId = p.character || 'edgar';
+            const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
+            const entity = new BalloonPlayerEntity(p.id, p.number, p.color, baseModel, this.baseAnimations);
+            
+            this.players.set(p.id, entity);
+            this.scene.add(entity.model);
+
+            const x = startX + idx * BALLOON_CONFIG.PLAYER_SPACING;
+            entity.model.position.set(x, 0, 0);
+        });
+    }
+
+    updateGameState(state) {
+        if (!state) return;
+
+        state.players.forEach(pState => {
+            const entity = this.players.get(pState.id);
+            if (entity) {
+                entity.update(this.clock.getDelta(), pState);
+            }
+        });
+    }
+
+    showGameOver(data) {
+        const status = document.createElement('div');
+        status.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-family: 'Orbitron', sans-serif; font-size: 4rem; color: white;
+            text-align: center; z-index: 1000; text-shadow: 0 0 20px #ff66ff;
+        `;
+        status.innerHTML = `¡BOOM!<br><span style="color: #ff66ff">${data.winner.name}</span><br>GANA LA FIESTA`;
+        document.body.appendChild(status);
+        
+        this.players.forEach(entity => {
+            const isWinner = entity.id === data.winner.id;
+            entity.animController.update(0.1, isWinner ? 'win' : 'lose');
+        });
+    }
+
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        const delta = this.clock.getDelta();
+        this.renderer.render(this.scene, this.camera);
+        this.labelRenderer.render(this.scene, this.camera);
+    }
+
+    onWindowResize() {
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
+}
+
+new BalloonGame();
+

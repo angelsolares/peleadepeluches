@@ -17,6 +17,7 @@ import { FlappyStateManager } from './flappyState.js';
 import TagStateManager from './tagState.js';
 import TugStateManager from './tugState.js';
 import PaintStateManager from './paintState.js';
+import BalloonStateManager from './balloonState.js';
 
 // ES Module dirname support
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +63,7 @@ const flappyStateManager = new FlappyStateManager();
 const tagStateManager = new TagStateManager(lobbyManager);
 const tugStateManager = new TugStateManager(lobbyManager);
 const paintStateManager = new PaintStateManager(lobbyManager);
+const balloonStateManager = new BalloonStateManager(lobbyManager);
 
 // Set up flappy game end callback for tournament handling
 flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
@@ -197,6 +199,9 @@ const tugLoops = new Map();
 
 // Paint game loops
 const paintLoops = new Map();
+
+// Balloon game loops
+const balloonLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -392,6 +397,11 @@ io.on('connection', (socket) => {
                 paintStateManager.initializePaint(roomCode);
                 startPaintLoop(roomCode);
                 console.log(`[Socket] Paint game started in room ${roomCode}`);
+            } else if (room.gameMode === 'balloon') {
+                // Initialize balloon state
+                balloonStateManager.initializeBalloon(roomCode);
+                startBalloonLoop(roomCode);
+                console.log(`[Socket] Balloon game started in room ${roomCode}`);
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -764,6 +774,16 @@ io.on('connection', (socket) => {
         
         tugStateManager.handlePull(socket.id, roomCode);
     });
+
+    /**
+     * Balloon inflate action
+     */
+    socket.on('balloon-inflate', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        balloonStateManager.handleInflate(socket.id, roomCode);
+    });
     
     /**
      * Set Flappy speed multiplier (host only)
@@ -951,6 +971,10 @@ function startNextRound(roomCode, gameMode) {
             paintStateManager.initializePaint(roomCode);
             stopPaintLoop(roomCode);
             startPaintLoop(roomCode);
+        } else if (gameMode === 'balloon') {
+            balloonStateManager.initializeBalloon(roomCode);
+            stopBalloonLoop(roomCode);
+            startBalloonLoop(roomCode);
         } else {
             // Smash mode
             stopGameLoop(roomCode);
@@ -988,6 +1012,7 @@ function handleDisconnect(socket) {
             stopTagLoop(result.roomCode);
             stopTugLoop(result.roomCode);
             stopPaintLoop(result.roomCode);
+            stopBalloonLoop(result.roomCode);
             
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
@@ -1387,6 +1412,70 @@ function stopPaintLoop(roomCode) {
         clearInterval(loop);
         paintLoops.delete(roomCode);
         console.log(`[Paint] Stopped paint loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start balloon game loop for a room
+ */
+function startBalloonLoop(roomCode) {
+    stopBalloonLoop(roomCode);
+    
+    const tickRate = 1000 / 60;
+    
+    const loop = setInterval(() => {
+        const state = balloonStateManager.processTick(roomCode);
+        
+        if (state) {
+            io.to(roomCode).emit('balloon-state', state);
+            
+            if (state.gameState === 'finished') {
+                stopBalloonLoop(roomCode);
+                
+                // Handle tournament logic
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1) {
+                    const roundResult = handleRoundEnd(
+                        roomCode, 
+                        state.winner.id,
+                        state.winner.name,
+                        'balloon'
+                    );
+                    
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', {
+                            ...roundResult,
+                            gameMode: 'balloon'
+                        });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', {
+                            ...roundResult,
+                            gameMode: 'balloon'
+                        });
+                        setTimeout(() => startNextRound(roomCode, 'balloon'), 5000);
+                    }
+                } else {
+                    io.to(roomCode).emit('balloon-game-over', state);
+                }
+            }
+        } else {
+            stopBalloonLoop(roomCode);
+        }
+    }, tickRate);
+    
+    balloonLoops.set(roomCode, loop);
+    console.log(`[Balloon] Started balloon loop for room ${roomCode}`);
+}
+
+/**
+ * Stop balloon game loop for a room
+ */
+function stopBalloonLoop(roomCode) {
+    const loop = balloonLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        balloonLoops.delete(roomCode);
+        console.log(`[Balloon] Stopped balloon loop for room ${roomCode}`);
     }
 }
 

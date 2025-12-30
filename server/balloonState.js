@@ -1,0 +1,110 @@
+/**
+ * Balloon (Infla el Globo) State Manager
+ * Server-side game state for Balloon mode
+ */
+
+const BALLOON_CONFIG = {
+    TARGET_SIZE: 100,       // Size to win
+    INFLATE_AMOUNT: 4,      // How much size increases per pump
+    DEFLATE_RATE: 2.5,      // How much size decreases per second (difficulty)
+    COOLDOWN: 100,          // Minimum ms between pumps
+};
+
+class BalloonStateManager {
+    constructor(lobbyManager) {
+        this.lobbyManager = lobbyManager;
+        this.balloonStates = new Map();
+    }
+
+    /**
+     * Initialize balloon state for a room
+     * @param {string} roomCode - Room code
+     */
+    initializeBalloon(roomCode) {
+        const room = this.lobbyManager.rooms.get(roomCode);
+        if (!room || room.gameMode !== 'balloon') return null;
+
+        const balloonState = {
+            roomCode,
+            players: new Map(),
+            startTime: Date.now(),
+            gameState: 'active',    // 'active', 'finished'
+            winner: null
+        };
+
+        // Initialize players
+        room.players.forEach((player) => {
+            balloonState.players.set(player.id, {
+                id: player.id,
+                name: player.name,
+                number: player.number,
+                color: player.color,
+                character: player.character || 'edgar',
+                balloonSize: 0,
+                lastPumpTime: 0
+            });
+        });
+
+        this.balloonStates.set(roomCode, balloonState);
+        return balloonState;
+    }
+
+    /**
+     * Process a game tick
+     */
+    processTick(roomCode) {
+        const state = this.balloonStates.get(roomCode);
+        if (!state || state.gameState !== 'active') return null;
+
+        const now = Date.now();
+        const dt = 1 / 60;
+
+        // Apply slow deflation to all players
+        state.players.forEach((p) => {
+            if (p.balloonSize > 0) {
+                p.balloonSize = Math.max(0, p.balloonSize - BALLOON_CONFIG.DEFLATE_RATE * dt);
+            }
+        });
+
+        return {
+            roomCode,
+            gameState: state.gameState,
+            winner: state.winner,
+            players: Array.from(state.players.values())
+        };
+    }
+
+    /**
+     * Handle inflation pump from a player
+     */
+    handleInflate(playerId, roomCode) {
+        const state = this.balloonStates.get(roomCode);
+        if (!state || state.gameState !== 'active') return;
+
+        const player = state.players.get(playerId);
+        if (!player) return;
+
+        const now = Date.now();
+        if (now - player.lastPumpTime < BALLOON_CONFIG.COOLDOWN) return;
+
+        player.lastPumpTime = now;
+        player.balloonSize += BALLOON_CONFIG.INFLATE_AMOUNT;
+
+        // Check for win
+        if (player.balloonSize >= BALLOON_CONFIG.TARGET_SIZE) {
+            player.balloonSize = BALLOON_CONFIG.TARGET_SIZE;
+            state.gameState = 'finished';
+            state.winner = {
+                id: player.id,
+                name: player.name
+            };
+        }
+    }
+
+    cleanup(roomCode) {
+        this.balloonStates.delete(roomCode);
+    }
+}
+
+export default BalloonStateManager;
+
