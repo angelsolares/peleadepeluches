@@ -460,7 +460,8 @@ class TagGame {
     updateGameState(state) {
         const timerElement = document.getElementById('match-timer');
         if (timerElement) {
-            const seconds = Math.floor(state.remainingTime / 1000);
+            const remainingTime = state.remainingTime || 0;
+            const seconds = Math.floor(remainingTime / 1000);
             const m = Math.floor(seconds / 60).toString().padStart(2, '0');
             const s = (seconds % 60).toString().padStart(2, '0');
             timerElement.textContent = `${m}:${s}`;
@@ -495,10 +496,15 @@ class TagGame {
 
         const itAnnouncement = document.getElementById('it-announcement');
         if (itAnnouncement) {
-            const itPlayer = state.players.find(p => p.isIt);
-            if (itPlayer) {
-                itAnnouncement.textContent = `¡${itPlayer.name.toUpperCase()} LA TRAE!`;
-                itAnnouncement.style.color = itPlayer.color;
+            if (state.gameState === 'finished') {
+                itAnnouncement.textContent = '¡TIEMPO AGOTADO!';
+                itAnnouncement.style.color = '#fff';
+            } else {
+                const itPlayer = state.players.find(p => p.isIt);
+                if (itPlayer) {
+                    itAnnouncement.textContent = `¡${itPlayer.name.toUpperCase()} LA TRAE!`;
+                    itAnnouncement.style.color = itPlayer.color;
+                }
             }
         }
     }

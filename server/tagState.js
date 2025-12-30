@@ -256,6 +256,7 @@ class TagStateManager {
         return {
             roomCode: tagState.roomCode,
             gameState: 'finished',
+            remainingTime: 0,
             winner: {
                 id: winner.id,
                 name: winner.name,
