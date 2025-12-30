@@ -4,10 +4,10 @@
  */
 
 const BALLOON_CONFIG = {
-    TARGET_SIZE: 100,       // Size to win
-    INFLATE_AMOUNT: 6,      // Increased from 4
-    DEFLATE_RATE: 2.0,      // Decreased from 2.5
-    COOLDOWN: 50,           // Decreased from 100
+    TARGET_SIZE: 100,       // UI target
+    INFLATE_AMOUNT: 8,      // A bit more air to compensate for fast deflation
+    DEFLATE_RATE: 12.0,     // Much faster deflation (difficulty)
+    COOLDOWN: 50,           // 50ms cooldown
     GAME_DURATION: 60,      // Seconds
 };
 
@@ -44,7 +44,7 @@ class BalloonStateManager {
                 color: player.color,
                 character: player.character || 'edgar',
                 balloonSize: 0,
-                burstSize: 95 + Math.random() * 10, // Burst between 95% and 105%
+                burstSize: 101, // Pop exactly at 101%
                 lastPumpTime: 0
             });
         });
@@ -101,7 +101,7 @@ class BalloonStateManager {
             timeLeft: Math.ceil(state.timeLeft),
             players: Array.from(state.players.values()).map(p => ({
                 ...p,
-                progress: Math.min(100, (p.balloonSize / p.burstSize) * 100)
+                progress: Math.min(101, (p.balloonSize / 100) * 100)
             }))
         };
     }
