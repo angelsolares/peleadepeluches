@@ -188,6 +188,11 @@ function connectToServer() {
     socket.on('flappy-player-died', handleFlappyDeath);
     socket.on('flappy-game-over', handleFlappyGameOver);
     
+    // Tag mode events
+    socket.on('tag-state', handleTagState);
+    socket.on('tag-transfer', handleTagTransfer);
+    socket.on('tag-game-over', handleTagGameOver);
+    
     // Tournament events
     socket.on('tournament-config', handleTournamentConfig);
     socket.on('round-ended', handleRoundEnded);
@@ -465,6 +470,95 @@ function handleFlappyGameOver(data) {
         data.results.forEach((p, i) => {
             const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}°`;
             message += `${medal} ${p.name} - ${Math.floor(p.distance)}m\n`;
+        });
+    }
+    
+    elements.gameOverMessage.textContent = message;
+    elements.gameOverMessage.style.whiteSpace = 'pre-line';
+    
+    triggerHaptic(true);
+}
+
+// =================================
+// Tag Mode Event Handlers
+// =================================
+
+function handleTagState(data) {
+    if (!data || !data.players) return;
+    
+    const myState = data.players.find(p => p.id === socket.id);
+    if (myState) {
+        // Update damage display as penalty time
+        const penaltySec = (myState.penaltyTime / 1000).toFixed(1);
+        elements.playerDamage.textContent = `${penaltySec}s`;
+        elements.playerDamage.style.color = myState.isIt ? '#ff3366' : '#fff';
+        
+        // Show indicator if we "la traemos"
+        if (myState.isIt) {
+            elements.playerDamage.parentElement.querySelector('.health-label').textContent = 'LA TRAES';
+        } else {
+            elements.playerDamage.parentElement.querySelector('.health-label').textContent = 'TIEMPO';
+        }
+    }
+}
+
+function handleTagTransfer(data) {
+    if (data.newItId === socket.id) {
+        // We are "It"!
+        triggerHaptic(true);
+        showTagNotification('¡LA TRAES!', '#ff3366');
+    } else if (data.oldItId === socket.id) {
+        // We passed it!
+        triggerHaptic(false);
+        showTagNotification('¡PÁSALA!', '#00ff88');
+    }
+}
+
+function showTagNotification(text, color) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: ${color}; border-radius: 20px; padding: 20px 40px;
+        font-family: 'Orbitron', sans-serif; font-size: 2rem; color: white;
+        z-index: 9999; animation: tagPop 0.5s ease-out; pointer-events: none;
+    `;
+    notification.textContent = text;
+    
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes tagPop {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.style.transition = 'opacity 0.5s';
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 500);
+    }, 1000);
+}
+
+function handleTagGameOver(data) {
+    console.log('[Tag] Game over:', data);
+    
+    const isWinner = data.winner && data.winner.id === socket.id;
+    
+    elements.gameOverOverlay.classList.remove('hidden');
+    elements.gameOverTitle.textContent = isWinner ? '🏆 ¡GANASTE!' : '🏃 FIN DEL JUEGO';
+    elements.gameOverTitle.style.color = isWinner ? 'var(--secondary)' : 'var(--accent)';
+    
+    let message = data.winner ? `🥇 ${data.winner.name} fue el que menos la trajo!` : '¡Juego terminado!';
+    
+    if (data.ranking && data.ranking.length > 0) {
+        message += '\n\n📊 POSICIONES:\n';
+        data.ranking.forEach((p, i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}°`;
+            const penalty = (p.penaltyTime / 1000).toFixed(1);
+            message += `${medal} ${p.name} - ${penalty}s\n`;
         });
     }
     
@@ -783,6 +877,30 @@ function updateControllerUIForMode() {
         setupRaceControls();
         
         console.log('[Controller] Race mode UI configured');
+    } else if (gameMode === 'tag') {
+        // Tag mode: D-pad for 4-way movement, no action buttons
+        if (controllerBody) controllerBody.style.display = 'flex';
+        if (raceControls) raceControls.style.display = 'none';
+        if (flappyControls) flappyControls.style.display = 'none';
+        
+        if (dpadUp) {
+            dpadUp.dataset.input = 'up';
+            dpadUp.dataset.originalInput = 'up';
+        }
+        if (dpadDown) {
+            dpadDown.dataset.input = 'down';
+            dpadDown.dataset.originalInput = 'down';
+            if (runLabel) runLabel.style.display = 'none';
+        }
+        
+        // Hide action buttons in Tag mode
+        const actionButtons = document.querySelector('.action-buttons');
+        if (actionButtons) actionButtons.style.display = 'none';
+        
+        if (healthLabel) healthLabel.textContent = 'TIEMPO';
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        
+        console.log('[Controller] Tag mode UI configured');
     } else if (gameMode === 'arena') {
         // Arena mode: D-pad controls all 4 directions for movement
         if (controllerBody) controllerBody.style.display = 'flex';

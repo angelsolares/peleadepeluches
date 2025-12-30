@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Trae de Peluches - Tag Game</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/arena.css">
+    <style>
+        .game-title {
+            background: linear-gradient(135deg, #ff3366, #ffcc00, #ff6600);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        #tag-hud {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .match-timer {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 3rem;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 30px;
+            border-radius: 50px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .it-indicator-global {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.2rem;
+            color: #ff3366;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        #tag-player-list {
+            position: absolute;
+            left: 20px;
+            top: 100px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .tag-player-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border-radius: 10px;
+            border-left: 5px solid var(--player-color);
+            min-width: 200px;
+            transition: all 0.3s ease;
+        }
+
+        .tag-player-item.is-it {
+            background: rgba(255, 51, 102, 0.3);
+            border-left-width: 10px;
+            transform: translateX(10px);
+            box-shadow: 0 0 15px rgba(255, 51, 102, 0.5);
+        }
+
+        .tag-player-name {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            color: #fff;
+            flex: 1;
+        }
+
+        .tag-penalty-time {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .tag-badge {
+            background: #ff3366;
+            color: #fff;
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 5px;
+            font-weight: 900;
+        }
+
+        /* Float labels for Tag mode */
+        .tag-label-it {
+            background: #ff3366;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 14px;
+            text-transform: uppercase;
+            box-shadow: 0 0 15px #ff3366;
+            animation: bounce 0.5s infinite alternate;
+        }
+
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-10px); }
+        }
+
+        .tag-aura {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 51, 102, 0.5) 0%, transparent 70%);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- Tag HUD -->
+        <div id="tag-hud">
+            <h1 class="game-title">LA TRAE</h1>
+            <div id="match-timer" class="match-timer">02:00</div>
+            <div id="it-announcement" class="it-indicator-global">¡BUSCA A ALGUIEN!</div>
+        </div>
+
+        <!-- Player list with penalty times -->
+        <div id="tag-player-list">
+            <!-- Dynamic player items -->
+        </div>
+        
+        <!-- Round End Overlay (cloned from arena) -->
+        <div id="round-end-overlay" class="hidden">
+            <h2 id="round-title">RONDA TERMINADA</h2>
+            <div id="round-winner">¡GANADOR!</div>
+            <div id="round-scores">
+                <!-- Dynamic scores -->
+            </div>
+            <div id="next-round-countdown">
+                Siguiente ronda en <span class="countdown-number" id="countdown-number">5</span>...
+            </div>
+        </div>
+        
+        <!-- Tournament End Overlay -->
+        <div id="tournament-end-overlay" class="hidden">
+            <div class="champion-crown">👑</div>
+            <h1>¡TORNEO TERMINADO!</h1>
+            <div id="tournament-champion">CAMPEÓN</div>
+            <div id="tournament-final-scores">
+                <!-- Dynamic final scores -->
+            </div>
+            <button class="btn-return-menu" onclick="window.location.href='index.html'">VOLVER AL MENÚ</button>
+        </div>
+        
+        <!-- Loading screen -->
+        <div id="loading-screen">
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p id="loading-text">Cargando juego...</p>
+                <div class="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module" src="js/tag/TagGame.js"></script>
+</body>
+</html>
+

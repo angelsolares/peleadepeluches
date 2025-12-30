@@ -14,6 +14,7 @@ import GameStateManager from './gameState.js';
 import ArenaStateManager from './arenaState.js';
 import { RaceStateManager } from './raceState.js';
 import { FlappyStateManager } from './flappyState.js';
+import TagStateManager from './tagState.js';
 
 // ES Module dirname support
 const __filename = fileURLToPath(import.meta.url);
@@ -56,6 +57,7 @@ const gameStateManager = new GameStateManager(lobbyManager);
 const arenaStateManager = new ArenaStateManager(lobbyManager);
 const raceStateManager = new RaceStateManager(lobbyManager);
 const flappyStateManager = new FlappyStateManager();
+const tagStateManager = new TagStateManager(lobbyManager);
 
 // Set up flappy game end callback for tournament handling
 flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
@@ -182,6 +184,9 @@ const raceLoops = new Map();
 
 // Flappy game loops
 const flappyLoops = new Map();
+
+// Tag game loops
+const tagLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -362,6 +367,11 @@ io.on('connection', (socket) => {
                 console.log(`[Socket] Flappy game starting in room ${roomCode}`);
                 flappyStateManager.initializeGame(roomCode, result.players);
                 flappyStateManager.startCountdown(roomCode, io);
+            } else if (room.gameMode === 'tag') {
+                // Initialize tag state
+                tagStateManager.initializeTag(roomCode);
+                startTagLoop(roomCode);
+                console.log(`[Socket] Tag game started in room ${roomCode}`);
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -903,6 +913,10 @@ function startNextRound(roomCode, gameMode) {
         } else if (gameMode === 'flappy') {
             flappyStateManager.initializeGame(roomCode, players);
             flappyStateManager.startCountdown(roomCode, io);
+        } else if (gameMode === 'tag') {
+            tagStateManager.initializeTag(roomCode);
+            stopTagLoop(roomCode);
+            startTagLoop(roomCode);
         } else {
             // Smash mode
             stopGameLoop(roomCode);
@@ -937,6 +951,7 @@ function handleDisconnect(socket) {
             stopArenaLoop(result.roomCode);
             stopRaceLoop(result.roomCode);
             stopFlappyLoop(result.roomCode);
+            stopTagLoop(result.roomCode);
             
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
@@ -1135,6 +1150,77 @@ function stopArenaLoop(roomCode) {
         clearInterval(loop);
         arenaLoops.delete(roomCode);
         console.log(`[Arena] Stopped arena loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start tag game loop for a room
+ */
+function startTagLoop(roomCode) {
+    // Stop existing loop if any
+    stopTagLoop(roomCode);
+    
+    const tickRate = 1000 / 60; // 60 FPS
+    
+    const loop = setInterval(() => {
+        const state = tagStateManager.processTick(roomCode);
+        
+        if (state) {
+            // Send state to all clients in room
+            io.to(roomCode).emit('tag-state', state);
+            
+            // Check for game over
+            if (state.gameState === 'finished') {
+                stopTagLoop(roomCode);
+                
+                // Handle tournament logic
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1) {
+                    const roundResult = handleRoundEnd(
+                        roomCode, 
+                        state.winner?.id, 
+                        state.winner?.name,
+                        'tag'
+                    );
+                    
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', {
+                            ...roundResult,
+                            gameMode: 'tag'
+                        });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', {
+                            ...roundResult,
+                            gameMode: 'tag'
+                        });
+                        // Start next round after 5 seconds
+                        setTimeout(() => startNextRound(roomCode, 'tag'), 5000);
+                    }
+                } else {
+                    // Single round, just emit game-over
+                    io.to(roomCode).emit('tag-game-over', state);
+                }
+            }
+        } else {
+            // Room no longer active
+            stopTagLoop(roomCode);
+        }
+    }, tickRate);
+    
+    tagLoops.set(roomCode, loop);
+    console.log(`[Tag] Started tag loop for room ${roomCode}`);
+}
+
+/**
+ * Stop tag game loop for a room
+ */
+function stopTagLoop(roomCode) {
+    const loop = tagLoops.get(roomCode);
+    
+    if (loop) {
+        clearInterval(loop);
+        tagLoops.delete(roomCode);
+        console.log(`[Tag] Stopped tag loop for room ${roomCode}`);
     }
 }
 

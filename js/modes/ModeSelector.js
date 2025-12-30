@@ -5,7 +5,8 @@
 
 export const GAME_MODES = {
     SMASH: 'smash',
-    ARENA: 'arena'
+    ARENA: 'arena',
+    TAG: 'tag'
 };
 
 export const MODE_CONFIG = {
@@ -34,6 +35,19 @@ export const MODE_CONFIG = {
             'Agarres y lanzamientos'
         ],
         color: '#00ffcc'
+    },
+    [GAME_MODES.TAG]: {
+        id: 'tag',
+        name: 'La Trae',
+        description: 'Juego de persecución - ¡Pásale la marca a otros!',
+        icon: '🏃',
+        features: [
+            'Hasta 8 jugadores',
+            'Sistema de penalización',
+            'Periodos de gracia',
+            'Vista aérea'
+        ],
+        color: '#ffcc00'
     }
 };
 
@@ -338,5 +352,6 @@ class ModeSelector {
 }
 
 export default ModeSelector;
+
 
 
