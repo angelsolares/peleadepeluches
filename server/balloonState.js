@@ -121,7 +121,7 @@ class BalloonStateManager {
         if (now - player.lastPumpTime < BALLOON_CONFIG.COOLDOWN) return;
 
         player.lastPumpTime = now;
-        player.balloonSize += BALLOON_CONFIG.INFLATE_AMOUNT*100;
+        player.balloonSize += BALLOON_CONFIG.INFLATE_AMOUNT;
 
         // Check for burst (Disqualification)
         if (player.balloonSize >= player.burstSize) {
