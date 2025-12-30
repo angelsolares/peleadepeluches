@@ -625,15 +625,18 @@ function handleBalloonState(data) {
     
     const myState = data.players.find(p => p.id === socket.id);
     if (myState) {
-        balloonProgress = myState.balloonSize;
+        // Use normalized progress (0-100) from server
+        balloonProgress = myState.progress !== undefined ? myState.progress : myState.balloonSize;
         const fill = document.getElementById('balloon-progress-fill');
         if (fill) {
             fill.style.width = `${balloonProgress}%`;
             // Visual feedback for high progress
             if (balloonProgress > 80) {
                 fill.style.background = 'linear-gradient(90deg, #ff66ff, #ff0000)';
+                fill.style.boxShadow = '0 0 20px rgba(255, 0, 0, 0.6)';
             } else {
                 fill.style.background = 'linear-gradient(90deg, #9966ff, #ff66ff)';
+                fill.style.boxShadow = '0 0 15px rgba(255, 102, 255, 0.5)';
             }
         }
     }

@@ -5,9 +5,9 @@
 
 const BALLOON_CONFIG = {
     TARGET_SIZE: 100,       // Size to win
-    INFLATE_AMOUNT: 4,      // How much size increases per pump
-    DEFLATE_RATE: 2.5,      // How much size decreases per second (difficulty)
-    COOLDOWN: 100,          // Minimum ms between pumps
+    INFLATE_AMOUNT: 6,      // Increased from 4
+    DEFLATE_RATE: 2.0,      // Decreased from 2.5
+    COOLDOWN: 50,           // Decreased from 100
     GAME_DURATION: 60,      // Seconds
 };
 
@@ -99,7 +99,10 @@ class BalloonStateManager {
             gameState: state.gameState,
             winner: state.winner,
             timeLeft: Math.ceil(state.timeLeft),
-            players: Array.from(state.players.values())
+            players: Array.from(state.players.values()).map(p => ({
+                ...p,
+                progress: Math.min(100, (p.balloonSize / p.burstSize) * 100)
+            }))
         };
     }
 
