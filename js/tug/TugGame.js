@@ -52,7 +52,8 @@ class TugPlayerEntity {
         this.name = `Player ${number}`;
         
         this.model = SkeletonUtils.clone(baseModel);
-        this.model.scale.set(0.01, 0.01, 0.01);
+        // Correct scale and orientation (using negative Z like in main game to fix upside-down issue)
+        this.model.scale.set(0.01, 0.01, -0.01);
         
         this.applyColorTint(color);
         
@@ -70,7 +71,7 @@ class TugPlayerEntity {
         div.textContent = this.name;
         div.style.color = color;
         const label = new CSS2DObject(div);
-        label.position.set(0, 250, 0);
+        label.position.set(0, 220, 0); // Corrected height for 0.01 scale
         return label;
     }
     
@@ -196,7 +197,7 @@ class TugGame {
             }
             .rhythm-hud {
                 position: fixed;
-                top: 20%;
+                top: 15%; /* Adjusted to be above the modal title area */
                 left: 50%;
                 transform: translateX(-50%);
                 width: 400px;
@@ -228,16 +229,17 @@ class TugGame {
             }
             .tug-status {
                 position: fixed;
-                top: 50px;
+                top: 80px; /* Adjusted to avoid overlap */
                 left: 50%;
                 transform: translateX(-50%);
                 font-family: 'Orbitron', sans-serif;
-                font-size: 2rem;
+                font-size: 2.5rem;
                 font-weight: 900;
                 color: white;
                 text-align: center;
                 pointer-events: none;
                 z-index: 10;
+                text-shadow: 0 0 20px #9966ff;
             }
         `;
         document.head.appendChild(style);
