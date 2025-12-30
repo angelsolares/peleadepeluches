@@ -258,7 +258,7 @@ class TugGame {
             }
             .tug-timer {
                 position: fixed;
-                top: 140px;
+                top: 240px;
                 left: 50%;
                 transform: translateX(-50%);
                 font-family: 'Orbitron', sans-serif;
@@ -594,16 +594,35 @@ class TugGame {
     }
 
     showGameOver(data) {
-        const winnerName = data.winnerTeam === 'left' ? 'EQUIPO IZQUIERDO' : 'EQUIPO DERECHO';
+        let winnerTeamName = 'EMPATE';
+        let winners = [];
+        
+        if (data.winnerTeam === 'left') {
+            winnerTeamName = 'EQUIPO IZQUIERDO';
+            winners = data.players.filter(p => p.team === 'left').map(p => p.name);
+        } else if (data.winnerTeam === 'right') {
+            winnerTeamName = 'EQUIPO DERECHO';
+            winners = data.players.filter(p => p.team === 'right').map(p => p.name);
+        }
+
         const status = document.getElementById('tug-game-status');
         if (status) {
-            status.innerHTML = `¡FIN DE LA PARTIDA!<br><span style="color: ${data.winnerTeam === 'left' ? '#ff3366' : '#00ffcc'}">${winnerName} GANA</span>`;
+            let html = `¡FIN DE LA PARTIDA!<br>`;
+            if (data.winnerTeam === 'draw') {
+                html += `<span style="color: #ffffff">¡EMPATE!</span>`;
+            } else {
+                html += `<span style="color: ${data.winnerTeam === 'left' ? '#ff3366' : '#00ffcc'}">${winnerTeamName} GANA</span>`;
+                if (winners.length > 0) {
+                    html += `<br><span style="font-size: 1.2rem; color: white;">(${winners.join(', ')})</span>`;
+                }
+            }
+            status.innerHTML = html;
         }
         
         // Final animations
         this.players.forEach(entity => {
             const isWinner = entity.team === data.winnerTeam;
-            entity.animController.update(0.1, isWinner ? 'win' : 'lose');
+            entity.animController.play(isWinner ? 'win' : 'lose', 0.2);
         });
     }
 
