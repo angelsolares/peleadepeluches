@@ -296,9 +296,36 @@ class TugGame {
         createWinZone(-25, 0xff3366);
         createWinZone(25, 0x00ffcc);
 
+        // Procedural Rope Texture
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        // Base color
+        ctx.fillStyle = '#8b4513';
+        ctx.fillRect(0, 0, 128, 128);
+        // Strands pattern
+        ctx.strokeStyle = '#5d2e0c';
+        ctx.lineWidth = 10;
+        for(let i = -128; i < 128; i += 20) {
+            ctx.beginPath();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i + 128, 128);
+            ctx.stroke();
+        }
+        
+        const ropeTex = new THREE.CanvasTexture(canvas);
+        ropeTex.wrapS = THREE.RepeatWrapping;
+        ropeTex.wrapT = THREE.RepeatWrapping;
+        ropeTex.repeat.set(10, 1);
+
         // Rope
-        const ropeGeo = new THREE.CylinderGeometry(0.15, 0.15, TUG_CONFIG.ROPE_LENGTH, 12);
-        const ropeMat = new THREE.MeshPhongMaterial({ color: 0x8b4513 }); // Brownish
+        const ropeGeo = new THREE.CylinderGeometry(0.15, 0.15, TUG_CONFIG.ROPE_LENGTH, 12, 1, true);
+        const ropeMat = new THREE.MeshStandardMaterial({ 
+            map: ropeTex,
+            roughness: 0.8,
+            metalness: 0.1
+        });
         this.rope = new THREE.Mesh(ropeGeo, ropeMat);
         this.rope.rotation.z = Math.PI / 2;
         this.rope.position.y = 1.2; // Lowered to align with character hands
