@@ -256,6 +256,33 @@ class TugGame {
                 pointer-events: none;
                 display: none;
             }
+            .tug-timer {
+                position: fixed;
+                top: 140px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-family: 'Orbitron', sans-serif;
+                font-size: 3rem;
+                font-weight: 900;
+                color: white;
+                background: rgba(0,0,0,0.5);
+                padding: 10px 30px;
+                border-radius: 50px;
+                border: 2px solid #9966ff;
+                text-shadow: 0 0 10px #9966ff;
+                z-index: 10;
+                display: none;
+            }
+            .tug-timer.low-time {
+                color: #ff3366;
+                border-color: #ff3366;
+                text-shadow: 0 0 20px #ff3366;
+                animation: pulse-red 1s infinite alternate;
+            }
+            @keyframes pulse-red {
+                from { transform: translateX(-50%) scale(1); }
+                to { transform: translateX(-50%) scale(1.1); }
+            }
         `;
         document.head.appendChild(style);
     }
@@ -496,6 +523,11 @@ class TugGame {
         countdown.id = 'tug-countdown';
         countdown.className = 'tug-countdown';
         document.body.appendChild(countdown);
+
+        const timer = document.createElement('div');
+        timer.id = 'tug-timer';
+        timer.className = 'tug-timer';
+        document.body.appendChild(timer);
     }
 
     updateGameState(state) {
@@ -503,8 +535,9 @@ class TugGame {
 
         const delta = this.clock.getDelta();
 
-        // Handle countdown
+        // Handle countdown and timer
         const countdownEl = document.getElementById('tug-countdown');
+        const timerEl = document.getElementById('tug-timer');
         const statusEl = document.getElementById('tug-game-status');
         
         if (state.gameState === 'countdown') {
@@ -512,14 +545,27 @@ class TugGame {
                 countdownEl.style.display = 'block';
                 countdownEl.textContent = state.countdown > 0 ? state.countdown : '¡YA!';
             }
+            if (timerEl) timerEl.style.display = 'none';
             if (statusEl) statusEl.textContent = '¡PREPÁRENSE!';
             
             // Still update animations during countdown
             this.players.forEach(entity => entity.update(delta, null));
             return;
+        } else if (state.gameState === 'active') {
+            if (countdownEl) countdownEl.style.display = 'none';
+            if (timerEl) {
+                timerEl.style.display = 'block';
+                timerEl.textContent = `${state.timeLeft}s`;
+                if (state.timeLeft <= 10) {
+                    timerEl.classList.add('low-time');
+                } else {
+                    timerEl.classList.remove('low-time');
+                }
+            }
+            if (statusEl) statusEl.textContent = '¡JALEN!';
         } else {
             if (countdownEl) countdownEl.style.display = 'none';
-            if (statusEl && state.gameState === 'active') statusEl.textContent = '¡JALEN!';
+            if (timerEl) timerEl.style.display = 'none';
         }
 
         // Update rope and marker position

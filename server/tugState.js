@@ -13,7 +13,8 @@ const TUG_CONFIG = {
     ALPHA_BALANCING: 0.85,  // Team size compensation factor
     PULSE_INTERVAL: 1500,   // Rhythm pulse interval (ms)
     GREEN_ZONE_WINDOW: 300, // Timing window for perfect pull (ms)
-    COMEBACK_MAX_BONUS: 0.15 // 15% max bonus for team losing
+    COMEBACK_MAX_BONUS: 0.15, // 15% max bonus for team losing
+    GAME_DURATION: 60       // 60 seconds game duration
 };
 
 class TugStateManager {
@@ -35,10 +36,12 @@ class TugStateManager {
             players: new Map(),
             markerPos: 0,           // -100 (left win) to 100 (right win)
             startTime: Date.now() + 3000, // 3 second countdown
+            endTime: Date.now() + 3000 + (TUG_CONFIG.GAME_DURATION * 1000),
             nextPulseTime: Date.now() + 3000 + TUG_CONFIG.PULSE_INTERVAL,
             gameState: 'countdown', // 'countdown', 'active', 'finished'
             winnerTeam: null,       // 'left' or 'right'
             countdown: 3,
+            timeLeft: TUG_CONFIG.GAME_DURATION,
             teams: {
                 left: [],
                 right: []
@@ -114,6 +117,7 @@ class TugStateManager {
                 markerPos: tugState.markerPos,
                 gameState: tugState.gameState,
                 countdown: tugState.countdown,
+                timeLeft: TUG_CONFIG.GAME_DURATION,
                 players: Array.from(tugState.players.values()).map(p => ({
                     id: p.id,
                     name: p.name,
@@ -122,6 +126,23 @@ class TugStateManager {
                     pullQuality: 0
                 }))
             };
+        }
+
+        if (tugState.gameState === 'active') {
+            const timeRemaining = (tugState.endTime - now) / 1000;
+            tugState.timeLeft = Math.max(0, timeRemaining);
+
+            if (tugState.timeLeft <= 0) {
+                tugState.gameState = 'finished';
+                // Determine winner based on marker position
+                if (tugState.markerPos < 0) {
+                    tugState.winnerTeam = 'left';
+                } else if (tugState.markerPos > 0) {
+                    tugState.winnerTeam = 'right';
+                } else {
+                    tugState.winnerTeam = 'draw';
+                }
+            }
         }
 
         // Check for pulse (rhythm)
@@ -188,7 +209,7 @@ class TugStateManager {
         const netForce = rightFinalForce - leftFinalForce;
         tugState.markerPos += netForce * TUG_CONFIG.ROPE_SENSITIVITY;
 
-        // Clamp and Check for win
+        // Clamp and Check for win (early win if pulled all the way)
         if (tugState.markerPos >= TUG_CONFIG.WIN_DISTANCE) {
             tugState.markerPos = TUG_CONFIG.WIN_DISTANCE;
             tugState.gameState = 'finished';
@@ -205,6 +226,7 @@ class TugStateManager {
             gameState: tugState.gameState,
             winnerTeam: tugState.winnerTeam,
             nextPulseTime: tugState.nextPulseTime,
+            timeLeft: Math.ceil(tugState.timeLeft),
             players: Array.from(tugState.players.values()).map(p => ({
                 id: p.id,
                 name: p.name,
