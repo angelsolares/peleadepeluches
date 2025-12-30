@@ -227,13 +227,14 @@ class PaintGame {
 
         overlay.innerHTML = `
             <h2 style="color: #ffffff; margin: 0; font-size: 1.5rem;">PINTA EL PISO</h2>
-            <div style="font-size: 4rem; color: #ffff00; letter-spacing: 10px; font-weight: 900;">${code}</div>
+            <div id="room-code-display" style="font-size: 4rem; color: #ffff00; letter-spacing: 10px; font-weight: 900;">${code}</div>
             
             <div style="background: white; padding: 15px; border-radius: 16px; margin: 10px 0; box-shadow: 0 0 20px rgba(255,255,255,0.2);">
                 <img src="${qrCodeUrl}" alt="QR Code" style="display: block; width: 200px; height: 200px;" />
             </div>
 
             <p style="color: rgba(255,255,255,0.6); margin: 0;">Escanea para unirte a la batalla</p>
+            <div id="player-count" style="font-size: 1.2rem; color: white; margin-top: 10px;">Jugadores: 0 / 8</div>
             
             <div style="width: 100%; margin-top: 10px;">
                 <button id="start-game-btn" style="
@@ -250,16 +251,46 @@ class PaintGame {
                     transition: all 0.3s;
                     text-transform: uppercase;
                     letter-spacing: 2px;
-                ">EMPEZAR JUEGO</button>
+                " disabled>ESPERANDO JUGADORES...</button>
             </div>
         `;
 
-        document.getElementById('start-game-btn').addEventListener('click', () => {
+        const startBtn = document.getElementById('start-game-btn');
+        startBtn.addEventListener('click', () => {
+            console.log('[Paint] Start button clicked');
             this.socket.emit('start-game', (response) => {
                 if (response && response.success) {
+                    console.log('[Paint] Game started successfully, hiding overlay');
                     overlay.classList.add('hidden');
+                    overlay.style.display = 'none'; // Asegurar que se oculte
+                } else {
+                    console.error('[Paint] Failed to start game:', response);
                 }
             });
+        });
+
+        // Escuchar cuando el juego inicia (por si acaso se inicia desde otro lugar)
+        this.socket.on('game-started', () => {
+            console.log('[Paint] Game started signal received');
+            overlay.classList.add('hidden');
+            overlay.style.display = 'none';
+        });
+
+        // Actualizar contador de jugadores
+        this.socket.on('player-joined', (data) => {
+            console.log('[Paint] Player joined:', data);
+            if (data.room) {
+                const count = data.room.playerCount;
+                const playerCountElem = document.getElementById('player-count');
+                if (playerCountElem) {
+                    playerCountElem.textContent = `Jugadores: ${count} / 8`;
+                }
+
+                if (count >= 1 && startBtn) {
+                    startBtn.disabled = false;
+                    startBtn.textContent = 'EMPEZAR JUEGO';
+                }
+            }
         });
     }
 
