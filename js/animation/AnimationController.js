@@ -23,7 +23,7 @@ export const ANIMATION_CONFIG = {
     },
     
     // Animation types
-    looping: ['walk', 'run', 'idle'],
+    looping: ['walk', 'run', 'idle', 'pull'],
     oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt', 'throw'],
     held: ['block', 'grab'],  // Animations that play once and hold on last frame while held
     
@@ -31,7 +31,8 @@ export const ANIMATION_CONFIG = {
     fadeDuration: {
         default: 0.15,
         toIdle: 0.2,
-        toAttack: 0.1
+        toAttack: 0.1,
+        toPull: 0.1
     },
     
     // Attack cooldowns (seconds) - reduced due to faster animations
@@ -41,7 +42,8 @@ export const ANIMATION_CONFIG = {
         hit: 0.3,
         fall: 1.0,
         block: 0.1,  // Can release block quickly
-        taunt: 2.0   // Taunt takes time, risky!
+        taunt: 2.0,   // Taunt takes time, risky!
+        pull: 0.5
     },
     
     // Default animation speeds (multiplier)
@@ -55,7 +57,8 @@ export const ANIMATION_CONFIG = {
         block: 1.0,  // Normal block speed
         taunt: 1.0,  // Normal dance speed
         grab: 1.2,   // Grab animation speed
-        throw: 1.5   // Throw animation speed (faster for impact)
+        throw: 1.5,   // Throw animation speed (faster for impact)
+        pull: 1.0
     }
 };
 

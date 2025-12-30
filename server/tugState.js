@@ -134,7 +134,13 @@ class TugStateManager {
         let rightTeamForce = 0;
 
         // Process each player
-        tugState.players.forEach((playerState) => {
+        tugState.players.forEach((playerState, socketId) => {
+            const room = this.lobbyManager.rooms.get(roomCode);
+            const roomPlayer = room ? room.players.get(socketId) : null;
+            if (roomPlayer && roomPlayer.name) {
+                playerState.name = roomPlayer.name; // Sync latest name
+            }
+
             const timeDiff = (now - playerState.lastProcessedTime) / 1000;
             playerState.lastProcessedTime = now;
 

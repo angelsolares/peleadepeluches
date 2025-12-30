@@ -61,6 +61,7 @@ class TugPlayerEntity {
         this.model.add(this.nameLabel);
         
         this.animController = new AnimationController(this.model, baseAnimations);
+        this.animController.play('idle'); // Ensure idle plays immediately
         this.isPulling = false;
         this.pullEndTime = 0;
     }
@@ -500,6 +501,8 @@ class TugGame {
     updateGameState(state) {
         if (!state) return;
 
+        const delta = this.clock.getDelta();
+
         // Handle countdown
         const countdownEl = document.getElementById('tug-countdown');
         const statusEl = document.getElementById('tug-game-status');
@@ -510,7 +513,10 @@ class TugGame {
                 countdownEl.textContent = state.countdown > 0 ? state.countdown : '¡YA!';
             }
             if (statusEl) statusEl.textContent = '¡PREPÁRENSE!';
-            return; // Skip gameplay updates during countdown
+            
+            // Still update animations during countdown
+            this.players.forEach(entity => entity.update(delta, null));
+            return;
         } else {
             if (countdownEl) countdownEl.style.display = 'none';
             if (statusEl && state.gameState === 'active') statusEl.textContent = '¡JALEN!';
@@ -529,11 +535,14 @@ class TugGame {
         const cursor = document.getElementById('tug-rhythm-cursor');
         if (cursor) cursor.style.left = `${progress * 100}%`;
 
-        // Update each player animation
+        // Update each player animation and sync names if they changed
         state.players.forEach(pState => {
             const entity = this.players.get(pState.id);
             if (entity) {
-                entity.update(this.clock.getDelta(), pState);
+                if (pState.name && entity.name !== pState.name) {
+                    entity.setName(pState.name);
+                }
+                entity.update(delta, pState);
             }
         });
     }
