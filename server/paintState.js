@@ -44,6 +44,7 @@ class PaintStateManager {
                 name: player.name,
                 number: player.number,
                 color: player.color,
+                character: player.character || 'edgar',
                 position: { 
                     x: Math.cos(angle) * radius, 
                     y: 0.5, 
@@ -123,6 +124,7 @@ class PaintStateManager {
                 id: p.id,
                 name: p.name,
                 number: p.number,
+                character: p.character,
                 position: p.position,
                 facingAngle: p.facingAngle,
                 score: p.score,

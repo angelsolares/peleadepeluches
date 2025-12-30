@@ -18,6 +18,23 @@ const PAINT_CONFIG = {
     CAMERA_ANGLE: Math.PI / 4
 };
 
+const CHARACTER_MODELS = {
+    edgar: { name: 'Edgar', file: 'Edgar_Model.fbx' },
+    isabella: { name: 'Isabella', file: 'Isabella_Model.fbx' },
+    jesus: { name: 'Jesus', file: 'Jesus_Model.fbx' },
+    lia: { name: 'Lia', file: 'Lia_Model.fbx' },
+    hector: { name: 'Hector', file: 'Hector.fbx' },
+    katy: { name: 'Katy', file: 'Katy.fbx' },
+    mariana: { name: 'Mariana', file: 'Mariana.fbx' },
+    sol: { name: 'Sol', file: 'Sol.fbx' },
+    yadira: { name: 'Yadira', file: 'Yadira.fbx' },
+    angel: { name: 'Angel', file: 'Angel.fbx' },
+    lidia: { name: 'Lidia', file: 'Lidia.fbx' },
+    fabian: { name: 'Fabian', file: 'Fabian.fbx' },
+    marile: { name: 'Marile', file: 'Marile.fbx' },
+    gabriel: { name: 'Gabriel', file: 'Gabriel.fbx' }
+};
+
 class PaintGame {
     constructor() {
         this.scene = null;
@@ -35,7 +52,7 @@ class PaintGame {
         this.roomCode = null;
         this.hud = new PaintHUD();
         
-        this.baseModel = null;
+        this.baseModels = {};
         this.baseAnimations = {};
         
         this.init();
@@ -116,16 +133,18 @@ class PaintGame {
 
     async loadAssets() {
         const loader = new FBXLoader();
-        const loadingManager = new THREE.LoadingManager();
         
-        loadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
-            const progress = (itemsLoaded / itemsTotal) * 100;
-            const progressFill = document.getElementById('progress-fill');
-            if (progressFill) progressFill.style.width = `${progress}%`;
-        };
-
-        // Load base model (using Edgar as base for now)
-        this.baseModel = await loader.loadAsync('assets/Edgar_Model.fbx');
+        // Load all character models
+        const modelPromises = Object.entries(CHARACTER_MODELS).map(async ([id, data]) => {
+            try {
+                const model = await loader.loadAsync(`assets/${data.file}`);
+                this.baseModels[id] = model;
+            } catch (e) {
+                console.warn(`Failed to load model ${id}:`, e);
+            }
+        });
+        
+        await Promise.all(modelPromises);
         
         // Load animations
         const animFiles = {
@@ -317,7 +336,9 @@ class PaintGame {
     }
 
     createPlayer(data) {
-        const model = SkeletonUtils.clone(this.baseModel);
+        const characterId = data.character || 'edgar';
+        const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
+        const model = SkeletonUtils.clone(baseModel);
         model.scale.set(0.01, 0.01, 0.01);
         
         // Apply color
