@@ -15,6 +15,7 @@ import ArenaStateManager from './arenaState.js';
 import { RaceStateManager } from './raceState.js';
 import { FlappyStateManager } from './flappyState.js';
 import TagStateManager from './tagState.js';
+import TugStateManager from './tugState.js';
 
 // ES Module dirname support
 const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +59,7 @@ const arenaStateManager = new ArenaStateManager(lobbyManager);
 const raceStateManager = new RaceStateManager(lobbyManager);
 const flappyStateManager = new FlappyStateManager();
 const tagStateManager = new TagStateManager(lobbyManager);
+const tugStateManager = new TugStateManager(lobbyManager);
 
 // Set up flappy game end callback for tournament handling
 flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
@@ -187,6 +189,9 @@ const flappyLoops = new Map();
 
 // Tag game loops
 const tagLoops = new Map();
+
+// Tug game loops
+const tugLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -372,6 +377,11 @@ io.on('connection', (socket) => {
                 tagStateManager.initializeTag(roomCode);
                 startTagLoop(roomCode);
                 console.log(`[Socket] Tag game started in room ${roomCode}`);
+            } else if (room.gameMode === 'tug') {
+                // Initialize tug state
+                tugStateManager.initializeTug(roomCode);
+                startTugLoop(roomCode);
+                console.log(`[Socket] Tug game started in room ${roomCode}`);
             } else {
                 // Start smash game loop
                 startGameLoop(roomCode);
@@ -736,6 +746,16 @@ io.on('connection', (socket) => {
     });
     
     /**
+     * Tug of War pull action
+     */
+    socket.on('tug-pull', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+        
+        tugStateManager.handlePull(socket.id, roomCode);
+    });
+    
+    /**
      * Set Flappy speed multiplier (host only)
      */
     socket.on('flappy-set-speed', (multiplier, callback) => {
@@ -952,6 +972,7 @@ function handleDisconnect(socket) {
             stopRaceLoop(result.roomCode);
             stopFlappyLoop(result.roomCode);
             stopTagLoop(result.roomCode);
+            stopTugLoop(result.roomCode);
             
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
@@ -1221,6 +1242,70 @@ function stopTagLoop(roomCode) {
         clearInterval(loop);
         tagLoops.delete(roomCode);
         console.log(`[Tag] Stopped tag loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start tug game loop for a room
+ */
+function startTugLoop(roomCode) {
+    stopTugLoop(roomCode);
+    
+    const tickRate = 1000 / 60;
+    
+    const loop = setInterval(() => {
+        const state = tugStateManager.processTick(roomCode);
+        
+        if (state) {
+            io.to(roomCode).emit('tug-state', state);
+            
+            if (state.gameState === 'finished') {
+                stopTugLoop(roomCode);
+                
+                // Handle tournament logic
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1) {
+                    const roundResult = handleRoundEnd(
+                        roomCode, 
+                        null, // Team win, handled differently in Tug
+                        state.winnerTeam === 'left' ? 'EQUIPO IZQUIERDO' : 'EQUIPO DERECHO',
+                        'tug'
+                    );
+                    
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', {
+                            ...roundResult,
+                            gameMode: 'tug'
+                        });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', {
+                            ...roundResult,
+                            gameMode: 'tug'
+                        });
+                        setTimeout(() => startNextRound(roomCode, 'tug'), 5000);
+                    }
+                } else {
+                    io.to(roomCode).emit('tug-game-over', state);
+                }
+            }
+        } else {
+            stopTugLoop(roomCode);
+        }
+    }, tickRate);
+    
+    tugLoops.set(roomCode, loop);
+    console.log(`[Tug] Started tug loop for room ${roomCode}`);
+}
+
+/**
+ * Stop tug game loop for a room
+ */
+function stopTugLoop(roomCode) {
+    const loop = tugLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        tugLoops.delete(roomCode);
+        console.log(`[Tug] Stopped tug loop for room ${roomCode}`);
     }
 }
 

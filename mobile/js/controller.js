@@ -86,6 +86,12 @@ let raceSpeed = 0; // Current speed display
 // Flappy mode state
 let flappyAlive = true;
 
+// Tug of War state
+let tugStamina = 100;
+let tugNextPulse = 0;
+let tugPulseInterval = 1500; // ms
+let tugRhythmStart = 0;
+
 // Available characters
 const CHARACTERS = {
     edgar: { name: 'Edgar', emoji: '👦' },
@@ -192,6 +198,10 @@ function connectToServer() {
     socket.on('tag-state', handleTagState);
     socket.on('tag-transfer', handleTagTransfer);
     socket.on('tag-game-over', handleTagGameOver);
+    
+    // Tug mode events
+    socket.on('tug-state', handleTugState);
+    socket.on('tug-game-over', handleGameOver);
     
     // Tournament events
     socket.on('tournament-config', handleTournamentConfig);
@@ -568,6 +578,41 @@ function handleTagGameOver(data) {
     triggerHaptic(true);
 }
 
+// =================================
+// Tug of War Mode Event Handlers
+// =================================
+
+function handleTugState(data) {
+    if (!data || !data.players) return;
+    
+    const myState = data.players.find(p => p.id === socket.id);
+    if (myState) {
+        // Update stamina
+        tugStamina = myState.stamina;
+        const fill = document.getElementById('tug-stamina-fill');
+        if (fill) {
+            fill.style.width = `${tugStamina}%`;
+            // Change color if low
+            fill.style.background = tugStamina < 30 ? 'var(--primary)' : 'linear-gradient(90deg, #9966ff, #ff3366)';
+        }
+        
+        // Visual feedback for pull quality
+        if (myState.pullQuality !== undefined && myState.pullQuality > 0) {
+            const btn = document.getElementById('tug-pull-btn');
+            if (btn) {
+                const qualityClass = myState.pullQuality === 2 ? 'perfect' : 'good';
+                btn.classList.add(qualityClass);
+                setTimeout(() => btn.classList.remove(qualityClass), 300);
+            }
+        }
+    }
+    
+    // Sync rhythm pulse
+    if (data.nextPulseTime) {
+        tugNextPulse = data.nextPulseTime;
+    }
+}
+
 function updateConnectionStatus(status, text) {
     const statusEl = elements.connectionStatus;
     statusEl.className = 'connection-status ' + status;
@@ -845,13 +890,30 @@ function updateControllerUIForMode() {
     const controllerBody = document.querySelector('.controller-body');
     const raceControls = document.getElementById('race-controls');
     const flappyControls = document.getElementById('flappy-controls');
+    const tugControls = document.getElementById('tug-controls');
     const controllerScreen = document.getElementById('controller-screen');
     
     // Hide all special controls first
     if (raceControls) raceControls.style.display = 'none';
     if (flappyControls) flappyControls.style.display = 'none';
+    if (tugControls) tugControls.style.display = 'none';
     
-    if (gameMode === 'flappy') {
+    if (gameMode === 'tug') {
+        // Tug of War mode
+        if (controllerBody) controllerBody.style.display = 'none';
+        if (tugControls) tugControls.style.display = 'flex';
+        if (controllerScreen) {
+            controllerScreen.classList.add('tug-mode');
+            controllerScreen.classList.remove('race-mode', 'flappy-mode');
+        }
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (healthLabel) healthLabel.textContent = '';
+        
+        setupTugControls();
+        startTugRhythmAnimation();
+        
+        console.log('[Controller] Tug mode UI configured');
+    } else if (gameMode === 'flappy') {
         // Flappy mode: Show single TAP button
         if (controllerBody) controllerBody.style.display = 'none';
         if (flappyControls) flappyControls.style.display = 'flex';
@@ -1035,6 +1097,60 @@ function setupFlappyControls() {
     }
     
     console.log('[Flappy] Controls setup complete');
+}
+
+// Setup Tug of War mode controls
+function setupTugControls() {
+    const pullBtn = document.getElementById('tug-pull-btn');
+    
+    if (pullBtn) {
+        // Remove old listeners
+        pullBtn.replaceWith(pullBtn.cloneNode(true));
+        const newPullBtn = document.getElementById('tug-pull-btn');
+        
+        const handlePull = (e) => {
+            if (e) e.preventDefault();
+            if (gameMode !== 'tug') return;
+            
+            newPullBtn.classList.add('pressed');
+            
+            // Send pull action to server
+            if (socket && socket.connected) {
+                socket.emit('tug-pull');
+            }
+            
+            triggerHaptic();
+        };
+        
+        newPullBtn.addEventListener('touchstart', handlePull, { passive: false });
+        newPullBtn.addEventListener('touchend', () => newPullBtn.classList.remove('pressed'), { passive: false });
+        newPullBtn.addEventListener('mousedown', handlePull);
+        newPullBtn.addEventListener('mouseup', () => newPullBtn.classList.remove('pressed'));
+    }
+    
+    console.log('[Tug] Controls setup complete');
+}
+
+// Client-side rhythm animation for the Tug of War bar
+function startTugRhythmAnimation() {
+    const cursor = document.getElementById('rhythm-bar-cursor');
+    if (!cursor) return;
+    
+    const animate = () => {
+        if (gameMode !== 'tug') return;
+        
+        const now = Date.now();
+        // Calculate progress within the current pulse interval (0 to 1)
+        // We use tugPulseInterval = 1500ms
+        const progress = (now % tugPulseInterval) / tugPulseInterval;
+        
+        // Move cursor from 0% to 100%
+        cursor.style.left = `${progress * 100}%`;
+        
+        requestAnimationFrame(animate);
+    };
+    
+    requestAnimationFrame(animate);
 }
 
 // Handle flappy tap (flap wings)

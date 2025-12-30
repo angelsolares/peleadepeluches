@@ -1361,6 +1361,181 @@ body {
 }
 
 /* ==================================
+   Tug of War Controller
+   ================================== */
+
+.tug-controls {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 30px 20px;
+    background: linear-gradient(180deg, 
+        rgba(153, 102, 255, 0.2) 0%, 
+        rgba(10, 10, 21, 0.95) 30%,
+        rgba(10, 10, 21, 0.95) 100%
+    );
+}
+
+.tug-info {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.tug-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #9966ff;
+    text-shadow: 0 0 20px rgba(153, 102, 255, 0.5);
+}
+
+.tug-stamina-bar {
+    width: 80%;
+    height: 15px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(153, 102, 255, 0.3);
+}
+
+.tug-stamina-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #9966ff, #ff3366);
+    transition: width 0.1s linear;
+}
+
+.tug-rhythm-area {
+    width: 100%;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rhythm-bar-container {
+    width: 90%;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    position: relative;
+    overflow: hidden;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.rhythm-bar-target {
+    position: absolute;
+    height: 100%;
+    width: 20%;
+    background: rgba(0, 255, 204, 0.4);
+    left: 40%;
+    box-shadow: 0 0 15px rgba(0, 255, 204, 0.5);
+    border-left: 2px solid #00ffcc;
+    border-right: 2px solid #00ffcc;
+}
+
+.rhythm-bar-cursor {
+    position: absolute;
+    height: 100%;
+    width: 4px;
+    background: white;
+    left: 0;
+    box-shadow: 0 0 10px white;
+    z-index: 2;
+}
+
+.tug-tap-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+.tug-pull-btn {
+    width: 80%;
+    max-width: 280px;
+    height: 200px;
+    border-radius: 40px;
+    border: 5px solid #9966ff;
+    background: linear-gradient(135deg, rgba(153, 102, 255, 0.2), rgba(153, 102, 255, 0.1));
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    transition: all 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    box-shadow: 0 0 30px rgba(153, 102, 255, 0.3);
+}
+
+.tug-pull-btn:active {
+    transform: scale(0.95);
+    background: rgba(153, 102, 255, 0.4);
+    box-shadow: 0 0 50px rgba(153, 102, 255, 0.6);
+}
+
+.tug-icon {
+    font-size: 5rem;
+}
+
+.tug-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #9966ff;
+}
+
+.tug-hint {
+    padding: 10px 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.tug-pull-btn.perfect {
+    animation: perfect-glow 0.3s ease;
+}
+
+@keyframes perfect-glow {
+    0% { box-shadow: 0 0 20px #00ffcc; border-color: #00ffcc; }
+    50% { box-shadow: 0 0 60px #00ffcc; border-color: #00ffcc; }
+    100% { box-shadow: 0 0 20px #9966ff; border-color: #9966ff; }
+}
+
+.tug-pull-btn.good {
+    animation: good-glow 0.3s ease;
+}
+
+@keyframes good-glow {
+    0% { box-shadow: 0 0 20px #00ccff; border-color: #00ccff; }
+    50% { box-shadow: 0 0 40px #00ccff; border-color: #00ccff; }
+    100% { box-shadow: 0 0 20px #9966ff; border-color: #9966ff; }
+}
+
+/* Tug mode - hide normal controls */
+.tug-mode .controller-body {
+    display: none;
+}
+
+.tug-mode .controller-header .game-info,
+.tug-mode .controller-header .stocks-display {
+    display: none;
+}
+
+/* ==================================
    Tournament Overlays (Mobile)
    ================================== */
 

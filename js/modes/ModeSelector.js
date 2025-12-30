@@ -6,7 +6,8 @@
 export const GAME_MODES = {
     SMASH: 'smash',
     ARENA: 'arena',
-    TAG: 'tag'
+    TAG: 'tag',
+    TUG: 'tug'
 };
 
 export const MODE_CONFIG = {
@@ -48,6 +49,19 @@ export const MODE_CONFIG = {
             'Vista aérea'
         ],
         color: '#ffcc00'
+    },
+    [GAME_MODES.TUG]: {
+        id: 'tug',
+        name: 'Guerra de Cuerda',
+        description: 'Tug of War - ¡Jala con ritmo y equipo!',
+        icon: '🪢',
+        features: [
+            'Mecánica de ritmo',
+            'Juego por equipos',
+            'Gestión de estamina',
+            'Bonus de remontada'
+        ],
+        color: '#9966ff'
     }
 };
 
