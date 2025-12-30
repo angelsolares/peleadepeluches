@@ -427,8 +427,8 @@ io.on('connection', (socket) => {
         if (result.success) {
             socket.join(roomCode.toUpperCase());
             
-            // Notify room of new player
-            socket.to(roomCode.toUpperCase()).emit('player-joined', {
+            // Notify room of new player - using io.to to ensure everyone receives it
+            io.to(roomCode.toUpperCase()).emit('player-joined', {
                 player: result.player,
                 room: result.room
             });

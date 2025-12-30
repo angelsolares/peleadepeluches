@@ -256,19 +256,36 @@ class BalloonGame {
         script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
         script.onload = () => {
             this.socket = io(SERVER_URL);
+            
             this.socket.on('connect', () => {
+                console.log('[Balloon] Connected to server');
                 this.socket.emit('create-room', { gameMode: 'balloon' }, (response) => {
                     if (response.success) {
                         this.roomCode = response.roomCode;
-                        this.showRoomUI(this.roomCode);
+                        this.showRoomUI(this.roomCode, response.room);
                     }
                 });
             });
 
             this.socket.on('game-started', (data) => {
+                console.log('[Balloon] Game started signal received:', data);
                 this.gameStarted = true;
                 this.hideRoomUI();
                 this.setupPlayers(data.players);
+            });
+
+            this.socket.on('player-joined', (data) => {
+                console.log('[Balloon] Player joined event received:', data);
+                if (data && data.room) {
+                    this.updatePlayerCountUI(data.room);
+                }
+            });
+
+            this.socket.on('player-left', (data) => {
+                console.log('[Balloon] Player left event received:', data);
+                if (data && data.room) {
+                    this.updatePlayerCountUI(data.room);
+                }
             });
 
             this.socket.on('balloon-state', (state) => this.updateGameState(state));
@@ -277,7 +294,33 @@ class BalloonGame {
         document.head.appendChild(script);
     }
 
-    showRoomUI(code) {
+    updatePlayerCountUI(roomData) {
+        if (!roomData) return;
+        
+        const count = roomData.playerCount;
+        console.log(`[Balloon] Updating UI with count: ${count}`);
+        
+        const playerCountElem = document.getElementById('player-count');
+        if (playerCountElem) {
+            playerCountElem.textContent = `Jugadores: ${count} / 8`;
+        }
+        
+        const btn = document.getElementById('start-btn');
+        if (btn) {
+            if (count >= 1) {
+                btn.disabled = false;
+                btn.textContent = '¡INICIAR FIESTA!';
+            } else {
+                btn.disabled = true;
+                btn.textContent = 'ESPERANDO JUGADORES...';
+            }
+        }
+    }
+
+    showRoomUI(code, roomData) {
+        // Prevent duplicate overlays
+        this.hideRoomUI();
+
         const overlay = document.createElement('div');
         overlay.id = 'balloon-room-overlay';
         overlay.style.cssText = `
@@ -292,6 +335,9 @@ class BalloonGame {
         const mobileUrl = `${window.location.origin}/mobile/index.html?room=${code}`;
         const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(mobileUrl)}`;
 
+        const initialCount = roomData ? roomData.playerCount : 0;
+        const isEnabled = initialCount >= 1;
+
         overlay.innerHTML = `
             <h1 style="color: #ff66ff; margin: 0;">INFLA EL GLOBO</h1>
             <div style="font-size: 4rem; color: white; letter-spacing: 10px;">${code}</div>
@@ -301,26 +347,20 @@ class BalloonGame {
             </div>
 
             <p style="color: rgba(255,255,255,0.6); margin: 0;">¡Prepara tus pulmones!</p>
-            <div id="player-count" style="font-size: 1.2rem; color: white;">Jugadores: 0 / 8</div>
+            <div id="player-count" style="font-size: 1.2rem; color: white;">Jugadores: ${initialCount} / 8</div>
             <button id="start-btn" style="
                 padding: 15px 40px; background: #ff66ff; border: none; border-radius: 12px;
                 color: white; font-family: 'Orbitron'; font-size: 1.2rem; cursor: pointer;
                 transition: all 0.3s;
-            " disabled>ESPERANDO JUGADORES...</button>
+            " ${isEnabled ? '' : 'disabled'}>${isEnabled ? '¡INICIAR FIESTA!' : 'ESPERANDO JUGADORES...'}</button>
         `;
         document.body.appendChild(overlay);
 
-        this.socket.on('player-joined', (data) => {
-            const count = data.room.playerCount;
-            document.getElementById('player-count').textContent = `Jugadores: ${count} / 8`;
-            const btn = document.getElementById('start-btn');
-            if (count >= 1) {
-                btn.disabled = false;
-                btn.textContent = '¡INICIAR FIESTA!';
-            }
-        });
-
-        document.getElementById('start-btn').onclick = () => this.socket.emit('start-game');
+        document.getElementById('start-btn').onclick = () => {
+            console.log('[Balloon] Start game button clicked');
+            this.socket.emit('start-game');
+        };
+    }
     }
 
     hideRoomUI() {
