@@ -123,6 +123,13 @@ class TagPlayerEntity {
         });
     }
 
+    setName(name) {
+        this.name = name;
+        if (this.nameLabel && this.nameLabel.element) {
+            this.nameLabel.element.textContent = name;
+        }
+    }
+
     update(delta, state) {
         if (state) {
             this.controller.applyServerState(state);
@@ -156,7 +163,7 @@ class TagGame {
         this.clock = new THREE.Clock();
         this.socket = null;
         this.roomCode = null;
-        this.isHost = false;
+        this.isHost = true; // Assume host by default for tag.html
         this.gameStarted = false;
         
         this.baseModels = {};
@@ -200,6 +207,32 @@ class TagGame {
         this.labelRenderer.domElement.style.top = '0px';
         this.labelRenderer.domElement.style.pointerEvents = 'none';
         document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
+        
+        // Add name label styles
+        this.addPlayerNameStyles();
+    }
+
+    addPlayerNameStyles() {
+        if (document.getElementById('arena-name-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'arena-name-styles';
+        style.textContent = `
+            .arena-player-name-label {
+                color: white;
+                font-family: 'Orbitron', sans-serif;
+                font-size: 12px;
+                font-weight: bold;
+                text-shadow: 0 0 10px rgba(0,0,0,0.8);
+                padding: 4px 12px;
+                background: rgba(0,0,0,0.6);
+                border-radius: 10px;
+                border: 2px solid currentColor;
+                white-space: nowrap;
+                pointer-events: none;
+                text-transform: uppercase;
+            }
+        `;
+        document.head.appendChild(style);
     }
 
     setupLights() {
@@ -242,22 +275,168 @@ class TagGame {
 
         // Load all character models
         const modelPromises = Object.entries(CHARACTER_MODELS).map(async ([id, data]) => {
-            const model = await loader.loadAsync(`assets/${data.file}`);
-            this.baseModels[id] = model;
+            try {
+                const model = await loader.loadAsync(`assets/${data.file}`);
+                this.baseModels[id] = model;
+            } catch (e) {
+                console.warn(`Failed to load model ${id}:`, e);
+            }
         });
         
         await Promise.all(modelPromises);
         
         for (const [name, file] of Object.entries(ANIMATION_FILES)) {
-            const anim = await loader.loadAsync(`assets/${file}`);
-            this.baseAnimations[name] = anim.animations[0];
+            try {
+                const anim = await loader.loadAsync(`assets/${file}`);
+                this.baseAnimations[name] = anim.animations[0];
+            } catch (e) {
+                console.warn(`Failed to load animation ${name}:`, e);
+            }
         }
 
         document.getElementById('loading-screen').classList.add('hidden');
     }
 
     connectToServer() {
-        // ...
+        // Load socket.io script first
+        const script = document.createElement('script');
+        script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+        script.onload = () => this.initializeSocket();
+        document.head.appendChild(script);
+    }
+
+    initializeSocket() {
+        console.log('[Tag] Connecting to server:', SERVER_URL);
+        this.socket = io(SERVER_URL);
+
+        this.socket.on('connect', () => {
+            console.log('[Tag] Connected to server');
+            
+            // Create a new room for tag mode
+            this.socket.emit('create-room', { gameMode: 'tag' }, (response) => {
+                if (response.success) {
+                    this.roomCode = response.roomCode;
+                    this.showRoomCode(this.roomCode);
+                    console.log(`[Tag] Room created: ${this.roomCode}`);
+                }
+            });
+        });
+
+        this.socket.on('player-joined', (data) => {
+            console.log('[Tag] Player joined:', data.player);
+            this.updateRoomOverlay(data.room.playerCount);
+        });
+
+        this.socket.on('player-left', (data) => {
+            console.log('[Tag] Player left:', data.playerId);
+            const entity = this.players.get(data.playerId);
+            if (entity) {
+                this.scene.remove(entity.model);
+                this.players.delete(data.playerId);
+            }
+        });
+
+        this.socket.on('game-started', (data) => {
+            console.log('[Tag] Game started!', data);
+            this.gameStarted = true;
+            document.getElementById('room-code-overlay')?.classList.add('hidden');
+            this.setupPlayers(data.players);
+        });
+
+        this.socket.on('tag-state', (state) => {
+            this.updateGameState(state);
+        });
+
+        this.socket.on('tag-transfer', (data) => {
+            this.handleTagTransfer(data);
+        });
+
+        this.socket.on('tag-game-over', (data) => {
+            this.showGameOver(data);
+        });
+    }
+
+    showRoomCode(code) {
+        let overlay = document.getElementById('room-code-overlay');
+        const mobileUrl = `${window.location.origin}/mobile/index.html?room=${code}`;
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(mobileUrl)}`;
+        
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'room-code-overlay';
+            overlay.innerHTML = `
+                <div class="room-code-content">
+                    <h2>🏃 LA TRAE - SALA</h2>
+                    <div class="room-code">${code}</div>
+                    <div class="qr-container">
+                        <img src="${qrCodeUrl}" alt="QR Code" class="qr-code" />
+                    </div>
+                    <p>Escanea para unirte al juego</p>
+                    <div class="url-display">${mobileUrl}</div>
+                    
+                    <button id="start-game-btn" disabled>ESPERANDO JUGADORES...</button>
+                    <div id="player-count-lobby">Jugadores: 0 / 8</div>
+                </div>
+            `;
+            
+            const style = document.createElement('style');
+            style.textContent = `
+                #room-code-overlay {
+                    position: fixed; top: 50%; left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: rgba(10, 10, 21, 0.95);
+                    border: 3px solid #ffcc00; border-radius: 24px;
+                    padding: 40px; z-index: 1000; text-align: center;
+                    font-family: 'Orbitron', sans-serif;
+                    box-shadow: 0 0 50px rgba(255, 204, 0, 0.3);
+                    min-width: 320px;
+                }
+                .room-code-content h2 { color: #ffcc00; margin-bottom: 20px; font-size: 1.5rem; }
+                .room-code { 
+                    font-size: 4rem; font-weight: 900; color: #fff; 
+                    letter-spacing: 15px; margin-bottom: 20px;
+                    text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+                }
+                .qr-container { 
+                    background: white; padding: 15px; border-radius: 16px; 
+                    display: inline-block; margin-bottom: 20px;
+                }
+                .qr-code { display: block; width: 150px; height: 150px; }
+                .url-display { color: #ff3366; font-size: 0.8rem; margin-bottom: 25px; opacity: 0.8; }
+                #start-game-btn {
+                    width: 100%; padding: 18px; font-family: 'Orbitron';
+                    font-size: 1.2rem; font-weight: 900;
+                    background: linear-gradient(135deg, #ffcc00, #ff6600);
+                    border: none; border-radius: 12px; color: #000;
+                    cursor: pointer; transition: all 0.3s;
+                }
+                #start-game-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
+                #start-game-btn:not(:disabled):hover { transform: scale(1.05); box-shadow: 0 0 30px #ffcc00; }
+                #player-count-lobby { margin-top: 15px; color: rgba(255,255,255,0.6); font-size: 0.9rem; }
+                .hidden { display: none !important; }
+            `;
+            document.head.appendChild(style);
+            document.body.appendChild(overlay);
+            
+            document.getElementById('start-game-btn').addEventListener('click', () => {
+                this.socket.emit('start-game');
+            });
+        }
+    }
+
+    updateRoomOverlay(count) {
+        const btn = document.getElementById('start-game-btn');
+        const countEl = document.getElementById('player-count-lobby');
+        if (btn && countEl) {
+            countEl.textContent = `Jugadores: ${count} / 8`;
+            if (count >= 2) {
+                btn.disabled = false;
+                btn.textContent = '¡INICIAR JUEGO!';
+            } else {
+                btn.disabled = true;
+                btn.textContent = 'ESPERANDO JUGADORES...';
+            }
+        }
     }
 
     setupPlayers(playersData) {
@@ -369,4 +548,3 @@ class TagGame {
 
 // Start the game
 new TagGame();
-
