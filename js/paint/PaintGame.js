@@ -201,35 +201,55 @@ class PaintGame {
             overlay = document.createElement('div');
             overlay.id = 'room-code-overlay';
             overlay.style.cssText = `
-                position: absolute;
-                top: 20px;
-                left: 20px;
-                background: rgba(0,0,0,0.8);
-                color: white;
-                padding: 20px;
-                border-radius: 10px;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(10, 10, 21, 0.95);
+                border: 4px solid #ffffff;
+                border-radius: 24px;
+                padding: 40px;
+                text-align: center;
                 font-family: 'Orbitron', sans-serif;
-                z-index: 1000;
-                border: 2px solid #ffffff;
+                z-index: 2000;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 20px;
+                min-width: 400px;
+                box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
             `;
             document.body.appendChild(overlay);
         }
         
         const mobileUrl = `${window.location.origin}/mobile/index.html?room=${code}`;
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mobileUrl)}&bgcolor=ffffff`;
+
         overlay.innerHTML = `
-            <div style="font-size: 1.2rem; margin-bottom: 10px;">SALA: <span style="font-weight: bold; color: #ffff00;">${code}</span></div>
-            <div style="font-size: 0.8rem; margin-bottom: 10px;">Escanea para unirte:</div>
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(mobileUrl)}" />
-            <div style="margin-top: 10px;">
+            <h2 style="color: #ffffff; margin: 0; font-size: 1.5rem;">PINTA EL PISO</h2>
+            <div style="font-size: 4rem; color: #ffff00; letter-spacing: 10px; font-weight: 900;">${code}</div>
+            
+            <div style="background: white; padding: 15px; border-radius: 16px; margin: 10px 0; box-shadow: 0 0 20px rgba(255,255,255,0.2);">
+                <img src="${qrCodeUrl}" alt="QR Code" style="display: block; width: 200px; height: 200px;" />
+            </div>
+
+            <p style="color: rgba(255,255,255,0.6); margin: 0;">Escanea para unirte a la batalla</p>
+            
+            <div style="width: 100%; margin-top: 10px;">
                 <button id="start-game-btn" style="
                     background: #ffff00;
                     color: black;
                     border: none;
-                    padding: 10px 20px;
-                    border-radius: 5px;
+                    padding: 15px 30px;
+                    border-radius: 12px;
                     font-family: 'Orbitron', sans-serif;
+                    font-size: 1.2rem;
+                    font-weight: 700;
                     cursor: pointer;
                     width: 100%;
+                    transition: all 0.3s;
+                    text-transform: uppercase;
+                    letter-spacing: 2px;
                 ">EMPEZAR JUEGO</button>
             </div>
         `;
