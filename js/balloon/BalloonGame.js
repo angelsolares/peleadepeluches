@@ -13,11 +13,11 @@ import { SFXManager } from '../audio/SFXManager.js';
 import VFXManager from '../effects/VFXManager.js';
 
 const BALLOON_CONFIG = {
-    CAMERA_HEIGHT: 15,
-    CAMERA_DISTANCE: 25,
-    PLAYER_SPACING: 6,
-    MAX_BALLOON_SCALE: 2.5,
-    MIN_BALLOON_SCALE: 0.2
+    CAMERA_HEIGHT: 20,      // Raised camera for massive balloons
+    CAMERA_DISTANCE: 35,    // Pulled back camera
+    PLAYER_SPACING: 15,     // More spacing for giant balloons
+    MAX_BALLOON_SCALE: 12.0, // MASSIVE!
+    MIN_BALLOON_SCALE: 0.05  // Starts tiny
 };
 
 const CHARACTER_MODELS = {
@@ -193,15 +193,21 @@ class BalloonPlayerEntity {
             // For now, let's trust the server's balloonSize.
             
             // Update balloon scale
-            const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + (state.balloonSize / 100) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
+            const progress = state.balloonSize / 100;
+            // Use power function for exponential growth feel
+            const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + Math.pow(progress, 1.3) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
             this.balloon.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+
+            // Move balloon up as it grows to avoid floor clipping
+            const targetY = 200 + Math.pow(progress, 1.1) * 600; 
+            this.balloon.position.y = THREE.MathUtils.lerp(this.balloon.position.y, targetY, 0.1);
 
             // TENSION VISUALS
             if (state.balloonSize > 80) {
                 // Shake effect
-                const shakeIntensity = (state.balloonSize - 80) / 20 * 5;
-                this.balloon.position.x = this.originalBalloonPos.x + (Math.random() - 0.5) * shakeIntensity;
-                this.balloon.position.y = this.originalBalloonPos.y + (Math.random() - 0.5) * shakeIntensity;
+                const shakeIntensity = (state.balloonSize - 80) / 20 * 10; // Increased shake
+                this.balloon.position.x = (Math.random() - 0.5) * shakeIntensity;
+                this.balloon.position.y += (Math.random() - 0.5) * shakeIntensity;
                 
                 // Red tension color
                 const tensionColor = new THREE.Color(this.color).lerp(new THREE.Color(0xff0000), (state.balloonSize - 80) / 20);
@@ -256,11 +262,11 @@ class BalloonGame {
     setupScene() {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0a0a15);
-        this.scene.fog = new THREE.Fog(0x0a0a15, 30, 100);
+        this.scene.fog = new THREE.Fog(0x0a0a15, 50, 200); // Increased fog distance
 
-        this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000); // Increased far plane
         this.camera.position.set(0, BALLOON_CONFIG.CAMERA_HEIGHT, BALLOON_CONFIG.CAMERA_DISTANCE);
-        this.camera.lookAt(0, 5, 0);
+        this.camera.lookAt(0, 10, 0); // Looking higher up to see the big balloons better
 
         this.renderer = new THREE.WebGLRenderer({ 
             canvas: document.getElementById('game-canvas'),
