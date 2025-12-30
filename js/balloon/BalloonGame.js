@@ -54,7 +54,8 @@ class BalloonPlayerEntity {
         this.vfxManager = vfxManager;
         
         this.model = SkeletonUtils.clone(baseModel);
-        this.model.scale.set(0.01, 0.01, 0.01);
+        // Correct scale and orientation (using negative Z to ensure character faces forward/correct side)
+        this.model.scale.set(0.01, 0.01, -0.01);
         
         this.applyColorTint(color);
         

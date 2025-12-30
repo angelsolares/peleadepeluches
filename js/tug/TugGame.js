@@ -442,8 +442,8 @@ class TugGame {
             const teamPlayers = teams[team];
             const pIdx = teamPlayers.findIndex(tp => tp.id === p.id);
             const x = (team === 'left' ? -1 : 1) * (TUG_CONFIG.SIDE_OFFSET + pIdx * TUG_CONFIG.PLAYER_SPACING);
-            const z = (pIdx % 2 === 0 ? 1 : -1) * 0.8; // Closer to the rope (was 1.5)
-            entity.model.position.set(x, 0, z);
+            const z = (pIdx % 2 === 0 ? 1 : -1) * 0.8; // Closer to the rope
+            entity.model.position.set(x, 0.8, z); // Raised even more to align hands perfectly with rope at 1.2
             // Swapped signs: Left team faces X+, Right team faces X-
             entity.model.rotation.y = (team === 'left' ? -1 : 1) * Math.PI / 2;
         });
