@@ -355,24 +355,39 @@ class TugGame {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(10, 10, 21, 0.95); border: 4px solid #9966ff; border-radius: 24px;
             padding: 40px; text-align: center; font-family: 'Orbitron', sans-serif; z-index: 100;
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+            min-width: 400px; box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
         `;
+
+        const mobileUrl = `${window.location.origin}/mobile/index.html?room=${code}`;
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mobileUrl)}&bgcolor=ffffff`;
+
         overlay.innerHTML = `
-            <h1 style="color: #9966ff; margin-bottom: 20px;">GUERRA DE CUERDA</h1>
-            <div style="font-size: 4rem; color: white; letter-spacing: 10px; margin-bottom: 20px;">${code}</div>
-            <p style="color: rgba(255,255,255,0.6);">Escanea para unirte al equipo</p>
-            <div id="player-count" style="margin: 20px 0; font-size: 1.2rem; color: white;">Jugadores: 0 / 8</div>
+            <h1 style="color: #9966ff; margin: 0;">GUERRA DE CUERDA</h1>
+            <div style="font-size: 4rem; color: white; letter-spacing: 10px; font-weight: 900;">${code}</div>
+            
+            <div style="background: white; padding: 15px; border-radius: 16px; margin: 10px 0; box-shadow: 0 0 20px rgba(255,255,255,0.2);">
+                <img src="${qrCodeUrl}" alt="QR Code" style="display: block; width: 200px; height: 200px;" />
+            </div>
+
+            <p style="color: rgba(255,255,255,0.6); margin: 0;">Escanea para unirte al equipo</p>
+            <div id="player-count" style="font-size: 1.2rem; color: white;">Jugadores: 0 / 8</div>
+            
             <button id="start-btn" style="
                 padding: 15px 40px; background: #9966ff; border: none; border-radius: 12px;
                 color: white; font-family: 'Orbitron'; font-size: 1.2rem; cursor: pointer;
+                width: 100%; transition: all 0.3s; text-transform: uppercase; letter-spacing: 2px;
             " disabled>ESPERANDO JUGADORES...</button>
         `;
         document.body.appendChild(overlay);
 
         this.socket.on('player-joined', (data) => {
             const count = data.room.playerCount;
-            document.getElementById('player-count').textContent = `Jugadores: ${count} / 8`;
+            const playerCountElem = document.getElementById('player-count');
+            if (playerCountElem) playerCountElem.textContent = `Jugadores: ${count} / 8`;
+            
             const btn = document.getElementById('start-btn');
-            if (count >= 2) {
+            if (btn && count >= 2) {
                 btn.disabled = false;
                 btn.textContent = '¡INICIAR!';
             }
