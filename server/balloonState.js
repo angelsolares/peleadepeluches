@@ -45,7 +45,8 @@ class BalloonStateManager {
                 character: player.character || 'edgar',
                 balloonSize: 0,
                 burstSize: 101, // Pop exactly at 101%
-                lastPumpTime: 0
+                lastPumpTime: 0,
+                isDQ: false // Disqualified if they burst
             });
         });
 
@@ -66,9 +67,9 @@ class BalloonStateManager {
         // Update timer
         state.timeLeft = Math.max(0, (state.endTime - now) / 1000);
 
-        // Apply slow deflation to all players
+        // Apply slow deflation to all active players
         state.players.forEach((p) => {
-            if (p.balloonSize > 0) {
+            if (!p.isDQ && p.balloonSize > 0) {
                 p.balloonSize = Math.max(0, p.balloonSize - BALLOON_CONFIG.DEFLATE_RATE * dt);
             }
         });
@@ -79,14 +80,14 @@ class BalloonStateManager {
             let winnerPlayer = null;
 
             state.players.forEach(p => {
-                if (p.balloonSize > maxProgress) {
+                if (!p.isDQ && p.balloonSize > maxProgress) {
                     maxProgress = p.balloonSize;
                     winnerPlayer = p;
                 }
             });
 
+            state.gameState = 'finished';
             if (winnerPlayer) {
-                state.gameState = 'finished';
                 state.winner = {
                     id: winnerPlayer.id,
                     name: winnerPlayer.name
@@ -101,7 +102,7 @@ class BalloonStateManager {
             timeLeft: Math.ceil(state.timeLeft),
             players: Array.from(state.players.values()).map(p => ({
                 ...p,
-                progress: Math.min(101, (p.balloonSize / 100) * 100)
+                progress: p.isDQ ? 0 : Math.min(101, (p.balloonSize / 100) * 100)
             }))
         };
     }
@@ -114,7 +115,7 @@ class BalloonStateManager {
         if (!state || state.gameState !== 'active') return;
 
         const player = state.players.get(playerId);
-        if (!player) return;
+        if (!player || player.isDQ) return;
 
         const now = Date.now();
         if (now - player.lastPumpTime < BALLOON_CONFIG.COOLDOWN) return;
@@ -122,14 +123,16 @@ class BalloonStateManager {
         player.lastPumpTime = now;
         player.balloonSize += BALLOON_CONFIG.INFLATE_AMOUNT;
 
-        // Check for burst (win condition)
+        // Check for burst (Disqualification)
         if (player.balloonSize >= player.burstSize) {
             player.balloonSize = player.burstSize;
-            state.gameState = 'finished';
-            state.winner = {
-                id: player.id,
-                name: player.name
-            };
+            player.isDQ = true;
+            // Optionally: if all players are DQ, finish game early
+            const allDQ = Array.from(state.players.values()).every(p => p.isDQ);
+            if (allDQ) {
+                state.gameState = 'finished';
+                state.winner = null; // Nobody wins
+            }
         }
     }
 

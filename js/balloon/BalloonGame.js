@@ -94,6 +94,14 @@ class BalloonPlayerEntity {
             this.vfxManager.createImpactRing(worldPos, this.color);
         }
 
+        // Show DQ Label
+        const dqDiv = document.createElement('div');
+        dqDiv.className = 'balloon-player-dq-label';
+        dqDiv.textContent = 'ELIMINADO';
+        const dqLabel = new CSS2DObject(dqDiv);
+        dqLabel.position.set(0, 300, 0);
+        this.model.add(dqLabel);
+
         setTimeout(() => {
             this.balloon.visible = false;
         }, 50);
@@ -103,7 +111,7 @@ class BalloonPlayerEntity {
             this.sfxManager.play('ko'); // Using 'ko' as a loud impactful sound for the pop
         }
         
-        console.log(`[Balloon] ${this.name}'s balloon popped!`);
+        console.log(`[Balloon] ${this.name}'s balloon popped! ELIMINADO`);
     }
     
     createBalloon(color) {
@@ -162,6 +170,12 @@ class BalloonPlayerEntity {
 
         const state = this.lastServerState;
         if (state) {
+            // Check for DQ/Pop from server state
+            if (state.isDQ && !this.isPopped) {
+                this.pop();
+                return;
+            }
+
             if (state.balloonSize > this.lastSize + 0.5) {
                 this.isPumping = true;
                 this.pumpEndTime = Date.now() + 300;
