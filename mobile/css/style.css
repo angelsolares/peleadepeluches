@@ -1671,6 +1671,10 @@ body {
 }
 
 /* Paint Mode specific styles */
+.paint-mode .controller-body {
+    justify-content: center;
+}
+
 .paint-mode .controller-header .stocks-display {
     display: none;
 }

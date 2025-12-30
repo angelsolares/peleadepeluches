@@ -210,6 +210,10 @@ function connectToServer() {
     socket.on('balloon-state', handleBalloonState);
     socket.on('balloon-game-over', handleGameOver);
     
+    // Paint mode events
+    socket.on('paint-state', handlePaintState);
+    socket.on('paint-game-over', handleGameOver);
+    
     // Tournament events
     socket.on('tournament-config', handleTournamentConfig);
     socket.on('round-ended', handleRoundEnded);
@@ -653,6 +657,19 @@ function handleBalloonState(data) {
                 fill.style.background = 'linear-gradient(90deg, #9966ff, #ff66ff)';
                 fill.style.boxShadow = '0 0 15px rgba(255, 102, 255, 0.5)';
             }
+        }
+    }
+}
+
+function handlePaintState(data) {
+    if (!data || !data.players) return;
+    
+    const myState = data.players.find(p => p.id === socket.id);
+    if (myState) {
+        // Update score display
+        if (elements.playerDamage) {
+            elements.playerDamage.textContent = `${myState.score.toFixed(1)}%`;
+            elements.playerDamage.style.color = 'var(--secondary)';
         }
     }
 }
