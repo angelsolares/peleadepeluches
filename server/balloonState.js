@@ -44,6 +44,7 @@ class BalloonStateManager {
                 color: player.color,
                 character: player.character || 'edgar',
                 balloonSize: 0,
+                burstSize: 95 + Math.random() * 10, // Burst between 95% and 105%
                 lastPumpTime: 0
             });
         });
@@ -118,9 +119,9 @@ class BalloonStateManager {
         player.lastPumpTime = now;
         player.balloonSize += BALLOON_CONFIG.INFLATE_AMOUNT;
 
-        // Check for win
-        if (player.balloonSize >= BALLOON_CONFIG.TARGET_SIZE) {
-            player.balloonSize = BALLOON_CONFIG.TARGET_SIZE;
+        // Check for burst (win condition)
+        if (player.balloonSize >= player.burstSize) {
+            player.balloonSize = player.burstSize;
             state.gameState = 'finished';
             state.winner = {
                 id: player.id,

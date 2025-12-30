@@ -10,6 +10,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController } from '../animation/AnimationController.js';
 import { SFXManager } from '../audio/SFXManager.js';
+import VFXManager from '../effects/VFXManager.js';
 
 const BALLOON_CONFIG = {
     CAMERA_HEIGHT: 15,
@@ -44,12 +45,13 @@ const ANIMATION_FILES = {
 };
 
 class BalloonPlayerEntity {
-    constructor(id, name, number, color, baseModel, baseAnimations, sfxManager) {
+    constructor(id, name, number, color, baseModel, baseAnimations, sfxManager, vfxManager) {
         this.id = id;
         this.number = number;
         this.color = color;
         this.name = name || `Player ${number}`;
         this.sfxManager = sfxManager;
+        this.vfxManager = vfxManager;
         
         this.model = SkeletonUtils.clone(baseModel);
         this.model.scale.set(0.01, 0.01, 0.01);
@@ -60,6 +62,8 @@ class BalloonPlayerEntity {
         this.model.add(this.nameLabel);
         
         this.animController = new AnimationController(this.model, baseAnimations);
+        // Start with idle
+        this.animController.play('idle');
         
         // Create Balloon
         this.balloon = this.createBalloon(color);
@@ -71,6 +75,8 @@ class BalloonPlayerEntity {
         this.pumpEndTime = 0;
         this.isPopped = false;
         this.lastServerState = null;
+        
+        this.originalBalloonPos = this.balloon.position.clone();
     }
     
     pop() {
@@ -80,6 +86,14 @@ class BalloonPlayerEntity {
         // Show sudden scale expansion before hiding
         this.balloon.scale.set(BALLOON_CONFIG.MAX_BALLOON_SCALE * 1.5, BALLOON_CONFIG.MAX_BALLOON_SCALE * 1.5, BALLOON_CONFIG.MAX_BALLOON_SCALE * 1.5);
         
+        // Visual burst effect using VFXManager
+        if (this.vfxManager) {
+            const worldPos = new THREE.Vector3();
+            this.balloon.getWorldPosition(worldPos);
+            this.vfxManager.createHitSparks(worldPos, this.color, 2.0);
+            this.vfxManager.createImpactRing(worldPos, this.color);
+        }
+
         setTimeout(() => {
             this.balloon.visible = false;
         }, 50);
@@ -160,15 +174,28 @@ class BalloonPlayerEntity {
             }
             this.lastSize = state.balloonSize;
             
-            // Check for pop
-            if (state.balloonSize >= 100) {
-                this.pop();
-                return;
-            }
+            // Check for pop logic: if balloonSize hits 100 or server says finished
+            // Wait, server logic now uses burstSize which can be > 100.
+            // For now, let's trust the server's balloonSize.
             
             // Update balloon scale
             const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + (state.balloonSize / 100) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
             this.balloon.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+
+            // TENSION VISUALS
+            if (state.balloonSize > 80) {
+                // Shake effect
+                const shakeIntensity = (state.balloonSize - 80) / 20 * 5;
+                this.balloon.position.x = this.originalBalloonPos.x + (Math.random() - 0.5) * shakeIntensity;
+                this.balloon.position.y = this.originalBalloonPos.y + (Math.random() - 0.5) * shakeIntensity;
+                
+                // Red tension color
+                const tensionColor = new THREE.Color(this.color).lerp(new THREE.Color(0xff0000), (state.balloonSize - 80) / 20);
+                this.balloon.material.color.copy(tensionColor);
+            } else {
+                this.balloon.position.copy(this.originalBalloonPos);
+                this.balloon.material.color.set(this.color);
+            }
         }
 
         if (this.isPumping && Date.now() > this.pumpEndTime) {
@@ -192,6 +219,7 @@ class BalloonGame {
         this.roomCode = null;
         this.gameStarted = false;
         this.sfxManager = new SFXManager();
+        this.vfxManager = null;
         
         this.baseModels = {};
         this.baseAnimations = {};
@@ -234,6 +262,8 @@ class BalloonGame {
         this.labelRenderer.domElement.style.top = '0px';
         this.labelRenderer.domElement.style.pointerEvents = 'none';
         document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
+
+        this.vfxManager = new VFXManager(this.scene, this.camera, THREE);
 
         // Timer Display
         this.timerElement = document.createElement('div');
@@ -433,7 +463,7 @@ class BalloonGame {
         playersData.forEach((p, idx) => {
             const characterId = p.character || 'edgar';
             const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
-            const entity = new BalloonPlayerEntity(p.id, p.name, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager);
+            const entity = new BalloonPlayerEntity(p.id, p.name, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager, this.vfxManager);
             
             this.players.set(p.id, entity);
             this.scene.add(entity.model);
@@ -508,6 +538,10 @@ class BalloonGame {
             this.players.forEach(entity => {
                 entity.update(delta);
             });
+        }
+
+        if (this.vfxManager) {
+            this.vfxManager.update(delta * 1000); // VFXManager uses ms
         }
         
         this.renderer.render(this.scene, this.camera);
