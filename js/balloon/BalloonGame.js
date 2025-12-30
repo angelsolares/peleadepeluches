@@ -44,11 +44,11 @@ const ANIMATION_FILES = {
 };
 
 class BalloonPlayerEntity {
-    constructor(id, number, color, baseModel, baseAnimations, sfxManager) {
+    constructor(id, name, number, color, baseModel, baseAnimations, sfxManager) {
         this.id = id;
         this.number = number;
         this.color = color;
-        this.name = `Player ${number}`;
+        this.name = name || `Player ${number}`;
         this.sfxManager = sfxManager;
         
         this.model = SkeletonUtils.clone(baseModel);
@@ -418,7 +418,7 @@ class BalloonGame {
         playersData.forEach((p, idx) => {
             const characterId = p.character || 'edgar';
             const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
-            const entity = new BalloonPlayerEntity(p.id, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager);
+            const entity = new BalloonPlayerEntity(p.id, p.name, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager);
             
             this.players.set(p.id, entity);
             this.scene.add(entity.model);
