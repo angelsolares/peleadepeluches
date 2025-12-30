@@ -8,6 +8,7 @@ const BALLOON_CONFIG = {
     INFLATE_AMOUNT: 4,      // How much size increases per pump
     DEFLATE_RATE: 2.5,      // How much size decreases per second (difficulty)
     COOLDOWN: 100,          // Minimum ms between pumps
+    GAME_DURATION: 60,      // Seconds
 };
 
 class BalloonStateManager {
@@ -28,8 +29,10 @@ class BalloonStateManager {
             roomCode,
             players: new Map(),
             startTime: Date.now(),
+            endTime: Date.now() + (BALLOON_CONFIG.GAME_DURATION * 1000),
             gameState: 'active',    // 'active', 'finished'
-            winner: null
+            winner: null,
+            timeLeft: BALLOON_CONFIG.GAME_DURATION
         };
 
         // Initialize players
@@ -59,6 +62,9 @@ class BalloonStateManager {
         const now = Date.now();
         const dt = 1 / 60;
 
+        // Update timer
+        state.timeLeft = Math.max(0, (state.endTime - now) / 1000);
+
         // Apply slow deflation to all players
         state.players.forEach((p) => {
             if (p.balloonSize > 0) {
@@ -66,10 +72,32 @@ class BalloonStateManager {
             }
         });
 
+        // Check if time ran out
+        if (state.timeLeft <= 0) {
+            let maxProgress = -1;
+            let winnerPlayer = null;
+
+            state.players.forEach(p => {
+                if (p.balloonSize > maxProgress) {
+                    maxProgress = p.balloonSize;
+                    winnerPlayer = p;
+                }
+            });
+
+            if (winnerPlayer) {
+                state.gameState = 'finished';
+                state.winner = {
+                    id: winnerPlayer.id,
+                    name: winnerPlayer.name
+                };
+            }
+        }
+
         return {
             roomCode,
             gameState: state.gameState,
             winner: state.winner,
+            timeLeft: Math.ceil(state.timeLeft),
             players: Array.from(state.players.values())
         };
     }

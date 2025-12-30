@@ -77,15 +77,18 @@ class BalloonPlayerEntity {
         if (this.isPopped) return;
         this.isPopped = true;
         
-        // Hide balloon
-        this.balloon.visible = false;
+        // Show sudden scale expansion before hiding
+        this.balloon.scale.set(BALLOON_CONFIG.MAX_BALLOON_SCALE * 1.5, BALLOON_CONFIG.MAX_BALLOON_SCALE * 1.5, BALLOON_CONFIG.MAX_BALLOON_SCALE * 1.5);
+        
+        setTimeout(() => {
+            this.balloon.visible = false;
+        }, 50);
         
         // SFX: Pop
         if (this.sfxManager) {
             this.sfxManager.play('ko'); // Using 'ko' as a loud impactful sound for the pop
         }
         
-        // Visual pop effect
         console.log(`[Balloon] ${this.name}'s balloon popped!`);
     }
     
@@ -231,6 +234,18 @@ class BalloonGame {
         this.labelRenderer.domElement.style.top = '0px';
         this.labelRenderer.domElement.style.pointerEvents = 'none';
         document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
+
+        // Timer Display
+        this.timerElement = document.createElement('div');
+        this.timerElement.id = 'balloon-timer';
+        this.timerElement.style.cssText = `
+            position: fixed; top: 120px; left: 50%; transform: translateX(-50%);
+            font-family: 'Orbitron', sans-serif; font-size: 3rem; color: white;
+            background: rgba(0, 0, 0, 0.5); padding: 10px 30px; border-radius: 50px;
+            border: 2px solid #ff66ff; z-index: 100; text-shadow: 0 0 10px #ff66ff;
+            display: none;
+        `;
+        document.body.appendChild(this.timerElement);
     }
 
     setupLights() {
@@ -430,6 +445,16 @@ class BalloonGame {
 
     updateGameState(state) {
         if (!state) return;
+
+        // Update Timer
+        if (this.timerElement) {
+            this.timerElement.style.display = 'block';
+            this.timerElement.textContent = state.timeLeft || 0;
+            if (state.timeLeft <= 10) {
+                this.timerElement.style.color = '#ff3366';
+                this.timerElement.style.borderColor = '#ff3366';
+            }
+        }
 
         state.players.forEach(pState => {
             const entity = this.players.get(pState.id);
