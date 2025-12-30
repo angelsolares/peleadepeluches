@@ -628,10 +628,25 @@ function handleBalloonState(data) {
         // Use normalized progress (0-100) from server
         balloonProgress = myState.progress !== undefined ? myState.progress : myState.balloonSize;
         const fill = document.getElementById('balloon-progress-fill');
+        const btn = document.getElementById('balloon-inflate-btn');
+        const label = document.querySelector('.balloon-label');
+
         if (fill) {
             fill.style.width = `${balloonProgress}%`;
-            // Visual feedback for high progress
-            if (balloonProgress > 80) {
+            
+            if (myState.isDQ) {
+                fill.style.background = '#ff3366';
+                fill.style.boxShadow = '0 0 20px #ff0000';
+                if (btn) {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.5';
+                    btn.querySelector('.balloon-text').textContent = '¡BOOM!';
+                }
+                if (label) {
+                    label.textContent = '💀 ¡ELIMINADO!';
+                    label.style.color = '#ff3366';
+                }
+            } else if (balloonProgress > 80) {
                 fill.style.background = 'linear-gradient(90deg, #ff66ff, #ff0000)';
                 fill.style.boxShadow = '0 0 20px rgba(255, 0, 0, 0.6)';
             } else {

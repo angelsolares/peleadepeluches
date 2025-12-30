@@ -44,7 +44,7 @@ class BalloonStateManager {
                 color: player.color,
                 character: player.character || 'edgar',
                 balloonSize: 0,
-                burstSize: 101, // Pop exactly at 101%
+                burstSize: 85 + Math.random() * 10, // Burst between 85% and 95%
                 lastPumpTime: 0,
                 isDQ: false // Disqualified if they burst
             });
@@ -102,7 +102,7 @@ class BalloonStateManager {
             timeLeft: Math.ceil(state.timeLeft),
             players: Array.from(state.players.values()).map(p => ({
                 ...p,
-                progress: p.isDQ ? 0 : Math.min(101, (p.balloonSize / 100) * 100)
+                progress: p.isDQ ? 100 : Math.min(100, (p.balloonSize / 100) * 100)
             }))
         };
     }
@@ -127,12 +127,7 @@ class BalloonStateManager {
         if (player.balloonSize >= player.burstSize) {
             player.balloonSize = player.burstSize;
             player.isDQ = true;
-            // Optionally: if all players are DQ, finish game early
-            const allDQ = Array.from(state.players.values()).every(p => p.isDQ);
-            if (allDQ) {
-                state.gameState = 'finished';
-                state.winner = null; // Nobody wins
-            }
+            // Removed early finish logic - wait for timer to reach 0
         }
     }
 
