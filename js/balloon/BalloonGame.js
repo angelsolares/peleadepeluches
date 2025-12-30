@@ -9,6 +9,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController } from '../animation/AnimationController.js';
+import { SFXManager } from '../audio/SFXManager.js';
 
 const BALLOON_CONFIG = {
     CAMERA_HEIGHT: 15,
@@ -43,11 +44,12 @@ const ANIMATION_FILES = {
 };
 
 class BalloonPlayerEntity {
-    constructor(id, number, color, baseModel, baseAnimations) {
+    constructor(id, number, color, baseModel, baseAnimations, sfxManager) {
         this.id = id;
         this.number = number;
         this.color = color;
         this.name = `Player ${number}`;
+        this.sfxManager = sfxManager;
         
         this.model = SkeletonUtils.clone(baseModel);
         this.model.scale.set(0.01, 0.01, 0.01);
@@ -67,6 +69,24 @@ class BalloonPlayerEntity {
         this.lastSize = 0;
         this.isPumping = false;
         this.pumpEndTime = 0;
+        this.isPopped = false;
+        this.lastServerState = null;
+    }
+    
+    pop() {
+        if (this.isPopped) return;
+        this.isPopped = true;
+        
+        // Hide balloon
+        this.balloon.visible = false;
+        
+        // SFX: Pop
+        if (this.sfxManager) {
+            this.sfxManager.play('ko'); // Using 'ko' as a loud impactful sound for the pop
+        }
+        
+        // Visual pop effect
+        console.log(`[Balloon] ${this.name}'s balloon popped!`);
     }
     
     createBalloon(color) {
@@ -117,13 +137,31 @@ class BalloonPlayerEntity {
         });
     }
 
-    update(delta, state) {
+    update(delta) {
+        if (this.isPopped) {
+            this.animController.update(delta);
+            return;
+        }
+
+        const state = this.lastServerState;
         if (state) {
             if (state.balloonSize > this.lastSize + 0.5) {
                 this.isPumping = true;
                 this.pumpEndTime = Date.now() + 300;
+                this.animController.play('pump', 0.1);
+                
+                // SFX: Pump/Air sound
+                if (this.sfxManager) {
+                    this.sfxManager.play('punchWhoosh', 0.4);
+                }
             }
             this.lastSize = state.balloonSize;
+            
+            // Check for pop
+            if (state.balloonSize >= 100) {
+                this.pop();
+                return;
+            }
             
             // Update balloon scale
             const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + (state.balloonSize / 100) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
@@ -132,12 +170,10 @@ class BalloonPlayerEntity {
 
         if (this.isPumping && Date.now() > this.pumpEndTime) {
             this.isPumping = false;
+            this.animController.play('idle', 0.2);
         }
 
-        let animName = 'idle';
-        if (this.isPumping) animName = 'pump';
-        
-        this.animController.update(delta, animName);
+        this.animController.update(delta);
     }
 }
 
@@ -152,6 +188,7 @@ class BalloonGame {
         this.socket = null;
         this.roomCode = null;
         this.gameStarted = false;
+        this.sfxManager = new SFXManager();
         
         this.baseModels = {};
         this.baseAnimations = {};
@@ -373,7 +410,7 @@ class BalloonGame {
         playersData.forEach((p, idx) => {
             const characterId = p.character || 'edgar';
             const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
-            const entity = new BalloonPlayerEntity(p.id, p.number, p.color, baseModel, this.baseAnimations);
+            const entity = new BalloonPlayerEntity(p.id, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager);
             
             this.players.set(p.id, entity);
             this.scene.add(entity.model);
@@ -389,30 +426,57 @@ class BalloonGame {
         state.players.forEach(pState => {
             const entity = this.players.get(pState.id);
             if (entity) {
-                entity.update(this.clock.getDelta(), pState);
+                entity.lastServerState = pState;
             }
         });
     }
 
     showGameOver(data) {
         const status = document.createElement('div');
+        status.id = 'game-over-status';
         status.style.cssText = `
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
             font-family: 'Orbitron', sans-serif; font-size: 4rem; color: white;
             text-align: center; z-index: 1000; text-shadow: 0 0 20px #ff66ff;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         `;
         status.innerHTML = `¡BOOM!<br><span style="color: #ff66ff">${data.winner.name}</span><br>GANA LA FIESTA`;
         document.body.appendChild(status);
         
         this.players.forEach(entity => {
             const isWinner = entity.id === data.winner.id;
-            entity.animController.update(0.1, isWinner ? 'win' : 'lose');
+            if (isWinner) {
+                entity.pop();
+                entity.animController.play('win', 0.2);
+            } else {
+                entity.animController.play('lose', 0.2);
+            }
         });
+
+        // Add CSS animation for popIn
+        if (!document.getElementById('balloon-animations')) {
+            const style = document.createElement('style');
+            style.id = 'balloon-animations';
+            style.textContent = `
+                @keyframes popIn {
+                    0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+                    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
     }
 
     animate() {
         requestAnimationFrame(() => this.animate());
         const delta = this.clock.getDelta();
+        
+        if (this.gameStarted) {
+            this.players.forEach(entity => {
+                entity.update(delta);
+            });
+        }
+        
         this.renderer.render(this.scene, this.camera);
         this.labelRenderer.render(this.scene, this.camera);
     }

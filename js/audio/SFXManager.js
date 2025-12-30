@@ -2,7 +2,7 @@
  * SFXManager - Centralized Sound Effects System
  * Manages all audio playback for the game
  */
-class SFXManager {
+export class SFXManager {
     constructor() {
         this.sounds = {};
         this.enabled = true;
