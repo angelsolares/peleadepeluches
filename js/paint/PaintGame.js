@@ -142,52 +142,57 @@ class PaintGame {
     }
 
     connectToServer() {
-        this.socket = io(SERVER_URL);
-        
-        this.socket.on('connect', () => {
-            console.log('Connected to server');
+        const script = document.createElement('script');
+        script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+        script.onload = () => {
+            this.socket = io(SERVER_URL);
             
-            const urlParams = new URLSearchParams(window.location.search);
-            this.roomCode = urlParams.get('room');
-            const isHost = urlParams.get('host') === 'true' || !this.roomCode;
+            this.socket.on('connect', () => {
+                console.log('Connected to server');
+                
+                const urlParams = new URLSearchParams(window.location.search);
+                this.roomCode = urlParams.get('room');
+                const isHost = urlParams.get('host') === 'true' || !this.roomCode;
 
-            if (isHost && !this.roomCode) {
-                // Create a new room if none provided
-                this.socket.emit('create-room', { gameMode: 'paint' }, (response) => {
-                    if (response && response.success) {
-                        this.roomCode = response.roomCode;
-                        console.log('Created room:', this.roomCode);
-                        this.showRoomCode(this.roomCode);
-                    } else {
-                        console.error('Failed to create room:', response);
-                    }
-                });
-            } else {
-                this.socket.emit('join-room', { roomCode: this.roomCode, playerName: 'Host-Screen' });
-            }
-        });
+                if (isHost && !this.roomCode) {
+                    // Create a new room if none provided
+                    this.socket.emit('create-room', { gameMode: 'paint' }, (response) => {
+                        if (response && response.success) {
+                            this.roomCode = response.roomCode;
+                            console.log('Created room:', this.roomCode);
+                            this.showRoomCode(this.roomCode);
+                        } else {
+                            console.error('Failed to create room:', response);
+                        }
+                    });
+                } else {
+                    this.socket.emit('join-room', { roomCode: this.roomCode, playerName: 'Host-Screen' });
+                }
+            });
 
-        this.socket.on('paint-state', (state) => {
-            this.updateState(state);
-        });
+            this.socket.on('paint-state', (state) => {
+                this.updateState(state);
+            });
 
-        this.socket.on('paint-game-over', (state) => {
-            this.hud.showResults(state.results, state.winner);
-        });
+            this.socket.on('paint-game-over', (state) => {
+                this.hud.showResults(state.results, state.winner);
+            });
 
-        this.socket.on('round-ended', (data) => {
-            this.hud.showResults(data.paintResults, { name: data.roundWinner });
-            this.hud.showNextRoundCountdown(5);
-        });
+            this.socket.on('round-ended', (data) => {
+                this.hud.showResults(data.paintResults, { name: data.roundWinner });
+                this.hud.showNextRoundCountdown(5);
+            });
 
-        this.socket.on('tournament-ended', (data) => {
-            this.hud.showResults(data.paintResults, data.tournamentWinner);
-            document.getElementById('btn-return-menu').classList.remove('hidden');
-        });
+            this.socket.on('tournament-ended', (data) => {
+                this.hud.showResults(data.paintResults, data.tournamentWinner);
+                document.getElementById('btn-return-menu').classList.remove('hidden');
+            });
 
-        this.socket.on('player-joined', (data) => {
-            console.log('Player joined:', data);
-        });
+            this.socket.on('player-joined', (data) => {
+                console.log('Player joined:', data);
+            });
+        };
+        document.head.appendChild(script);
     }
 
     showRoomCode(code) {
