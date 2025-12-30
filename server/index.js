@@ -338,74 +338,67 @@ io.on('connection', (socket) => {
         const result = lobbyManager.startGame(roomCode);
         
         if (result.success) {
-            // Prepare players data with correct character names
+            // Prepare players data
             let playersData = result.players;
+
+            // Get tournament state
+            const tournamentState = lobbyManager.getTournamentState(roomCode);
+            
+            // Handle mode-specific data initialization
             if (room.gameMode === 'race') {
-                // For race mode, use character name as display name
                 playersData = result.players.map(p => ({
                     ...p,
                     name: p.characterName || (p.character ? p.character.charAt(0).toUpperCase() + p.character.slice(1) : p.name)
                 }));
+            } else if (room.gameMode === 'tug') {
+                // Initialize tug state and get players with assigned teams
+                const tugPlayers = tugStateManager.initializeTug(roomCode);
+                if (tugPlayers) {
+                    playersData = tugPlayers;
+                }
+            } else if (room.gameMode === 'flappy') {
+                flappyStateManager.initializeGame(roomCode, result.players);
+            } else if (room.gameMode === 'arena') {
+                arenaStateManager.initializeArena(roomCode);
+            } else if (room.gameMode === 'tag') {
+                tagStateManager.initializeTag(roomCode);
+            } else if (room.gameMode === 'paint') {
+                paintStateManager.initializePaint(roomCode);
+            } else if (room.gameMode === 'balloon') {
+                balloonStateManager.initializeBalloon(roomCode);
             }
-            
-            // Get tournament state
-            const tournamentState = lobbyManager.getTournamentState(roomCode);
-            
-            // Notify all players in room
+
+            // Common game-started emit
             io.to(roomCode).emit('game-started', {
                 ...result,
                 players: playersData,
                 gameMode: room.gameMode || 'smash',
-                // Include tournament info
                 tournamentRounds: tournamentState?.tournamentRounds || 1,
                 currentRound: tournamentState?.currentRound || 1,
                 playerScores: tournamentState?.playerScores || {}
             });
             
-            // Start appropriate game loop based on mode
+            // Start appropriate game loop/countdown
             if (room.gameMode === 'arena') {
-                // Initialize arena state
-                arenaStateManager.initializeArena(roomCode);
                 startArenaLoop(roomCode);
                 console.log(`[Socket] Arena game started in room ${roomCode}`);
             } else if (room.gameMode === 'race') {
-                // Initialize race state and start countdown
-                console.log(`[Socket] Race game starting in room ${roomCode}`);
                 raceStateManager.initializeRace(roomCode);
-                
-                // Start countdown (with callback to start race loop)
                 raceStateManager.startCountdown(roomCode, io, () => {
                     startRaceLoop(roomCode);
                 });
             } else if (room.gameMode === 'flappy') {
-                // Initialize flappy state and start countdown
-                console.log(`[Socket] Flappy game starting in room ${roomCode}`);
-                flappyStateManager.initializeGame(roomCode, result.players);
                 flappyStateManager.startCountdown(roomCode, io);
             } else if (room.gameMode === 'tag') {
-                // Initialize tag state
-                tagStateManager.initializeTag(roomCode);
                 startTagLoop(roomCode);
-                console.log(`[Socket] Tag game started in room ${roomCode}`);
             } else if (room.gameMode === 'tug') {
-                // Initialize tug state
-                tugStateManager.initializeTug(roomCode);
                 startTugLoop(roomCode);
-                console.log(`[Socket] Tug game started in room ${roomCode}`);
             } else if (room.gameMode === 'paint') {
-                // Initialize paint state
-                paintStateManager.initializePaint(roomCode);
                 startPaintLoop(roomCode);
-                console.log(`[Socket] Paint game started in room ${roomCode}`);
             } else if (room.gameMode === 'balloon') {
-                // Initialize balloon state
-                balloonStateManager.initializeBalloon(roomCode);
                 startBalloonLoop(roomCode);
-                console.log(`[Socket] Balloon game started in room ${roomCode}`);
             } else {
-                // Start smash game loop
                 startGameLoop(roomCode);
-                console.log(`[Socket] Smash game started in room ${roomCode}`);
             }
         }
         

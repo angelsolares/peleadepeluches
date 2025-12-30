@@ -57,7 +57,16 @@ class TugStateManager {
         });
 
         this.tugStates.set(roomCode, tugState);
-        return tugState;
+        
+        // Return player data with team assignments for the start event
+        return Array.from(tugState.players.values()).map(p => ({
+            id: p.id,
+            name: p.name,
+            number: p.number,
+            color: p.color,
+            character: p.character,
+            team: p.team
+        }));
     }
 
     /**
@@ -102,6 +111,9 @@ class TugStateManager {
         tugState.players.forEach((playerState) => {
             const timeDiff = (now - playerState.lastProcessedTime) / 1000;
             playerState.lastProcessedTime = now;
+
+            // Reset pull quality for this tick unless a pull happens
+            playerState.pullQuality = 0;
 
             // Regenerate stamina
             playerState.stamina = Math.min(100, playerState.stamina + TUG_CONFIG.STAMINA_REGEN * timeDiff);

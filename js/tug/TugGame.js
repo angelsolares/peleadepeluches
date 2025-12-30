@@ -110,7 +110,9 @@ class TugPlayerEntity {
         let animName = 'idle';
         if (this.isPulling) animName = 'pull';
         
-        this.animController.update(delta, animName);
+        // Use play() to switch animations and update() for mixer
+        this.animController.play(animName, 0.1);
+        this.animController.update(delta);
     }
 }
 
@@ -403,15 +405,14 @@ class TugGame {
     setupPlayers(playersData) {
         // Find which players are on which team to position them
         const teams = { left: [], right: [] };
-        playersData.forEach(p => {
-            // Team assignment comes from server tugState
-            // For initial setup we'll wait for the first state tick or rely on data.players
-            // Let's assume data.players includes team from tugState
+        const assignedPlayers = playersData.map(p => {
             const team = p.team || (teams.left.length <= teams.right.length ? 'left' : 'right');
-            teams[team].push(p);
+            const playerWithTeam = { ...p, team };
+            teams[team].push(playerWithTeam);
+            return playerWithTeam;
         });
 
-        playersData.forEach((p) => {
+        assignedPlayers.forEach((p) => {
             const team = p.team;
             const characterId = p.character || 'edgar';
             const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
