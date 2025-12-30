@@ -34,10 +34,11 @@ class TugStateManager {
             roomCode,
             players: new Map(),
             markerPos: 0,           // -100 (left win) to 100 (right win)
-            startTime: Date.now(),
-            nextPulseTime: Date.now() + TUG_CONFIG.PULSE_INTERVAL,
-            gameState: 'active',    // 'active', 'finished'
+            startTime: Date.now() + 3000, // 3 second countdown
+            nextPulseTime: Date.now() + 3000 + TUG_CONFIG.PULSE_INTERVAL,
+            gameState: 'countdown', // 'countdown', 'active', 'finished'
             winnerTeam: null,       // 'left' or 'right'
+            countdown: 3,
             teams: {
                 left: [],
                 right: []
@@ -94,10 +95,34 @@ class TugStateManager {
      */
     processTick(roomCode) {
         const tugState = this.tugStates.get(roomCode);
-        if (!tugState || tugState.gameState !== 'active') return null;
+        if (!tugState || tugState.gameState === 'finished') return null;
 
         const now = Date.now();
         const dt = 1 / 60; // Assumed fixed delta for simplicity in calculations
+
+        if (tugState.gameState === 'countdown') {
+            const timeRemaining = (tugState.startTime - now) / 1000;
+            tugState.countdown = Math.ceil(timeRemaining);
+            
+            if (now >= tugState.startTime) {
+                tugState.gameState = 'active';
+                tugState.countdown = 0;
+            }
+
+            return {
+                roomCode,
+                markerPos: tugState.markerPos,
+                gameState: tugState.gameState,
+                countdown: tugState.countdown,
+                players: Array.from(tugState.players.values()).map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    team: p.team,
+                    stamina: p.stamina,
+                    pullQuality: 0
+                }))
+            };
+        }
 
         // Check for pulse (rhythm)
         if (now >= tugState.nextPulseTime) {

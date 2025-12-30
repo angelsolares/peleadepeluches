@@ -11,7 +11,7 @@ import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationController.js';
 
 const TUG_CONFIG = {
-    ROPE_LENGTH: 40,
+    ROPE_LENGTH: 30, // Reduced from 40
     WIN_DISTANCE: 100, // From server
     PLAYER_SPACING: 2.5,
     SIDE_OFFSET: 5,
@@ -241,6 +241,20 @@ class TugGame {
                 z-index: 10;
                 text-shadow: 0 0 20px #9966ff;
             }
+            .tug-countdown {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                font-family: 'Orbitron', sans-serif;
+                font-size: 10rem;
+                font-weight: 900;
+                color: white;
+                text-shadow: 0 0 50px #9966ff;
+                z-index: 100;
+                pointer-events: none;
+                display: none;
+            }
         `;
         document.head.appendChild(style);
     }
@@ -447,12 +461,33 @@ class TugGame {
         const status = document.createElement('div');
         status.id = 'tug-game-status';
         status.className = 'tug-status';
-        status.textContent = '¡JALEN!';
+        status.textContent = '¡PREPÁRENSE!'; // Changed from ¡JALEN!
         document.body.appendChild(status);
+
+        const countdown = document.createElement('div');
+        countdown.id = 'tug-countdown';
+        countdown.className = 'tug-countdown';
+        document.body.appendChild(countdown);
     }
 
     updateGameState(state) {
         if (!state) return;
+
+        // Handle countdown
+        const countdownEl = document.getElementById('tug-countdown');
+        const statusEl = document.getElementById('tug-game-status');
+        
+        if (state.gameState === 'countdown') {
+            if (countdownEl) {
+                countdownEl.style.display = 'block';
+                countdownEl.textContent = state.countdown > 0 ? state.countdown : '¡YA!';
+            }
+            if (statusEl) statusEl.textContent = '¡PREPÁRENSE!';
+            return; // Skip gameplay updates during countdown
+        } else {
+            if (countdownEl) countdownEl.style.display = 'none';
+            if (statusEl && state.gameState === 'active') statusEl.textContent = '¡JALEN!';
+        }
 
         // Update rope and marker position
         // Map server -100...100 to world -25...25
