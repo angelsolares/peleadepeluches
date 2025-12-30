@@ -401,9 +401,17 @@ class BalloonGame {
 
     hideRoomUI() {
         document.getElementById('balloon-room-overlay')?.remove();
+        // También limpiar el mensaje de Game Over si existe
+        document.getElementById('game-over-status')?.remove();
     }
 
     setupPlayers(playersData) {
+        // LIMPIEZA: Eliminar jugadores anteriores de la escena
+        this.players.forEach(entity => {
+            this.scene.remove(entity.model);
+        });
+        this.players.clear();
+
         const total = playersData.length;
         const startX = -(total - 1) * BALLOON_CONFIG.PLAYER_SPACING / 2;
         
