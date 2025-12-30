@@ -409,6 +409,7 @@ class TugGame {
             });
 
             this.socket.on('game-started', (data) => {
+                this.cleanupGame();
                 this.gameStarted = true;
                 this.hideRoomUI();
                 this.setupPlayers(data.players);
@@ -471,6 +472,37 @@ class TugGame {
 
     hideRoomUI() {
         document.getElementById('tug-room-overlay')?.remove();
+    }
+
+    cleanupGame() {
+        // Remove players from scene and dispose resources
+        this.players.forEach(entity => {
+            if (entity.model) {
+                this.scene.remove(entity.model);
+                if (entity.animController) {
+                    entity.animController.dispose();
+                }
+            }
+        });
+        this.players.clear();
+
+        // Clear existing UI elements to prevent overlap
+        const elementsToRemove = [
+            '.rhythm-hud',
+            '#tug-game-status',
+            '#tug-countdown',
+            '#tug-timer'
+        ];
+        
+        elementsToRemove.forEach(selector => {
+            const els = document.querySelectorAll(selector);
+            els.forEach(el => el.remove());
+        });
+
+        // Reset positions
+        this.markerPos = 0;
+        if (this.marker) this.marker.position.x = 0;
+        if (this.rope) this.rope.position.x = 0;
     }
 
     setupPlayers(playersData) {
@@ -613,11 +645,17 @@ class TugGame {
             } else {
                 html += `<span style="color: ${data.winnerTeam === 'left' ? '#ff3366' : '#00ffcc'}">${winnerTeamName} GANA</span>`;
                 if (winners.length > 0) {
-                    html += `<br><span style="font-size: 1.2rem; color: white;">(${winners.join(', ')})</span>`;
+                    html += `<br><span style="font-size: 1.2rem; color: white; text-shadow: none;">(${winners.join(', ')})</span>`;
                 }
             }
             status.innerHTML = html;
         }
+
+        // Hide HUD elements that are no longer needed
+        const rhythmHud = document.querySelector('.rhythm-hud');
+        if (rhythmHud) rhythmHud.style.display = 'none';
+        const timer = document.getElementById('tug-timer');
+        if (timer) timer.style.display = 'none';
         
         // Final animations
         this.players.forEach(entity => {
