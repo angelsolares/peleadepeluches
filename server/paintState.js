@@ -16,6 +16,7 @@ const PAINT_CONFIG = {
     // Game timing
     ROUND_DURATION: 90000, // 90 seconds
     COUNTDOWN_DURATION: 3000,
+    PAINT_RADIUS: 2,       // Cells radius to paint around player
 };
 
 class PaintStateManager {
@@ -120,16 +121,19 @@ class PaintStateManager {
             timeLeft: Math.max(0, state.endTime - now),
             players: Array.from(state.players.values()).map(p => ({
                 id: p.id,
+                name: p.name,
+                number: p.number,
                 position: p.position,
                 facingAngle: p.facingAngle,
                 score: p.score,
-                color: p.color
+                color: p.color,
+                isMoving: Math.abs(p.velocity.x) > 0.1 || Math.abs(p.velocity.z) > 0.1
             })),
             // We only send grid updates when cells change, or in a compressed format if needed.
             // For now, let's keep it simple and send grid changes via a different mechanism if possible,
             // or just include it in the tick if it's small enough. 
             // 60x60 = 3600 bytes, which is fine for a few players.
-            grid: state.grid 
+            grid: Array.from(state.grid)
         };
     }
 
@@ -168,10 +172,18 @@ class PaintStateManager {
         const gx = Math.floor(((player.position.x + halfWorld) / PAINT_CONFIG.WORLD_SIZE) * PAINT_CONFIG.GRID_SIZE);
         const gz = Math.floor(((player.position.z + halfWorld) / PAINT_CONFIG.WORLD_SIZE) * PAINT_CONFIG.GRID_SIZE);
 
-        if (gx >= 0 && gx < PAINT_CONFIG.GRID_SIZE && gz >= 0 && gz < PAINT_CONFIG.GRID_SIZE) {
-            const index = gz * PAINT_CONFIG.GRID_SIZE + gx;
-            // Use player number as the value in the grid
-            state.grid[index] = player.number;
+        const RADIUS = PAINT_CONFIG.PAINT_RADIUS;
+        
+        for (let oz = -RADIUS; oz <= RADIUS; oz++) {
+            for (let ox = -RADIUS; ox <= RADIUS; ox++) {
+                const nx = gx + ox;
+                const nz = gz + oz;
+                
+                if (nx >= 0 && nx < PAINT_CONFIG.GRID_SIZE && nz >= 0 && nz < PAINT_CONFIG.GRID_SIZE) {
+                    const index = nz * PAINT_CONFIG.GRID_SIZE + nx;
+                    state.grid[index] = player.number;
+                }
+            }
         }
     }
 

@@ -145,7 +145,10 @@ class PaintGame {
         const script = document.createElement('script');
         script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
         script.onload = () => {
-            this.socket = io(SERVER_URL);
+            this.socket = io(SERVER_URL, {
+                transports: ['websocket'],
+                reconnection: true
+            });
             
             this.socket.on('connect', () => {
                 console.log('Connected to server');
@@ -178,6 +181,29 @@ class PaintGame {
                 this.hud.showResults(state.results, state.winner);
             });
 
+            this.socket.on('game-started', () => {
+                console.log('[Paint] Game started signal received');
+                const overlay = document.getElementById('room-code-overlay');
+                if (overlay) {
+                    overlay.classList.add('hidden');
+                    overlay.style.display = 'none';
+                }
+            });
+
+            this.socket.on('player-joined', (data) => {
+                console.log('Player joined:', data);
+                // Update player count if lobby is visible
+                const playerCountElem = document.getElementById('player-count');
+                const startBtn = document.getElementById('start-game-btn');
+                if (data.room && playerCountElem) {
+                    playerCountElem.textContent = `Jugadores: ${data.room.playerCount} / 8`;
+                    if (data.room.playerCount >= 1 && startBtn) {
+                        startBtn.disabled = false;
+                        startBtn.textContent = 'EMPEZAR JUEGO';
+                    }
+                }
+            });
+
             this.socket.on('round-ended', (data) => {
                 this.hud.showResults(data.paintResults, { name: data.roundWinner });
                 this.hud.showNextRoundCountdown(5);
@@ -186,10 +212,6 @@ class PaintGame {
             this.socket.on('tournament-ended', (data) => {
                 this.hud.showResults(data.paintResults, data.tournamentWinner);
                 document.getElementById('btn-return-menu').classList.remove('hidden');
-            });
-
-            this.socket.on('player-joined', (data) => {
-                console.log('Player joined:', data);
             });
         };
         document.head.appendChild(script);
@@ -260,37 +282,11 @@ class PaintGame {
             console.log('[Paint] Start button clicked');
             this.socket.emit('start-game', (response) => {
                 if (response && response.success) {
-                    console.log('[Paint] Game started successfully, hiding overlay');
-                    overlay.classList.add('hidden');
-                    overlay.style.display = 'none'; // Asegurar que se oculte
+                    console.log('[Paint] Game started successfully');
                 } else {
                     console.error('[Paint] Failed to start game:', response);
                 }
             });
-        });
-
-        // Escuchar cuando el juego inicia (por si acaso se inicia desde otro lugar)
-        this.socket.on('game-started', () => {
-            console.log('[Paint] Game started signal received');
-            overlay.classList.add('hidden');
-            overlay.style.display = 'none';
-        });
-
-        // Actualizar contador de jugadores
-        this.socket.on('player-joined', (data) => {
-            console.log('[Paint] Player joined:', data);
-            if (data.room) {
-                const count = data.room.playerCount;
-                const playerCountElem = document.getElementById('player-count');
-                if (playerCountElem) {
-                    playerCountElem.textContent = `Jugadores: ${count} / 8`;
-                }
-
-                if (count >= 1 && startBtn) {
-                    startBtn.disabled = false;
-                    startBtn.textContent = 'EMPEZAR JUEGO';
-                }
-            }
         });
     }
 
@@ -311,12 +307,9 @@ class PaintGame {
             player.model.position.copy(playerData.position);
             player.model.rotation.y = playerData.facingAngle;
             
-            // Update animations
-            const velocity = new THREE.Vector3(0,0,0); // In paint mode server doesn't send velocity yet
-            // Simple movement check
-            const isMoving = true; // For now
+            // Update animations based on movement from server
             player.animController.updateFromMovementState({
-                isMoving,
+                isMoving: playerData.isMoving,
                 isRunning: false,
                 isGrounded: true
             });
@@ -349,12 +342,16 @@ class PaintGame {
         const colorMap = new Map();
         players.forEach(p => colorMap.set(p.number, p.color));
 
+        // Handle both regular arrays and TypedArrays/Buffers
+        const data = (gridData instanceof ArrayBuffer) ? new Int8Array(gridData) : gridData;
+
         const imageData = this.gridCtx.createImageData(PAINT_CONFIG.GRID_SIZE, PAINT_CONFIG.GRID_SIZE);
-        for (let i = 0; i < gridData.length; i++) {
-            const playerNum = gridData[i];
+        for (let i = 0; i < data.length; i++) {
+            const playerNum = data[i];
             const pixelIndex = i * 4;
             
             if (playerNum === -1) {
+                // Default dark floor color
                 imageData.data[pixelIndex] = 26;
                 imageData.data[pixelIndex+1] = 26;
                 imageData.data[pixelIndex+2] = 46;
