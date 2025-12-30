@@ -78,6 +78,7 @@ class TugStateManager {
             name: player.name,
             number: player.number,
             color: player.color,
+            character: player.character || 'edgar',
             team: team,
             stamina: 100,
             pullPower: TUG_CONFIG.BASE_PULL_POWER,
