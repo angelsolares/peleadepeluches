@@ -923,6 +923,15 @@ function handleGameStarted(data) {
     gameMode = data.gameMode || 'smash';
     console.log('[Game] Mode:', gameMode);
     
+    // Find my player data in the list to get team/character info
+    if (data.players && socket) {
+        const myPlayerData = data.players.find(p => p.id === socket.id);
+        if (myPlayerData) {
+            playerData = { ...playerData, ...myPlayerData };
+            console.log('[Controller] My team:', playerData.team);
+        }
+    }
+    
     showScreen('controller');
     
     // Update controller UI with player info
@@ -1530,14 +1539,25 @@ function handleGameOver(data) {
     
     elements.gameOverOverlay.classList.remove('hidden');
     
-    if (data.winner) {
+    // Handle Tug of War team winner
+    if (gameMode === 'tug' && data.winnerTeam) {
+        if (data.winnerTeam === 'draw') {
+            elements.gameOverTitle.textContent = '¡EMPATE!';
+            elements.gameOverMessage.textContent = 'Ningún equipo logró ganar';
+        } else {
+            const isWinner = playerData && playerData.team === data.winnerTeam;
+            elements.gameOverTitle.textContent = isWinner ? '¡GANASTE!' : '¡PERDISTE!';
+            elements.gameOverTitle.style.color = isWinner ? 'var(--secondary)' : 'var(--primary)';
+            elements.gameOverMessage.textContent = data.winnerTeam === 'left' ? 'Gana el EQUIPO IZQUIERDO' : 'Gana el EQUIPO DERECHO';
+        }
+    } else if (data.winner) {
         const isWinner = data.winner.id === socket.id;
         elements.gameOverTitle.textContent = isWinner ? '¡GANASTE!' : '¡PERDISTE!';
         elements.gameOverTitle.style.color = isWinner ? 'var(--secondary)' : 'var(--primary)';
         elements.gameOverMessage.textContent = `Ganador: ${data.winner.name}`;
     } else {
         elements.gameOverTitle.textContent = '¡EMPATE!';
-        elements.gameOverMessage.textContent = 'Todos eliminados';
+        elements.gameOverMessage.textContent = 'Partida terminada';
     }
     
     triggerHaptic(true);
