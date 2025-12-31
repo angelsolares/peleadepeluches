@@ -146,10 +146,11 @@ class TagPlayerEntity {
         }
         
         this.model.position.copy(this.controller.position);
-        this.model.rotation.y = this.controller.facingAngle + Math.PI;
+        this.model.rotation.y = this.controller.facingAngle; // Removed + Math.PI to fix walking backward
         
         const animState = this.controller.getMovementState();
-        this.animController.update(delta, animState);
+        this.animController.play(animState); // Correctly call play() to switch animations
+        this.animController.update(delta); // update() only takes delta
     }
 }
 

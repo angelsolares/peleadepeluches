@@ -65,6 +65,9 @@ const tugStateManager = new TugStateManager(lobbyManager);
 const paintStateManager = new PaintStateManager(lobbyManager);
 const balloonStateManager = new BalloonStateManager(lobbyManager);
 
+// Attach io to lobbyManager so managers can use it for global broadcasts
+lobbyManager.io = io;
+
 // Set up flappy game end callback for tournament handling
 flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
     const room = lobbyManager.rooms.get(roomCode);

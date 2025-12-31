@@ -111,6 +111,32 @@ class TagStateManager {
         const room = this.lobbyManager.rooms.get(roomCode);
         if (!room) return null;
 
+        // Clean up players who left the room
+        for (const socketId of tagState.players.keys()) {
+            if (!room.players.has(socketId)) {
+                tagState.players.delete(socketId);
+                // If the player who left was "It", we need to pick a new one
+                if (socketId === tagState.itPlayerId) {
+                    tagState.itPlayerId = null;
+                }
+            }
+        }
+
+        // If no players left, finish the game
+        if (tagState.players.size === 0) {
+            tagState.gameState = 'finished';
+            return null;
+        }
+
+        // Ensure there is always someone "It"
+        if (tagState.itPlayerId === null || !tagState.players.has(tagState.itPlayerId)) {
+            const playerIds = Array.from(tagState.players.keys());
+            if (playerIds.length > 0) {
+                const newItId = playerIds[Math.floor(Math.random() * playerIds.length)];
+                this.transferIt(tagState, null, newItId);
+            }
+        }
+
         // Update remaining time
         tagState.remainingTime = Math.max(0, tagState.matchDuration - (now - tagState.startTime));
         
@@ -272,6 +298,7 @@ class TagStateManager {
             name: playerState.name,
             number: playerState.number,
             position: { ...playerState.position },
+            velocity: { ...playerState.velocity },
             facingAngle: playerState.facingAngle,
             isIt: playerState.isIt,
             penaltyTime: playerState.penaltyTime,

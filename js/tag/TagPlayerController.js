@@ -94,6 +94,9 @@ class TagPlayerController {
         if (state.position) {
             this.position.set(state.position.x, 0, state.position.z);
         }
+        if (state.velocity) {
+            this.velocity.set(state.velocity.x, 0, state.velocity.z);
+        }
         if (typeof state.facingAngle === 'number') this.facingAngle = state.facingAngle;
         if (typeof state.isIt === 'boolean') this.isIt = state.isIt;
         if (typeof state.hasGrace === 'boolean') this.hasGrace = state.hasGrace;
@@ -107,7 +110,7 @@ class TagPlayerController {
     getMovementState() {
         const speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
         if (speed > 1) {
-            return this.isIt ? 'running' : 'walking';
+            return this.isIt ? 'run' : 'walk';
         }
         return 'idle';
     }
