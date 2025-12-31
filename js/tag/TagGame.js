@@ -71,6 +71,11 @@ class TagPlayerEntity {
         this.aura = this.createAura();
         this.aura.visible = false;
         this.model.add(this.aura);
+
+        // Shield for immune player
+        this.shield = this.createShield();
+        this.shield.visible = false;
+        this.model.add(this.shield);
         
         this.animController = new AnimationController(this.model, baseAnimations);
         this.controller = new TagPlayerController(id, number, color);
@@ -96,16 +101,34 @@ class TagPlayerEntity {
     }
 
     createAura() {
-        const geometry = new THREE.RingGeometry(1.2, 1.5, 32);
+        const geometry = new THREE.TorusGeometry(1.2, 0.1, 16, 100);
         const material = new THREE.MeshBasicMaterial({ 
             color: 0xff3366, 
             transparent: true, 
-            opacity: 0.5, 
-            side: THREE.DoubleSide 
+            opacity: 0.8
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.y = 5; // Slightly above ground in model space
+        mesh.position.y = 0.5; // At ground level in world but relative to model
+        
+        // Add a point light to the aura
+        const light = new THREE.PointLight(0xff3366, 2, 5);
+        light.position.y = 1;
+        mesh.add(light);
+        
+        return mesh;
+    }
+
+    createShield() {
+        const geometry = new THREE.IcosahedronGeometry(1.5, 1);
+        const material = new THREE.MeshBasicMaterial({
+            color: 0x00ffff,
+            transparent: true,
+            opacity: 0.3,
+            wireframe: true
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.y = 100; // Centered on character
         return mesh;
     }
     
@@ -135,12 +158,24 @@ class TagPlayerEntity {
             this.controller.applyServerState(state);
             this.itLabel.visible = state.isIt;
             this.aura.visible = state.isIt;
+            this.shield.visible = state.hasGrace;
+            
+            if (this.aura.visible) {
+                this.aura.rotation.z += delta * 2;
+                const scale = 1 + Math.sin(Date.now() * 0.01) * 0.1;
+                this.aura.scale.set(scale, scale, 1);
+            }
+
+            if (this.shield.visible) {
+                this.shield.rotation.y += delta * 3;
+                this.shield.rotation.x += delta * 1.5;
+            }
             
             // Visual feedback for grace period (transparency)
             this.model.traverse(child => {
-                if (child.isMesh) {
+                if (child.isMesh && child !== this.aura && child !== this.shield) {
                     child.material.transparent = state.hasGrace;
-                    child.material.opacity = state.hasGrace ? 0.5 : 1.0;
+                    child.material.opacity = state.hasGrace ? 0.6 : 1.0;
                 }
             });
         }

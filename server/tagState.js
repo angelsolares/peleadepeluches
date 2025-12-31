@@ -8,7 +8,7 @@ const TAG_CONFIG = {
     MAP_SIZE: 20,           // Width/depth of the play area
     BOUNDARY: 9.5,          // Practical boundary for players
     TAG_RANGE: 1.5,         // Distance for a successful tag
-    GRACE_PERIOD: 3000,     // 3 seconds immunity after being "It"
+    GRACE_PERIOD: 5000,     // Increased from 3000 to 5000ms (5 seconds)
     MATCH_DURATION: 120,    // 120 seconds per match
     
     // Physics
