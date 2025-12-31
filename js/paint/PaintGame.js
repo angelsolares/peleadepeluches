@@ -223,6 +223,19 @@ class PaintGame {
                 }
             });
 
+            this.socket.on('player-left', (data) => {
+                console.log('Player left:', data);
+                const playerCountElem = document.getElementById('player-count');
+                const startBtn = document.getElementById('start-game-btn');
+                if (data.room && playerCountElem) {
+                    playerCountElem.textContent = `Jugadores: ${data.room.playerCount} / 8`;
+                    if (data.room.playerCount < 1 && startBtn) {
+                        startBtn.disabled = true;
+                        startBtn.textContent = 'ESPERANDO JUGADORES...';
+                    }
+                }
+            });
+
             this.socket.on('round-ended', (data) => {
                 this.hud.showResults(data.paintResults, { name: data.roundWinner });
                 this.hud.showNextRoundCountdown(5);

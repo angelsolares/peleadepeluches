@@ -335,6 +335,9 @@ class TagGame {
                 this.scene.remove(entity.model);
                 this.players.delete(data.playerId);
             }
+            if (data.room) {
+                this.updateRoomOverlay(data.room.playerCount);
+            }
         });
 
         this.socket.on('game-started', (data) => {

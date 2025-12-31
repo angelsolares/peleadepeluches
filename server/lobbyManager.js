@@ -99,9 +99,25 @@ class LobbyManager {
         if (this.playerRooms.has(socketId)) {
             this.leaveRoom(socketId);
         }
+
+        // PREVENT GHOSTS: If a player with the same name is already in the room, 
+        // they are likely a disconnected "ghost" (e.g. from a refresh).
+        // Remove the old entry before adding the new one.
+        for (const [oldId, player] of room.players) {
+            if (player.name === playerName) {
+                console.log(`[Lobby] Removing ghost player with same name: ${playerName} (${oldId})`);
+                room.players.delete(oldId);
+                this.playerRooms.delete(oldId);
+            }
+        }
         
-        // Assign player number and color
-        const playerNumber = room.players.size + 1;
+        // Assign player number and color based on available slots (1-8)
+        let playerNumber = 1;
+        const takenNumbers = Array.from(room.players.values()).map(p => p.number);
+        while (takenNumbers.includes(playerNumber) && playerNumber <= 8) {
+            playerNumber++;
+        }
+
         const player = {
             id: socketId,
             name: playerName || `Player ${playerNumber}`,

@@ -464,6 +464,26 @@ class TugGame {
             if (btn && count >= 2) {
                 btn.disabled = false;
                 btn.textContent = '¡INICIAR!';
+            } else if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'ESPERANDO JUGADORES...';
+            }
+        });
+
+        this.socket.on('player-left', (data) => {
+            const count = data.room ? data.room.playerCount : this.players.size;
+            const playerCountElem = document.getElementById('player-count');
+            if (playerCountElem) playerCountElem.textContent = `Jugadores: ${count} / 8`;
+            
+            const btn = document.getElementById('start-btn');
+            if (btn) {
+                if (count >= 2) {
+                    btn.disabled = false;
+                    btn.textContent = '¡INICIAR!';
+                } else {
+                    btn.disabled = true;
+                    btn.textContent = 'ESPERANDO JUGADORES...';
+                }
             }
         });
 
