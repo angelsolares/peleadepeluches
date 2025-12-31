@@ -1239,15 +1239,35 @@ function setupTugControls() {
 // Setup Balloon mode controls
 function setupBalloonControls() {
     const inflateBtn = document.getElementById('balloon-inflate-btn');
+    const fill = document.getElementById('balloon-progress-fill');
+    const label = document.querySelector('.balloon-label');
+    
+    // Reset UI state for new game
+    if (fill) {
+        fill.style.width = '0%';
+        fill.style.background = 'linear-gradient(90deg, #9966ff, #ff66ff)';
+        fill.style.boxShadow = '0 0 15px rgba(255, 102, 255, 0.5)';
+    }
+    if (label) {
+        label.textContent = '¡Toca para inflar!';
+        label.style.color = 'white';
+    }
     
     if (inflateBtn) {
         // Remove old listeners
         inflateBtn.replaceWith(inflateBtn.cloneNode(true));
         const newInflateBtn = document.getElementById('balloon-inflate-btn');
         
+        // Reset button state
+        newInflateBtn.disabled = false;
+        newInflateBtn.style.opacity = '1';
+        const btnText = newInflateBtn.querySelector('.balloon-text');
+        if (btnText) btnText.textContent = '¡INFLAR!';
+        
         const handleInflate = (e) => {
             if (e) e.preventDefault();
             if (gameMode !== 'balloon') return;
+            if (newInflateBtn.disabled) return; // Don't process if DQ'd
             
             newInflateBtn.classList.add('pressed');
             newInflateBtn.classList.add('pulse');
@@ -1269,6 +1289,9 @@ function setupBalloonControls() {
         newInflateBtn.addEventListener('mousedown', handleInflate);
         newInflateBtn.addEventListener('mouseup', () => newInflateBtn.classList.remove('pressed'));
     }
+    
+    // Reset balloon progress state
+    balloonProgress = 0;
     
     console.log('[Balloon] Controls setup complete');
 }

@@ -5,8 +5,8 @@
 
 const BALLOON_CONFIG = {
     TARGET_SIZE: 100,       // UI target
-    INFLATE_AMOUNT: 1,      // A bit more air to compensate for fast deflation
-    DEFLATE_RATE: 2.0,     // Much faster deflation (difficulty)
+    INFLATE_AMOUNT: 5,      // Increased from 1 to make progress feel faster
+    DEFLATE_RATE: 1.5,      // Slower deflation for better UX
     COOLDOWN: 50,           // 50ms cooldown
     GAME_DURATION: 60,      // Seconds
 };
