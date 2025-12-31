@@ -524,15 +524,22 @@ class BalloonGame {
             text-align: center; z-index: 1000; text-shadow: 0 0 20px #ff66ff;
             animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         `;
-        status.innerHTML = `¡BOOM!<br><span style="color: #ff66ff">${data.winner.name}</span><br>GANA LA FIESTA`;
+        
+        if (data.winner) {
+            status.innerHTML = `¡TIEMPO!<br><span style="color: #ff66ff">${data.winner.name}</span><br>GANA LA FIESTA`;
+        } else {
+            status.innerHTML = `¡BOOM!<br><span style="color: #ff3366">TODOS ELIMINADOS</span><br>NADIE GANA`;
+        }
+        
         document.body.appendChild(status);
         
         this.players.forEach(entity => {
-            const isWinner = entity.id === data.winner.id;
+            const isWinner = data.winner && entity.id === data.winner.id;
             if (isWinner) {
-                entity.pop();
+                // Winner celebrates and balloon stays intact
                 entity.animController.play('win', 0.2);
             } else {
+                // Losers or everyone if no winner
                 entity.animController.play('lose', 0.2);
             }
         });

@@ -8,7 +8,7 @@ const BALLOON_CONFIG = {
     INFLATE_AMOUNT: 5,      // Increased from 1 to make progress feel faster
     DEFLATE_RATE: 1.5,      // Slower deflation for better UX
     COOLDOWN: 50,           // 50ms cooldown
-    GAME_DURATION: 60,      // Seconds
+    GAME_DURATION: 30       // Reduced from 60 to 30 seconds for more speed
 };
 
 class BalloonStateManager {
@@ -67,15 +67,22 @@ class BalloonStateManager {
         // Update timer
         state.timeLeft = Math.max(0, (state.endTime - now) / 1000);
 
-        // Apply slow deflation to all active players
-        state.players.forEach((p) => {
-            if (!p.isDQ && p.balloonSize > 0) {
-                p.balloonSize = Math.max(0, p.balloonSize - BALLOON_CONFIG.DEFLATE_RATE * dt);
-            }
-        });
-
-        // Check if time ran out
-        if (state.timeLeft <= 0) {
+        // Check for immediate game over conditions
+        const activePlayers = Array.from(state.players.values()).filter(p => !p.isDQ);
+        
+        if (activePlayers.length === 0) {
+            // Everyone popped!
+            state.gameState = 'finished';
+            state.winner = null; // Everyone lost
+        } else if (activePlayers.length === 1 && state.players.size > 1) {
+            // Last survivor wins!
+            state.gameState = 'finished';
+            state.winner = {
+                id: activePlayers[0].id,
+                name: activePlayers[0].name
+            };
+        } else if (state.timeLeft <= 0) {
+            // Time out: highest progress wins
             let maxProgress = -1;
             let winnerPlayer = null;
 
@@ -94,6 +101,13 @@ class BalloonStateManager {
                 };
             }
         }
+
+        // Apply slow deflation to all active players
+        state.players.forEach((p) => {
+            if (!p.isDQ && p.balloonSize > 0) {
+                p.balloonSize = Math.max(0, p.balloonSize - BALLOON_CONFIG.DEFLATE_RATE * dt);
+            }
+        });
 
         return {
             roomCode,
