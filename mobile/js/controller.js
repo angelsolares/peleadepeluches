@@ -131,6 +131,9 @@ const inputState = {
 // Socket.IO Connection
 // =================================
 
+// Prevent context menu globally for better mobile experience
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
 function connectToServer() {
     updateConnectionStatus('connecting', 'Conectando...');
     
