@@ -637,11 +637,20 @@ function handleBalloonState(data) {
         const fill = document.getElementById('balloon-progress-fill');
         const btn = document.getElementById('balloon-inflate-btn');
         const label = document.querySelector('.balloon-label');
+        const progressContainer = document.querySelector('.balloon-progress-container');
+
+        // Hide progress bar as requested by user to increase tension
+        if (progressContainer) {
+            progressContainer.style.display = 'none';
+        }
 
         if (fill) {
             fill.style.width = `${balloonProgress}%`;
             
             if (myState.isDQ) {
+                // When DQ, we can show the bar or some visual feedback that they popped
+                if (progressContainer) progressContainer.style.display = 'block';
+                fill.style.width = '100%';
                 fill.style.background = '#ff3366';
                 fill.style.boxShadow = '0 0 20px #ff0000';
                 if (btn) {
@@ -653,12 +662,6 @@ function handleBalloonState(data) {
                     label.textContent = '💀 ¡ELIMINADO!';
                     label.style.color = '#ff3366';
                 }
-            } else if (balloonProgress > 80) {
-                fill.style.background = 'linear-gradient(90deg, #ff66ff, #ff0000)';
-                fill.style.boxShadow = '0 0 20px rgba(255, 0, 0, 0.6)';
-            } else {
-                fill.style.background = 'linear-gradient(90deg, #9966ff, #ff66ff)';
-                fill.style.boxShadow = '0 0 15px rgba(255, 102, 255, 0.5)';
             }
         }
     }
@@ -1253,6 +1256,12 @@ function setupBalloonControls() {
     const inflateBtn = document.getElementById('balloon-inflate-btn');
     const fill = document.getElementById('balloon-progress-fill');
     const label = document.querySelector('.balloon-label');
+    const progressContainer = document.querySelector('.balloon-progress-container');
+    
+    // Hide progress bar as requested by user to increase tension
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
     
     // Reset UI state for new game
     if (fill) {

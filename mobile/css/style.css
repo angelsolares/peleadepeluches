@@ -1567,6 +1567,10 @@ input, textarea {
     );
 }
 
+.balloon-mode .balloon-progress-container {
+    display: none;
+}
+
 .balloon-info {
     width: 100%;
     display: flex;
