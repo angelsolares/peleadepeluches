@@ -926,6 +926,75 @@ body {
     50% { transform: scale(1.2); }
 }
 
+/* ==================================
+   Baby Shower Theme
+   ================================== */
+
+.baby-theme {
+    --primary-color: #FFC8DD; /* Pink pastel */
+    --secondary-color: #A2D2FF; /* Blue pastel */
+    --accent-color: #FCF6BD; /* Yellow pastel */
+    --dark-bg: #F8F9FA; /* Off-white / light grey */
+    --panel-bg: rgba(255, 255, 255, 0.9);
+    --glow-pink: 0 0 20px rgba(255, 200, 221, 0.8);
+    --glow-cyan: 0 0 20px rgba(162, 210, 255, 0.8);
+}
+
+.baby-theme body {
+    color: #555;
+    background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
+}
+
+.baby-theme .game-title {
+    background: linear-gradient(135deg, #FF99C8, #A2D2FF);
+    -webkit-background-clip: text;
+    background-clip: text;
+    filter: drop-shadow(0 0 5px rgba(0,0,0,0.1));
+}
+
+.baby-theme .controls-panel {
+    background: var(--panel-bg);
+    border: 3px solid var(--secondary-color);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05), var(--glow-cyan);
+    color: #444;
+}
+
+.baby-theme .controls-panel h3,
+.baby-theme .section-title,
+.baby-theme .key-item {
+    color: #666;
+}
+
+.baby-theme .key {
+    background: #fff;
+    border-color: var(--primary-color);
+    color: #FF85A1;
+    box-shadow: 0 3px 0 #FFC8DD, var(--glow-pink);
+}
+
+.baby-theme .player-hud {
+    background: rgba(255, 255, 255, 0.8);
+    border: 2px solid var(--secondary-color);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+}
+
+.baby-theme .player-name {
+    color: #444;
+}
+
+.baby-theme .player-damage {
+    background: #fff;
+    color: #555;
+}
+
+.baby-theme #loading-screen {
+    background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
+}
+
+.baby-theme #loading-text {
+    color: #888;
+}
+
 /* Responsive adjustments for tournament UI */
 @media (max-width: 768px) {
     .rounds-selector {

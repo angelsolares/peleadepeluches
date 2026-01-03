@@ -9,7 +9,8 @@ export const GAME_MODES = {
     TAG: 'tag',
     TUG: 'tug',
     PAINT: 'paint',
-    BALLOON: 'balloon'
+    BALLOON: 'balloon',
+    BABY_SHOWER: 'baby_shower'
 };
 
 export const MODE_CONFIG = {
@@ -90,6 +91,19 @@ export const MODE_CONFIG = {
             '¡Cuidado con que explote!'
         ],
         color: '#ff66ff'
+    },
+    [GAME_MODES.BABY_SHOWER]: {
+        id: 'baby_shower',
+        name: 'Baby Shower Party',
+        description: '¡Celebración especial! Mini-juegos temáticos de bebé',
+        icon: '👶',
+        features: [
+            'Estética pastel',
+            'Modelos de bebés',
+            'Carreras de gateo',
+            'Música festiva'
+        ],
+        color: '#A2D2FF'
     }
 };
 

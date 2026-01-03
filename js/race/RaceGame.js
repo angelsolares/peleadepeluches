@@ -36,6 +36,7 @@ const RACE_CONFIG = {
 
 // Character models (same as other modes)
 const CHARACTER_MODELS = {
+    'baby': { path: 'assets/bebe.fbx', color: '#A2D2FF', name: 'Bebé' },
     'angel': { path: 'assets/Angel.fbx', color: '#00ffcc', name: 'Angel' },
     'edgar': { path: 'assets/Edgar_Model.fbx', color: '#ff6600', name: 'Edgar' },
     'hector': { path: 'assets/Hector.fbx', color: '#9966ff', name: 'Hector' },
@@ -55,7 +56,8 @@ const CHARACTER_MODELS = {
 // Animation files (same as arena)
 const ANIMATION_FILES = {
     walk: 'assets/Meshy_AI_Animation_Walking_withSkin.fbx',
-    run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx'
+    run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx',
+    crawling: 'assets/@Crawling.fbx'
 };
 
 /**
@@ -139,6 +141,8 @@ class RacePlayerEntity {
         // Adjust speed based on animation
         if (name === 'run') {
             newAction.timeScale = 1.8; // Fast running animation
+        } else if (name === 'crawling') {
+            newAction.timeScale = 1.5; // Fast crawl
         } else if (name === 'walk') {
             newAction.timeScale = 1.0;
         } else if (name === 'idle') {
@@ -154,19 +158,22 @@ class RacePlayerEntity {
             this.mixer.update(delta);
         }
         
-        // Determine target animation based on speed with hysteresis to prevent flickering
+        // Determine target animation based on speed and mode
         let targetAnimation;
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+
         if (this.speed < RACE_CONFIG.IDLE_THRESHOLD) {
             targetAnimation = 'idle';
         } else if (this.speed < RACE_CONFIG.WALK_THRESHOLD) {
             // Add hysteresis: if currently running, stay running until speed drops more
-            if (this.currentAnimation === 'run' && this.speed > RACE_CONFIG.WALK_THRESHOLD * 0.7) {
-                targetAnimation = 'run';
+            const runAnim = isBabyShower ? 'crawling' : 'run';
+            if (this.currentAnimation === runAnim && this.speed > RACE_CONFIG.WALK_THRESHOLD * 0.7) {
+                targetAnimation = runAnim;
             } else {
                 targetAnimation = 'walk';
             }
         } else {
-            targetAnimation = 'run';
+            targetAnimation = isBabyShower ? 'crawling' : 'run';
         }
         
         // Only change animation if target is different

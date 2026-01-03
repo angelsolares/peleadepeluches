@@ -111,12 +111,14 @@ class LobbyManager {
             }
         }
         
-        // Assign player number and color based on available slots (1-8)
+        // assigns player number and color based on available slots (1-8)
         let playerNumber = 1;
         const takenNumbers = Array.from(room.players.values()).map(p => p.number);
         while (takenNumbers.includes(playerNumber) && playerNumber <= 8) {
             playerNumber++;
         }
+
+        const isBabyShower = room.gameMode === 'baby_shower';
 
         const player = {
             id: socketId,
@@ -124,6 +126,7 @@ class LobbyManager {
             number: playerNumber,
             color: PLAYER_COLORS[playerNumber - 1] || '#ffffff',
             ready: false,
+            character: isBabyShower ? 'baby' : null, // Auto-assign baby character
             // Game state
             position: { x: (playerNumber - 2.5) * 2, y: 0, z: 0 },
             velocity: { x: 0, y: 0, z: 0 },

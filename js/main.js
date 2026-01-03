@@ -19,6 +19,12 @@ let VFXManager = null;
 // Game mode - set directly from menu.html selection
 let selectedGameMode = GAME_MODES.SMASH;
 
+// Apply baby theme if needed
+if (window.location.search.includes('mode=baby_shower')) {
+    document.documentElement.classList.add('baby-theme');
+    CONFIG.BABY_SHOWER_MODE = true;
+}
+
 // SFX Manager will be loaded dynamically
 let SFXManager = null;
 

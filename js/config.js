@@ -24,7 +24,8 @@ export const SERVER_URL = isLocalhost
 export const CONFIG = {
     SERVER_URL,
     isLocalhost,
-    DEBUG: isLocalhost
+    DEBUG: isLocalhost,
+    BABY_SHOWER_MODE: false // Flag global para el modo Baby Shower
 };
 
 console.log(`[Config] Environment: ${isLocalhost ? 'Development' : 'Production'}`);

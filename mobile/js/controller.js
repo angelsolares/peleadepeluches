@@ -49,6 +49,10 @@ const elements = {
     playersList: document.getElementById('players-list'),
     readyBtn: document.getElementById('ready-btn'),
     
+    // Baby shower specific
+    babyNameContainer: document.getElementById('baby-name-input-container'),
+    babyNameInput: document.getElementById('baby-player-name'),
+    
     // Controller screen
     controllerBadge: document.getElementById('controller-player-badge'),
     playerDamage: document.getElementById('player-damage'),
@@ -748,6 +752,37 @@ function updateLobbyUI(room) {
     if (!room) return;
     
     elements.lobbyRoomCode.textContent = room.code;
+    gameMode = room.gameMode;
+
+    // Handle Baby Shower mode UI
+    const isBabyShower = gameMode === 'baby_shower';
+    if (isBabyShower) {
+        document.body.classList.add('baby-theme');
+        if (elements.babyNameContainer) elements.babyNameContainer.style.display = 'block';
+        const charSelection = document.querySelector('.character-selection');
+        if (charSelection) charSelection.style.display = 'none';
+        if (elements.playerStatus) elements.playerStatus.style.display = 'none';
+        
+        // Setup name input listener if not already done
+        if (!elements.babyNameInput.dataset.listenerAdded) {
+            elements.babyNameInput.addEventListener('input', (e) => {
+                const newName = e.target.value.trim();
+                if (newName.length > 0) {
+                    socket.emit('update-player-name', newName);
+                    elements.readyBtn.disabled = false;
+                } else {
+                    elements.readyBtn.disabled = true;
+                }
+            });
+            elements.babyNameInput.dataset.listenerAdded = 'true';
+        }
+    } else {
+        document.body.classList.remove('baby-theme');
+        if (elements.babyNameContainer) elements.babyNameContainer.style.display = 'none';
+        const charSelection = document.querySelector('.character-selection');
+        if (charSelection) charSelection.style.display = 'block';
+        if (elements.playerStatus) elements.playerStatus.style.display = 'block';
+    }
     
     if (playerData) {
         elements.playerAvatar.textContent = `P${playerData.number}`;
@@ -790,9 +825,15 @@ function updateLobbyUI(room) {
 }
 
 function toggleReady() {
-    // Can't be ready without selecting a character
-    if (!selectedCharacter) {
+    // Can't be ready without selecting a character (unless in baby shower mode)
+    if (gameMode !== 'baby_shower' && !selectedCharacter) {
         alert('¡Primero selecciona un personaje!');
+        return;
+    }
+
+    // In baby shower mode, must have a name
+    if (gameMode === 'baby_shower' && elements.babyNameInput.value.trim().length === 0) {
+        alert('¡Primero ingresa tu nombre!');
         return;
     }
     

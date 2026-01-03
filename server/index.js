@@ -436,6 +436,27 @@ io.on('connection', (socket) => {
             callback(result);
         }
     });
+
+    /**
+     * Update player name (specifically for baby shower mode)
+     */
+    socket.on('update-player-name', (newName) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+
+        const room = lobbyManager.rooms.get(roomCode);
+        if (!room) return;
+
+        const player = room.players.get(socket.id);
+        if (player) {
+            player.name = newName;
+            // Notify room of name update
+            io.to(roomCode).emit('player-name-updated', {
+                playerId: socket.id,
+                newName: newName
+            });
+        }
+    });
     
     /**
      * Player ready toggle
