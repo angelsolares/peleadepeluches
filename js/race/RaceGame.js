@@ -229,6 +229,9 @@ class RaceGame {
         // Apply baby theme if needed
         if (window.location.search.includes('mode=baby_shower')) {
             document.documentElement.classList.add('baby-theme');
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = 'CARRERA DE BEBÉS';
+            document.title = 'Carrera de Bebés - Baby Shower';
         }
 
         this.setupRenderer();
@@ -655,9 +658,11 @@ class RaceGame {
         this.selectedCharacter = character;
         
         // Use callback like Arena does
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
         this.socket.emit('create-room', { 
             gameMode: 'race',
-            character: character
+            character: character,
+            isBabyShower: isBabyShower
         }, (response) => {
             console.log('[Race] create-room response:', response);
             if (response && response.success) {

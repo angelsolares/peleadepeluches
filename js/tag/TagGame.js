@@ -212,6 +212,9 @@ class TagGame {
         // Apply baby theme if needed
         if (window.location.search.includes('mode=baby_shower')) {
             document.documentElement.classList.add('baby-theme');
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = '¡ATRÁPALO BEBÉ!';
+            document.title = '¡Atrápalo Bebé! - Baby Shower';
         }
 
         this.setupScene();
@@ -358,7 +361,11 @@ class TagGame {
             console.log('[Tag] Connected to server');
             
             // Create a new room for tag mode
-            this.socket.emit('create-room', { gameMode: 'tag' }, (response) => {
+            const isBabyShower = document.documentElement.classList.contains('baby-theme');
+            this.socket.emit('create-room', { 
+                gameMode: 'tag',
+                isBabyShower: isBabyShower
+            }, (response) => {
                 if (response.success) {
                     this.roomCode = response.roomCode;
                     this.showRoomCode(this.roomCode);

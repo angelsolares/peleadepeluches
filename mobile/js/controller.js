@@ -48,6 +48,7 @@ const elements = {
     playerStatus: document.getElementById('player-status'),
     playersList: document.getElementById('players-list'),
     readyBtn: document.getElementById('ready-btn'),
+    characterSelectionArea: document.getElementById('character-selection-area'),
     
     // Baby shower specific
     babyNameContainer: document.getElementById('baby-name-input-container'),
@@ -756,13 +757,12 @@ function updateLobbyUI(room) {
     gameMode = room.gameMode;
 
     // Handle Baby Shower mode UI
-    const isBabyShower = gameMode === 'baby_shower';
+    const isBabyShower = room.isBabyShower || gameMode === 'baby_shower';
     if (isBabyShower) {
         if (mainLogo) mainLogo.innerHTML = 'FIESTA DE<br>BEBÉS';
         document.body.classList.add('baby-theme');
         if (elements.babyNameContainer) elements.babyNameContainer.style.display = 'block';
-        const charSelection = document.querySelector('.character-selection');
-        if (charSelection) charSelection.style.display = 'none';
+        if (elements.characterSelectionArea) elements.characterSelectionArea.style.display = 'none';
         if (elements.playerStatus) elements.playerStatus.style.display = 'none';
         
         // Auto-select baby character if in baby shower mode

@@ -25,6 +25,11 @@ if (window.location.search.includes('mode=baby_shower')) {
     document.documentElement.classList.add('baby-theme');
     CONFIG.BABY_SHOWER_MODE = true;
     selectedCharacter = 'baby'; // Force baby model in Baby Shower mode
+    
+    // Update titles
+    const gameTitle = document.querySelector('.game-title');
+    if (gameTitle) gameTitle.innerHTML = 'FIESTA DE BEBÉS';
+    document.title = 'Fiesta de Bebés - 3D Fighter';
 }
 
 // SFX Manager will be loaded dynamically
@@ -1684,7 +1689,11 @@ function initializeSocket() {
         isHost = true;
         
         // Create room as host with selected game mode (host is display only, not a player)
-        socket.emit('create-room', { gameMode: selectedGameMode }, (response) => {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        socket.emit('create-room', { 
+            gameMode: selectedGameMode,
+            isBabyShower: isBabyShower 
+        }, (response) => {
             if (response.success) {
                 roomCode = response.roomCode;
                 console.log(`[Socket] Room created: ${roomCode} with mode: ${selectedGameMode}`);

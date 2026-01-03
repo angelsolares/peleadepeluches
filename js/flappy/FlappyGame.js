@@ -413,6 +413,9 @@ class FlappyGame {
         // Apply baby theme if needed
         if (window.location.search.includes('mode=baby_shower')) {
             document.documentElement.classList.add('baby-theme');
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = 'EL VUELO DE LA CIGÜEÑA';
+            document.title = 'El Vuelo de la Cigüeña - Baby Shower';
         }
 
         console.log('[FlappyGame] Initializing...');
@@ -897,9 +900,11 @@ class FlappyGame {
     }
     
     createRoom() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
         this.socket.emit('create-room', {
             character: this.selectedCharacter,
-            gameMode: 'flappy'
+            gameMode: 'flappy',
+            isBabyShower: isBabyShower
         }, (response) => {
             if (response && response.roomCode) {
                 this.roomCode = response.roomCode;

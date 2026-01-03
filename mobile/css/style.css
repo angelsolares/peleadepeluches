@@ -867,6 +867,58 @@ input, textarea {
 }
 
 /* ==================================
+   Baby Shower Theme (Mobile)
+   ================================== */
+
+.baby-theme {
+    --primary: #FFC8DD;
+    --secondary: #A2D2FF;
+    --accent: #FF85A1;
+    --dark: #F8F9FA;
+    --dark-lighter: #ffffff;
+    --panel: rgba(255, 255, 255, 0.9);
+    --text: #444;
+    --text-muted: #888;
+    
+    --glow-pink: 0 0 20px rgba(255, 200, 221, 0.5);
+    --glow-cyan: 0 0 20px rgba(162, 210, 255, 0.5);
+}
+
+.baby-theme body {
+    background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
+}
+
+.baby-theme .character-selection,
+.baby-theme .players-list li {
+    display: none !important;
+}
+
+.baby-theme .player-info {
+    background: #fff;
+    border: 2px solid var(--secondary);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+}
+
+.baby-theme .player-avatar {
+    background: linear-gradient(135deg, #FFC8DD, #A2D2FF);
+    color: #fff;
+}
+
+.baby-theme .btn-ready {
+    background: var(--secondary);
+    color: #fff;
+}
+
+.baby-theme .btn-ready.active {
+    background: var(--accent);
+}
+
+.baby-theme .input-group input {
+    background: #fff;
+    color: #444;
+}
+
+/* ==================================
    Haptic Feedback Animation
    ================================== */
 

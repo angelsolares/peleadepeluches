@@ -335,6 +335,9 @@ class ArenaGame {
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
         if (isBabyShower) {
             this.selectedCharacter = 'baby';
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = 'BUMPER BABIES';
+            document.title = 'Bumper Babies - Baby Shower';
         } else {
             this.selectedCharacter = 'edgar';
         }
@@ -993,7 +996,11 @@ class ArenaGame {
             
             // Create room with arena mode
             console.log('[Socket] Emitting create-room with arena mode...');
-            this.socket.emit('create-room', { gameMode: 'arena' }, (response) => {
+            const isBabyShower = document.documentElement.classList.contains('baby-theme');
+            this.socket.emit('create-room', { 
+                gameMode: 'arena',
+                isBabyShower: isBabyShower
+            }, (response) => {
                 console.log('[Socket] create-room response:', response);
                 if (response && response.success) {
                     this.roomCode = response.roomCode;

@@ -33,9 +33,10 @@ class LobbyManager {
      * Create a new room
      * @param {string} hostSocketId - Socket ID of the host (main screen)
      * @param {string} gameMode - Game mode ('smash' or 'arena')
+     * @param {object} options - Additional room options
      * @returns {object} Room info
      */
-    createRoom(hostSocketId, gameMode = 'smash') {
+    createRoom(hostSocketId, gameMode = 'smash', options = {}) {
         // Generate unique room code
         let roomCode;
         do {
@@ -48,6 +49,7 @@ class LobbyManager {
             players: new Map(),
             state: 'lobby', // 'lobby', 'playing', 'finished'
             gameMode: gameMode, // 'smash' or 'arena'
+            isBabyShower: !!options.isBabyShower,
             maxPlayers: 8, // Support up to 8 players in Arena mode
             createdAt: Date.now(),
             // Tournament state
@@ -118,7 +120,7 @@ class LobbyManager {
             playerNumber++;
         }
 
-        const isBabyShower = room.gameMode === 'baby_shower';
+        const isBabyShower = room.isBabyShower || room.gameMode === 'baby_shower';
 
         const player = {
             id: socketId,
@@ -225,6 +227,7 @@ class LobbyManager {
             code: room.code,
             state: room.state,
             gameMode: room.gameMode || 'smash',
+            isBabyShower: !!room.isBabyShower,
             playerCount: room.players.size,
             maxPlayers: room.maxPlayers,
             players: Array.from(room.players.values()).map(p => ({

@@ -144,6 +144,9 @@ class TugGame {
         // Apply baby theme if needed
         if (window.location.search.includes('mode=baby_shower')) {
             document.documentElement.classList.add('baby-theme');
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = 'GUERRA DE BIBERONES';
+            document.title = 'Guerra de Biberones - Baby Shower';
         }
 
         this.setupScene();
@@ -409,7 +412,11 @@ class TugGame {
         script.onload = () => {
             this.socket = io(SERVER_URL);
             this.socket.on('connect', () => {
-                this.socket.emit('create-room', { gameMode: 'tug' }, (response) => {
+                const isBabyShower = document.documentElement.classList.contains('baby-theme');
+            this.socket.emit('create-room', { 
+                gameMode: 'tug',
+                isBabyShower: isBabyShower
+            }, (response) => {
                     if (response.success) {
                         this.roomCode = response.roomCode;
                         this.showRoomUI(this.roomCode);

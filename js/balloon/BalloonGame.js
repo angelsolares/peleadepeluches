@@ -252,6 +252,9 @@ class BalloonGame {
         // Apply baby theme if needed
         if (window.location.search.includes('mode=baby_shower')) {
             document.documentElement.classList.add('baby-theme');
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = 'INFLA EL BIBERÓN';
+            document.title = 'Infla el Biberón - Baby Shower';
         }
 
         this.setupScene();
@@ -371,7 +374,11 @@ class BalloonGame {
             
             this.socket.on('connect', () => {
                 console.log('[Balloon] Connected to server');
-                this.socket.emit('create-room', { gameMode: 'balloon' }, (response) => {
+                const isBabyShower = document.documentElement.classList.contains('baby-theme');
+                this.socket.emit('create-room', { 
+                    gameMode: 'balloon',
+                    isBabyShower: isBabyShower
+                }, (response) => {
                     if (response.success) {
                         this.roomCode = response.roomCode;
                         this.showRoomUI(this.roomCode, response.room);

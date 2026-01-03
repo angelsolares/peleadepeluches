@@ -62,6 +62,9 @@ class PaintGame {
         // Apply baby theme if needed
         if (window.location.search.includes('mode=baby_shower')) {
             document.documentElement.classList.add('baby-theme');
+            const gameTitle = document.querySelector('.game-title');
+            if (gameTitle) gameTitle.innerHTML = 'PINTA EL CUARTO';
+            document.title = 'Pinta el Cuarto - Baby Shower';
         }
 
         this.scene = new THREE.Scene();
@@ -187,7 +190,11 @@ class PaintGame {
 
                 if (isHost && !this.roomCode) {
                     // Create a new room if none provided
-                    this.socket.emit('create-room', { gameMode: 'paint' }, (response) => {
+                    const isBabyShower = document.documentElement.classList.contains('baby-theme');
+                    this.socket.emit('create-room', { 
+                        gameMode: 'paint',
+                        isBabyShower: isBabyShower
+                    }, (response) => {
                         if (response && response.success) {
                             this.roomCode = response.roomCode;
                             console.log('Created room:', this.roomCode);

@@ -249,6 +249,7 @@ io.on('connection', (socket) => {
         
         // Handle both old format (just callback) and new format (data + callback)
         let gameMode = 'smash';
+        let isBabyShower = false;
         let actualCallback = callback;
         
         if (typeof dataOrCallback === 'function') {
@@ -258,10 +259,11 @@ io.on('connection', (socket) => {
         } else if (dataOrCallback && typeof dataOrCallback === 'object') {
             // New format: create-room with data object
             gameMode = dataOrCallback.gameMode || 'smash';
-            console.log('[Socket] Using new format with gameMode:', gameMode);
+            isBabyShower = !!dataOrCallback.isBabyShower;
+            console.log('[Socket] Using new format with gameMode:', gameMode, 'isBabyShower:', isBabyShower);
         }
         
-        const result = lobbyManager.createRoom(socket.id, gameMode);
+        const result = lobbyManager.createRoom(socket.id, gameMode, { isBabyShower });
         console.log('[Socket] createRoom result:', result);
         
         if (result.success) {
