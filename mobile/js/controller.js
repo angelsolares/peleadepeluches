@@ -729,6 +729,9 @@ function joinRoom() {
     socket.emit('join-room', { roomCode: code, playerName: name }, (response) => {
         elements.joinBtn.disabled = false;
         
+        console.log('[Controller] join-room response:', response);
+        console.log('[Controller] Room info:', response.room);
+        
         if (response.success) {
             playerData = response.player;
             roomCode = code;
@@ -756,20 +759,51 @@ function updateLobbyUI(room) {
     elements.lobbyRoomCode.textContent = room.code;
     gameMode = room.gameMode;
 
-    // Handle Baby Shower mode UI
-    const isBabyShower = room.isBabyShower || gameMode === 'baby_shower';
+    // Handle Baby Shower mode UI - check BOTH flags
+    const isBabyShower = room.isBabyShower === true || gameMode === 'baby_shower';
+    console.log('[Controller] updateLobbyUI - isBabyShower:', isBabyShower, 'room.isBabyShower:', room.isBabyShower, 'gameMode:', gameMode);
+    
     if (isBabyShower) {
-        if (mainLogo) mainLogo.innerHTML = 'FIESTA DE<br>BEBÉS';
-        document.body.classList.add('baby-theme');
-        if (elements.babyNameContainer) elements.babyNameContainer.style.display = 'block';
-        if (elements.characterSelectionArea) elements.characterSelectionArea.style.display = 'none';
-        if (elements.playerStatus) elements.playerStatus.style.display = 'none';
+        console.log('[Controller] Activating Baby Shower mode UI');
         
-        // Auto-select baby character if in baby shower mode
+        // Apply baby theme class to body FIRST
+        document.body.classList.add('baby-theme');
+        
+        // Update logo
+        if (mainLogo) mainLogo.innerHTML = 'FIESTA DE<br>BEBÉS';
+        
+        // Show name input container
+        if (elements.babyNameContainer) {
+            elements.babyNameContainer.style.display = 'block';
+            elements.babyNameContainer.style.visibility = 'visible';
+        }
+        
+        // FORCE hide character selection - multiple approaches
+        if (elements.characterSelectionArea) {
+            elements.characterSelectionArea.style.display = 'none';
+            elements.characterSelectionArea.style.visibility = 'hidden';
+            elements.characterSelectionArea.style.height = '0';
+            elements.characterSelectionArea.style.overflow = 'hidden';
+        }
+        const charSelectionByClass = document.querySelector('.character-selection');
+        if (charSelectionByClass) {
+            charSelectionByClass.style.display = 'none';
+            charSelectionByClass.style.visibility = 'hidden';
+        }
+        
+        // Hide player status text
+        if (elements.playerStatus) {
+            elements.playerStatus.style.display = 'none';
+        }
+        
+        // Auto-select baby character
         if (selectedCharacter !== 'baby') {
             selectedCharacter = 'baby';
             socket.emit('select-character', { characterId: 'baby', characterName: 'Bebé' });
         }
+        
+        // Disable ready button until name is entered
+        elements.readyBtn.disabled = true;
 
         // Setup name input listener if not already done
         if (!elements.babyNameInput.dataset.listenerAdded) {
@@ -778,17 +812,31 @@ function updateLobbyUI(room) {
                 if (newName.length > 0) {
                     socket.emit('update-player-name', newName);
                     elements.readyBtn.disabled = false;
+                    // Update display name
+                    elements.playerDisplayName.textContent = newName;
                 } else {
                     elements.readyBtn.disabled = true;
                 }
             });
             elements.babyNameInput.dataset.listenerAdded = 'true';
         }
+        
+        // Focus on name input for convenience
+        setTimeout(() => {
+            if (elements.babyNameInput) {
+                elements.babyNameInput.focus();
+            }
+        }, 300);
+        
     } else {
         document.body.classList.remove('baby-theme');
         if (elements.babyNameContainer) elements.babyNameContainer.style.display = 'none';
-        const charSelection = document.querySelector('.character-selection');
-        if (charSelection) charSelection.style.display = 'block';
+        if (elements.characterSelectionArea) {
+            elements.characterSelectionArea.style.display = 'block';
+            elements.characterSelectionArea.style.visibility = 'visible';
+            elements.characterSelectionArea.style.height = 'auto';
+            elements.characterSelectionArea.style.overflow = 'visible';
+        }
         if (elements.playerStatus) elements.playerStatus.style.display = 'block';
     }
     
@@ -805,8 +853,16 @@ function updateLobbyUI(room) {
         }
     }
     
-    // Disable ready button if no character selected
-    elements.readyBtn.disabled = !selectedCharacter;
+    // Disable ready button based on mode
+    const isBabyShowerMode = document.body.classList.contains('baby-theme');
+    if (isBabyShowerMode) {
+        // In baby shower mode, button is disabled until name is entered
+        const hasName = elements.babyNameInput && elements.babyNameInput.value.trim().length > 0;
+        elements.readyBtn.disabled = !hasName;
+    } else {
+        // Normal mode - disabled if no character selected
+        elements.readyBtn.disabled = !selectedCharacter;
+    }
     
     // Build taken characters map from room players
     takenCharacters = {};
@@ -833,14 +889,16 @@ function updateLobbyUI(room) {
 }
 
 function toggleReady() {
+    const isBabyShowerMode = document.body.classList.contains('baby-theme');
+    
     // Can't be ready without selecting a character (unless in baby shower mode)
-    if (gameMode !== 'baby_shower' && !selectedCharacter) {
+    if (!isBabyShowerMode && !selectedCharacter) {
         alert('¡Primero selecciona un personaje!');
         return;
     }
 
     // In baby shower mode, must have a name
-    if (gameMode === 'baby_shower' && elements.babyNameInput.value.trim().length === 0) {
+    if (isBabyShowerMode && elements.babyNameInput.value.trim().length === 0) {
         alert('¡Primero ingresa tu nombre!');
         return;
     }
@@ -850,7 +908,11 @@ function toggleReady() {
     elements.readyBtn.classList.toggle('active', isReady);
     elements.readyBtn.querySelector('.btn-text').textContent = isReady ? '¡ESPERANDO!' : '¡LISTO!';
     
-    if (selectedCharacter) {
+    if (isBabyShowerMode) {
+        // In baby shower mode, show the entered name
+        const playerName = elements.babyNameInput.value.trim();
+        elements.playerDisplayName.textContent = playerName;
+    } else if (selectedCharacter) {
         elements.playerStatus.textContent = isReady ? '¡Listo!' : `${CHARACTERS[selectedCharacter].emoji} ${CHARACTERS[selectedCharacter].name}`;
     }
     

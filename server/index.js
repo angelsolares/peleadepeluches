@@ -260,10 +260,11 @@ io.on('connection', (socket) => {
             // New format: create-room with data object
             gameMode = dataOrCallback.gameMode || 'smash';
             isBabyShower = !!dataOrCallback.isBabyShower;
-            console.log('[Socket] Using new format with gameMode:', gameMode, 'isBabyShower:', isBabyShower);
+            console.log('[Socket] Using new format with gameMode:', gameMode, 'isBabyShower:', isBabyShower, 'raw data:', dataOrCallback);
         }
         
         const result = lobbyManager.createRoom(socket.id, gameMode, { isBabyShower });
+        console.log('[Socket] Room created with isBabyShower:', result.room?.isBabyShower);
         console.log('[Socket] createRoom result:', result);
         
         if (result.success) {

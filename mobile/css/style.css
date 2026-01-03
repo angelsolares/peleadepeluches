@@ -888,9 +888,27 @@ input, textarea {
     background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
 }
 
+/* FORCE hide character selection in baby mode */
+.baby-theme #character-selection-area,
 .baby-theme .character-selection,
-.baby-theme .players-list li {
+.baby-theme .character-options,
+.baby-theme #character-options {
     display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* FORCE hide player status text in baby mode */
+.baby-theme #player-status {
+    display: none !important;
+}
+
+/* FORCE show baby name input in baby mode */
+.baby-theme #baby-name-input-container {
+    display: block !important;
 }
 
 .baby-theme .player-info {
@@ -913,9 +931,17 @@ input, textarea {
     background: var(--accent);
 }
 
-.baby-theme .input-group input {
-    background: #fff;
-    color: #444;
+.baby-theme .input-group input,
+.baby-theme #baby-player-name {
+    background: #fff !important;
+    color: #444 !important;
+    border-color: var(--secondary) !important;
+}
+
+.baby-theme .game-logo {
+    background: linear-gradient(135deg, #FFC8DD, #A2D2FF) !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
 }
 
 /* ==================================
