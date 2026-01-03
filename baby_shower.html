@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Shower Party - Selección de Juego</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Aplicar tema baby directamente */
+        :root {
+            --primary-color: #FFC8DD;
+            --secondary-color: #A2D2FF;
+            --accent-color: #FCF6BD;
+            --dark-bg: #F8F9FA;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
+            font-family: 'Orbitron', sans-serif;
+            color: #555;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        .container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .title h1 {
+            font-size: clamp(2.5rem, 8vw, 5rem);
+            background: linear-gradient(135deg, #FF99C8, #A2D2FF);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(0,0,0,0.1));
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .title p {
+            text-align: center;
+            color: #888;
+            letter-spacing: 4px;
+            margin-bottom: 40px;
+        }
+
+        .modes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .mode-card {
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 24px;
+            padding: 30px;
+            text-align: center;
+            text-decoration: none;
+            color: #555;
+            border: 4px solid var(--secondary-color);
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+        }
+
+        .mode-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 30px rgba(162, 210, 255, 0.4);
+            border-color: var(--primary-color);
+        }
+
+        .mode-icon {
+            font-size: 4rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .mode-title {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+            color: #FF85A1;
+        }
+
+        .back-btn {
+            margin-top: 40px;
+            padding: 12px 30px;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 50px;
+            color: #888;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+
+        .back-btn:hover {
+            background: #eee;
+            color: #555;
+        }
+    </style>
+</head>
+<body class="baby-theme">
+    <div class="container">
+        <div class="title">
+            <h1>BABY PARTY</h1>
+            <p>SELECCIONA UN JUEGO TEMÁTICO</p>
+        </div>
+
+        <div class="modes">
+            <!-- Carrera de Gateo -->
+            <a href="race.html?mode=baby_shower" class="mode-card">
+                <span class="mode-icon">🍼</span>
+                <h2 class="mode-title">CARRERA DE GATEO</h2>
+                <p>¡Llega primero a la meta gateando con todo!</p>
+            </a>
+
+            <!-- Arena de Bebés -->
+            <a href="arena.html?mode=baby_shower" class="mode-card">
+                <span class="mode-icon">👶</span>
+                <h2 class="mode-title">BUMPER BABIES</h2>
+                <p>¡Saca a los otros bebés de la alfombra de juegos!</p>
+            </a>
+
+            <!-- Flappy Cigüeña -->
+            <a href="flappy.html?mode=baby_shower" class="mode-card">
+                <span class="mode-icon">🕊️</span>
+                <h2 class="mode-title">LA CIGÜEÑA</h2>
+                <p>¡Esquiva obstáculos y entrega los paquetes!</p>
+            </a>
+
+            <!-- Infla el Globo -->
+            <a href="balloon.html?mode=baby_shower" class="mode-card">
+                <span class="mode-icon">🎈</span>
+                <h2 class="mode-title">INFLA EL GLOBO</h2>
+                <p>¡Sé el más rápido en inflar tu globo de fiesta!</p>
+            </a>
+        </div>
+
+        <a href="index.html" class="back-btn">← VOLVER AL MENÚ NORMAL</a>
+    </div>
+</body>
+</html>
