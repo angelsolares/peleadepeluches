@@ -867,6 +867,48 @@ input, textarea {
 }
 
 /* ==================================
+   Baby Name Input (Hidden by default)
+   ================================== */
+
+.baby-name-section {
+    display: none;
+    margin: 20px 0;
+    width: 100%;
+}
+
+.baby-name-label {
+    display: block;
+    margin-bottom: 10px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    color: var(--accent);
+    text-align: center;
+}
+
+.baby-name-input {
+    width: 100%;
+    padding: 15px;
+    border-radius: 12px;
+    border: 2px solid var(--secondary);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    text-align: center;
+    outline: none;
+    transition: all 0.3s ease;
+}
+
+.baby-name-input:focus {
+    border-color: var(--primary);
+    box-shadow: var(--glow-pink);
+}
+
+.baby-name-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* ==================================
    Baby Shower Theme (Mobile)
    ================================== */
 
@@ -907,8 +949,29 @@ input, textarea {
 }
 
 /* FORCE show baby name input in baby mode */
+.baby-theme .baby-name-section,
 .baby-theme #baby-name-input-container {
     display: block !important;
+    visibility: visible !important;
+}
+
+.baby-theme .baby-name-label {
+    color: #FF85A1 !important;
+}
+
+.baby-theme .baby-name-input {
+    background: #fff !important;
+    color: #444 !important;
+    border-color: var(--secondary) !important;
+}
+
+.baby-theme .baby-name-input:focus {
+    border-color: #FFC8DD !important;
+    box-shadow: 0 0 15px rgba(255, 200, 221, 0.5) !important;
+}
+
+.baby-theme .baby-name-input::placeholder {
+    color: #aaa !important;
 }
 
 .baby-theme .player-info {

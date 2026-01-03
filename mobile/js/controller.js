@@ -776,7 +776,11 @@ function updateLobbyUI(room) {
         if (elements.babyNameContainer) {
             elements.babyNameContainer.style.display = 'block';
             elements.babyNameContainer.style.visibility = 'visible';
+            elements.babyNameContainer.classList.add('visible');
         }
+        
+        // Update display name placeholder
+        elements.playerDisplayName.textContent = '¿Cuál es tu nombre?';
         
         // FORCE hide character selection - multiple approaches
         if (elements.characterSelectionArea) {
