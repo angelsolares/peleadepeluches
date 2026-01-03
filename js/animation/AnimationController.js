@@ -201,16 +201,24 @@ export class AnimationController {
      * Play an animation by name
      */
     play(actionName, fadeDuration = ANIMATION_CONFIG.fadeDuration.default) {
-        const newAction = this.actions[actionName];
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        let actualActionName = actionName;
+
+        // In baby shower mode, map walk and run to crawling
+        if (isBabyShower && (actionName === AnimationState.WALK || actionName === AnimationState.RUN)) {
+            actualActionName = AnimationState.CRAWLING;
+        }
+
+        const newAction = this.actions[actualActionName];
         if (!newAction) {
-            console.warn(`[AnimationController] Animation not found: ${actionName}`);
+            console.warn(`[AnimationController] Animation not found: ${actualActionName} (original: ${actionName})`);
             return false;
         }
         
         // Don't interrupt if same animation is already playing (except for one-shots)
         if (this.currentAction === newAction && 
             newAction.isRunning() && 
-            !ANIMATION_CONFIG.oneShot.includes(actionName)) {
+            !ANIMATION_CONFIG.oneShot.includes(actualActionName)) {
             return false;
         }
         
@@ -231,33 +239,37 @@ export class AnimationController {
         
         newAction.play();
         this.currentAction = newAction;
-        this.currentActionName = actionName;
+        this.currentActionName = actualActionName;
         
         // Update attacking state
-        if (ANIMATION_CONFIG.oneShot.includes(actionName)) {
+        if (ANIMATION_CONFIG.oneShot.includes(actualActionName)) {
             this.isAttacking = true;
         }
         
         // Fire state change callback
         if (this.onStateChange) {
-            this.onStateChange(actionName, this.previousActionName);
+            this.onStateChange(actualActionName, this.previousActionName);
         }
         
         return true;
     }
-    
+
     /**
-     * Play idle animation (walk paused)
+     * Play idle animation (walk or crawl paused)
      */
     playIdle() {
         if (this.isAttacking) return false;
         
-        if (this.currentActionName !== AnimationState.WALK) {
-            this.play(AnimationState.WALK, ANIMATION_CONFIG.fadeDuration.toIdle);
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const moveState = isBabyShower ? AnimationState.CRAWLING : AnimationState.WALK;
+
+        if (this.currentActionName !== moveState) {
+            this.play(moveState, ANIMATION_CONFIG.fadeDuration.toIdle);
         }
         
-        if (this.actions.walk) {
-            this.actions.walk.paused = true;
+        const action = this.actions[moveState];
+        if (action) {
+            action.paused = true;
         }
         
         this.currentActionName = AnimationState.IDLE;

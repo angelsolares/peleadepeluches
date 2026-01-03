@@ -45,7 +45,8 @@ const ANIMATION_FILES = {
     walk: 'Meshy_AI_Animation_Walking_withSkin.fbx',
     run: 'Meshy_AI_Animation_Running_withSkin.fbx',
     idle: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
-    win: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx'
+    win: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
+    crawling: 'Crawling.fbx'
 };
 
 class TagPlayerEntity {

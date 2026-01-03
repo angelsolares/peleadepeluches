@@ -40,7 +40,8 @@ const ANIMATION_FILES = {
     idle: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
     pull: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx', // Effort/Pulling
     win: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
-    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
+    crawling: 'Crawling.fbx'
 };
 
 class TugPlayerEntity {

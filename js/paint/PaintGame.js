@@ -161,7 +161,8 @@ class PaintGame {
         // Load animations
         const animFiles = {
             walk: 'assets/Meshy_AI_Animation_Walking_withSkin.fbx',
-            run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx'
+            run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx',
+            crawling: 'assets/Crawling.fbx'
         };
 
         for (const [name, path] of Object.entries(animFiles)) {

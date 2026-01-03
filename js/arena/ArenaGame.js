@@ -84,6 +84,7 @@ const ANIMATION_FILES = {
     taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
     grab: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx',
     throw: 'Meshy_AI_Animation_Throw_withSkin.fbx',
+    crawling: 'Crawling.fbx',
     // Additional animations for escape sequence
     uppercut: 'Meshy_AI_Animation_Left_Uppercut_from_Guard_withSkin.fbx',
     knockdown: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'

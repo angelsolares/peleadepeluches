@@ -30,7 +30,8 @@ const CHARACTER_MODELS = {
 
 // Animation Files
 const ANIMATION_FILES = {
-    flying: 'assets/Flying.fbx'
+    flying: 'assets/Flying.fbx',
+    crawling: 'assets/Crawling.fbx'
 };
 
 // Game Configuration
@@ -611,9 +612,19 @@ class FlappyGame {
             loadingText.textContent = 'Cargando animaciones...';
             progressFill.style.width = '70%';
             
+            const isBabyShower = document.documentElement.classList.contains('baby-theme');
+            
             const flyingAnim = await fbxLoader.loadAsync(ANIMATION_FILES.flying);
             if (flyingAnim.animations && flyingAnim.animations.length > 0) {
                 this.animations.flying = flyingAnim.animations[0];
+            }
+
+            // Load crawling animation if in baby shower mode
+            if (isBabyShower) {
+                const crawlingAnim = await fbxLoader.loadAsync(ANIMATION_FILES.crawling);
+                if (crawlingAnim.animations && crawlingAnim.animations.length > 0) {
+                    this.animations.flying = crawlingAnim.animations[0]; // Override flying with crawling
+                }
             }
             
             progressFill.style.width = '100%';

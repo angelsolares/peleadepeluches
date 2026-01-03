@@ -57,7 +57,7 @@ const CHARACTER_MODELS = {
 const ANIMATION_FILES = {
     walk: 'assets/Meshy_AI_Animation_Walking_withSkin.fbx',
     run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx',
-    crawling: 'assets/@Crawling.fbx'
+    crawling: 'assets/Crawling.fbx'
 };
 
 /**
@@ -112,8 +112,12 @@ class RacePlayerEntity {
     }
     
     playAnimation(name, forceRestart = false) {
-        // Map 'idle' to 'walk' with slow speed since we don't have idle animation
-        const actualName = name === 'idle' ? 'walk' : name;
+        // Map 'idle' to 'walk' or 'crawling' with slow speed since we don't have idle animation
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        let actualName = name;
+        if (name === 'idle') {
+            actualName = isBabyShower ? 'crawling' : 'walk';
+        }
         
         if (!this.mixer || !this.animations[actualName]) return;
         
@@ -146,13 +150,13 @@ class RacePlayerEntity {
         } else if (name === 'walk') {
             newAction.timeScale = 1.0;
         } else if (name === 'idle') {
-            newAction.timeScale = 0.3; // Very slow walk = idle
+            newAction.timeScale = 0.3; // Very slow walk/crawl = idle
         }
         
         this.currentAction = newAction;
         this.currentAnimation = name;
     }
-    
+
     update(delta) {
         if (this.mixer) {
             this.mixer.update(delta);
@@ -164,16 +168,18 @@ class RacePlayerEntity {
 
         if (this.speed < RACE_CONFIG.IDLE_THRESHOLD) {
             targetAnimation = 'idle';
+        } else if (isBabyShower) {
+            // In baby shower mode, use crawling for everything except idle
+            targetAnimation = 'crawling';
         } else if (this.speed < RACE_CONFIG.WALK_THRESHOLD) {
-            // Add hysteresis: if currently running, stay running until speed drops more
-            const runAnim = isBabyShower ? 'crawling' : 'run';
-            if (this.currentAnimation === runAnim && this.speed > RACE_CONFIG.WALK_THRESHOLD * 0.7) {
-                targetAnimation = runAnim;
+            // Normal mode hysteresis
+            if (this.currentAnimation === 'run' && this.speed > RACE_CONFIG.WALK_THRESHOLD * 0.7) {
+                targetAnimation = 'run';
             } else {
                 targetAnimation = 'walk';
             }
         } else {
-            targetAnimation = isBabyShower ? 'crawling' : 'run';
+            targetAnimation = 'run';
         }
         
         // Only change animation if target is different

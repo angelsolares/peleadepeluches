@@ -645,7 +645,8 @@ const ANIMATION_FILES = {
     hit: 'Meshy_AI_Animation_Hit_Reaction_1_withSkin.fbx',
     fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
     block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
-    taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx'
+    taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
+    crawling: 'Crawling.fbx'
 };
 
 // Available character models
