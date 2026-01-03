@@ -59,6 +59,11 @@ class PaintGame {
     }
 
     async init() {
+        // Apply baby theme if needed
+        if (window.location.search.includes('mode=baby_shower')) {
+            document.documentElement.classList.add('baby-theme');
+        }
+
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x050510);
         
@@ -134,8 +139,12 @@ class PaintGame {
     async loadAssets() {
         const loader = new FBXLoader();
         
-        // Load all character models
-        const modelPromises = Object.entries(CHARACTER_MODELS).map(async ([id, data]) => {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+
+        // Load only needed character models
+        const charactersToLoad = isBabyShower ? [['baby', CHARACTER_MODELS['baby']]] : Object.entries(CHARACTER_MODELS);
+        
+        const modelPromises = charactersToLoad.map(async ([id, data]) => {
             try {
                 const model = await loader.loadAsync(`assets/${data.file}`);
                 this.baseModels[id] = model;

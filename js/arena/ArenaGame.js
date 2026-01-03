@@ -55,6 +55,7 @@ const ARENA_CONFIG = {
 
 // Character models (same as main game)
 const CHARACTER_MODELS = {
+    baby: { name: 'Bebé', file: 'bebe.fbx', thumbnail: '👶' },
     edgar: { name: 'Edgar', file: 'Edgar_Model.fbx', thumbnail: '👦' },
     isabella: { name: 'Isabella', file: 'Isabella_Model.fbx', thumbnail: '👧' },
     jesus: { name: 'Jesus', file: 'Jesus_Model.fbx', thumbnail: '🧔' },
@@ -330,6 +331,14 @@ class ArenaGame {
     }
     
     async init() {
+        // Apply baby theme if needed
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        if (isBabyShower) {
+            this.selectedCharacter = 'baby';
+        } else {
+            this.selectedCharacter = 'edgar';
+        }
+
         // Create scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0a0a15);
@@ -771,19 +780,20 @@ class ArenaGame {
         document.body.appendChild(muteBtn);
     }
     
-    async loadCharacterWithAnimations(characterId = 'edgar') {
+    async loadCharacterWithAnimations(characterId = null) {
         const loader = new FBXLoader();
         const totalFiles = Object.keys(ANIMATION_FILES).length + 1;
         let loadedCount = 0;
         
-        const characterConfig = CHARACTER_MODELS[characterId];
+        const charId = characterId || this.selectedCharacter;
+        const characterConfig = CHARACTER_MODELS[charId];
         
         try {
             this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             
             // Load character model
             this.baseModel = await this.loadFBX(loader, `assets/${characterConfig.file}`);
-            this.characterModelCache[characterId] = this.baseModel;
+            this.characterModelCache[charId] = this.baseModel;
             loadedCount++;
             
             // Load animations

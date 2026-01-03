@@ -410,6 +410,11 @@ class FlappyGame {
     }
     
     async init() {
+        // Apply baby theme if needed
+        if (window.location.search.includes('mode=baby_shower')) {
+            document.documentElement.classList.add('baby-theme');
+        }
+
         console.log('[FlappyGame] Initializing...');
         
         this.setupScene();
@@ -579,12 +584,17 @@ class FlappyGame {
         const fbxLoader = new FBXLoader();
         
         try {
-            // Load all character models
+            const isBabyShower = document.documentElement.classList.contains('baby-theme');
+
+            // Load only needed character models
+            const characterKeys = isBabyShower ? ['baby'] : Object.keys(CHARACTER_MODELS);
             let progress = 0;
-            const totalModels = Object.keys(CHARACTER_MODELS).length;
+            const totalModels = characterKeys.length;
             
-            for (const key in CHARACTER_MODELS) {
+            for (const key of characterKeys) {
                 const charInfo = CHARACTER_MODELS[key];
+                if (!charInfo) continue;
+
                 loadingText.textContent = `Cargando ${charInfo.name}...`;
                 
                 const model = await fbxLoader.loadAsync(charInfo.path);

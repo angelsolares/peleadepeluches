@@ -18,11 +18,13 @@ let VFXManager = null;
 
 // Game mode - set directly from menu.html selection
 let selectedGameMode = GAME_MODES.SMASH;
+let selectedCharacter = 'edgar';
 
 // Apply baby theme if needed
 if (window.location.search.includes('mode=baby_shower')) {
     document.documentElement.classList.add('baby-theme');
     CONFIG.BABY_SHOWER_MODE = true;
+    selectedCharacter = 'baby'; // Force baby model in Baby Shower mode
 }
 
 // SFX Manager will be loaded dynamically
@@ -643,6 +645,11 @@ const ANIMATION_FILES = {
 
 // Available character models
 const CHARACTER_MODELS = {
+    baby: {
+        name: 'Bebé',
+        file: 'bebe.fbx',
+        thumbnail: '👶'
+    },
     edgar: {
         name: 'Edgar',
         file: 'Edgar_Model.fbx',
@@ -715,8 +722,8 @@ const CHARACTER_MODELS = {
     }
 };
 
-// Currently selected character (for local/host)
-let selectedCharacter = 'edgar';
+// Currently selected character (initialized at top)
+// selectedCharacter is defined at the beginning of the file
 
 // Cache of loaded character models (for multiplayer with different characters)
 const characterModelCache = {};

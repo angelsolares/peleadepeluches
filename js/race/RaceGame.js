@@ -226,6 +226,11 @@ class RaceGame {
     }
     
     async init() {
+        // Apply baby theme if needed
+        if (window.location.search.includes('mode=baby_shower')) {
+            document.documentElement.classList.add('baby-theme');
+        }
+
         this.setupRenderer();
         this.setupScene();
         this.setupCamera();
@@ -487,14 +492,18 @@ class RaceGame {
         const progressFill = document.getElementById('progress-fill');
         const loadingText = document.getElementById('loading-text');
         
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         try {
-            // Load all character models
-            const characterKeys = Object.keys(CHARACTER_MODELS);
+            // Load only needed character models
+            const characterKeys = isBabyShower ? ['baby'] : Object.keys(CHARACTER_MODELS);
             const totalItems = characterKeys.length + Object.keys(ANIMATION_FILES).length;
             let loadedItems = 0;
             
             for (const key of characterKeys) {
                 const charInfo = CHARACTER_MODELS[key];
+                if (!charInfo) continue;
+
                 loadingText.textContent = `Cargando ${charInfo.name}...`;
                 
                 try {
