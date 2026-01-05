@@ -974,8 +974,10 @@ body {
 .baby-theme .tournament-round-display,
 .baby-theme .camera-label,
 .baby-theme .cam-text,
-.baby-theme .waiting-text {
-    color: #666 !important;
+.baby-theme .waiting-text,
+.baby-theme .rounds-label {
+    color: #444 !important; /* Darker grey for much better contrast */
+    font-weight: 600;
 }
 
 .baby-theme .key,
@@ -986,7 +988,7 @@ body {
 .baby-theme .camera-btn {
     background: #fff !important;
     border: 2px solid var(--primary-color) !important;
-    color: #FF85A1 !important;
+    color: #FF5C8A !important; /* Darker pink for text */
     box-shadow: 0 3px 0 #FFC8DD, var(--glow-pink) !important;
     text-shadow: none !important;
 }
@@ -1007,6 +1009,11 @@ body {
     border: 2px solid var(--secondary-color) !important;
 }
 
+.baby-theme #room-code-overlay .url {
+    color: #0077b6 !important; /* Darker blue for links */
+    font-weight: bold;
+}
+
 .baby-theme .player-hud {
     background: rgba(255, 255, 255, 0.8);
     border: 2px solid var(--secondary-color);
@@ -1015,12 +1022,12 @@ body {
 
 .baby-theme .player-name,
 .baby-theme .position-name {
-    color: #444 !important;
+    color: #333 !important; /* Almost black for names */
 }
 
 .baby-theme .player-damage {
     background: #fff;
-    color: #555;
+    color: #333;
     border-color: var(--secondary-color);
 }
 
@@ -1029,20 +1036,21 @@ body {
 }
 
 .baby-theme #loading-text {
-    color: #888;
+    color: #555;
 }
 
 .baby-theme .state-bar {
-    background: rgba(255, 255, 255, 0.9) !important;
-    border: 2px solid var(--secondary-color) !important;
-    color: #666 !important;
-    box-shadow: 0 0 20px rgba(162, 210, 255, 0.4) !important;
+    background: #fff !important; /* Solid white for background */
+    border: 3px solid var(--secondary-color) !important;
+    color: #444 !important; /* Dark text */
+    box-shadow: 0 5px 25px rgba(162, 210, 255, 0.5) !important;
 }
 
 .baby-theme #room-code-display,
 .baby-theme .room-code {
-    color: #FF85A1 !important;
-    text-shadow: 0 0 10px rgba(255, 133, 161, 0.3) !important;
+    color: #FF5C8A !important; /* Darker pink */
+    text-shadow: none !important;
+    font-weight: 900;
 }
 
 .baby-theme .progress-container,
