@@ -13,11 +13,11 @@ import { SFXManager } from '../audio/SFXManager.js';
 import VFXManager from '../effects/VFXManager.js';
 
 const BALLOON_CONFIG = {
-    CAMERA_HEIGHT: 20,      // Raised camera for massive balloons
-    CAMERA_DISTANCE: 35,    // Pulled back camera
-    PLAYER_SPACING: 15,     // More spacing for giant balloons
-    MAX_BALLOON_SCALE: 12.0, // MASSIVE!
-    MIN_BALLOON_SCALE: 0.05  // Starts tiny
+    CAMERA_HEIGHT: 25,      // Altura para ver mejor los globos gigantes
+    CAMERA_DISTANCE: 70,    // Más lejos para que quepan todos los jugadores (especialmente 8)
+    PLAYER_SPACING: 12,     // Espaciado ajustado para 8 jugadores
+    MAX_BALLOON_SCALE: 12.0, // Tamaño máximo del globo
+    MIN_BALLOON_SCALE: 0.05  // Tamaño inicial
 };
 
 const CHARACTER_MODELS = {
