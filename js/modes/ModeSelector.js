@@ -66,7 +66,8 @@ export const MODE_CONFIG = {
             'Gestión de estamina',
             'Bonus de remontada'
         ],
-        color: '#9966ff'
+        color: '#9966ff',
+        hidden: true
     },
     [GAME_MODES.PAINT]: {
         id: 'paint',
