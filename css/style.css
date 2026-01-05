@@ -1039,10 +1039,25 @@ body {
     color: #555;
 }
 
-.baby-theme .state-bar {
-    background: #fff !important; /* Solid white for background */
+.baby-theme #current-animation {
+    background: #fff !important;
     border: 3px solid var(--secondary-color) !important;
-    color: #444 !important; /* Dark text */
+    box-shadow: 0 5px 25px rgba(162, 210, 255, 0.5) !important;
+}
+
+.baby-theme #current-animation .label {
+    color: #666 !important;
+}
+
+.baby-theme #animation-name {
+    color: #FF5C8A !important; /* Dark pink for contrast */
+    text-shadow: none !important;
+}
+
+.baby-theme .state-bar {
+    background: #fff !important;
+    border: 3px solid var(--secondary-color) !important;
+    color: #444 !important;
     box-shadow: 0 5px 25px rgba(162, 210, 255, 0.5) !important;
 }
 
