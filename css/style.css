@@ -946,10 +946,37 @@ body {
 }
 
 .baby-theme .game-title {
-    background: linear-gradient(135deg, #FF99C8, #A2D2FF);
-    -webkit-background-clip: text;
-    background-clip: text;
-    filter: drop-shadow(0 0 5px rgba(0,0,0,0.1));
+    background: linear-gradient(135deg, #FF5C8A, #4895EF) !important; /* Colores más oscuros para contraste */
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2)) !important;
+    font-weight: 900;
+}
+
+.baby-theme .progress-track {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 3px solid var(--secondary-color) !important;
+    box-shadow: 0 5px 15px rgba(162, 210, 255, 0.3) !important;
+}
+
+.baby-theme .progress-markers {
+    background: rgba(162, 210, 255, 0.1) !important;
+}
+
+.baby-theme .progress-markers::before {
+    background: repeating-linear-gradient(
+        90deg,
+        transparent,
+        transparent 10%,
+        rgba(162, 210, 255, 0.2) 10%,
+        rgba(162, 210, 255, 0.2) 10.5%
+    ) !important;
+}
+
+/* También ajustar la barra de progreso en carreras si es necesario */
+.baby-theme .track-progress-container {
+    background: rgba(255, 255, 255, 0.8) !important;
+    border: 2px solid var(--secondary-color) !important;
 }
 
 .baby-theme .controls-panel,
@@ -1079,12 +1106,20 @@ body {
     background: linear-gradient(90deg, var(--primary-color), var(--secondary-color)) !important;
 }
 
-.baby-theme #race-positions {
-    background: rgba(255, 255, 255, 0.8) !important;
-    border: 2px solid var(--secondary-color) !important;
+.baby-theme #race-positions,
+.baby-theme #race-scoreboard {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 3px solid var(--secondary-color) !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05), var(--glow-cyan) !important;
+}
+
+.baby-theme .scoreboard-title {
+    color: #444 !important;
+    border-bottom: 1px solid rgba(162, 210, 255, 0.3) !important;
 }
 
 .baby-theme .race-position-item {
+    background: rgba(162, 210, 255, 0.05) !important;
     border-bottom: 1px solid rgba(162, 210, 255, 0.3) !important;
 }
 
