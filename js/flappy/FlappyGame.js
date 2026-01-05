@@ -25,7 +25,9 @@ const CHARACTER_MODELS = {
     'mariana': { path: 'assets/Mariana.fbx', color: '#cc66ff', name: 'Mariana' },
     'gabriel': { path: 'assets/Gabriel.fbx', color: '#66ccff', name: 'Gabriel' },
     'sol': { path: 'assets/Sol.fbx', color: '#ffcc00', name: 'Sol' },
-    'yadira': { path: 'assets/Yadira.fbx', color: '#ff6699', name: 'Yadira' }
+    'yadira': { path: 'assets/Yadira.fbx', color: '#ff6699', name: 'Yadira' },
+    'baby': { path: 'assets/bebe.fbx', color: '#A2D2FF', name: 'Bebé' },
+    'ciguenia': { path: 'assets/ciguenia.fbx', color: '#FFFFFF', name: 'Cigüeña' }
 };
 
 // Animation Files
@@ -591,13 +593,19 @@ class FlappyGame {
             const isBabyShower = document.documentElement.classList.contains('baby-theme');
 
             // Load only needed character models
+            // In Baby Shower mode, the 'baby' character uses the 'ciguenia' model
             const characterKeys = isBabyShower ? ['baby'] : Object.keys(CHARACTER_MODELS);
             let progress = 0;
             const totalModels = characterKeys.length;
             
             for (const key of characterKeys) {
-                const charInfo = CHARACTER_MODELS[key];
+                let charInfo = CHARACTER_MODELS[key];
                 if (!charInfo) continue;
+
+                // SPECIAL CASE: In Baby Shower mode for Flappy, we use ciguenia for all babies
+                if (isBabyShower && key === 'baby') {
+                    charInfo = CHARACTER_MODELS['ciguenia'];
+                }
 
                 loadingText.textContent = `Cargando ${charInfo.name}...`;
                 
@@ -612,19 +620,9 @@ class FlappyGame {
             loadingText.textContent = 'Cargando animaciones...';
             progressFill.style.width = '70%';
             
-            const isBabyShower = document.documentElement.classList.contains('baby-theme');
-            
             const flyingAnim = await fbxLoader.loadAsync(ANIMATION_FILES.flying);
             if (flyingAnim.animations && flyingAnim.animations.length > 0) {
                 this.animations.flying = flyingAnim.animations[0];
-            }
-
-            // Load crawling animation if in baby shower mode
-            if (isBabyShower) {
-                const crawlingAnim = await fbxLoader.loadAsync(ANIMATION_FILES.crawling);
-                if (crawlingAnim.animations && crawlingAnim.animations.length > 0) {
-                    this.animations.flying = crawlingAnim.animations[0]; // Override flying with crawling
-                }
             }
             
             progressFill.style.width = '100%';
