@@ -25,7 +25,8 @@ export const MODE_CONFIG = {
             'Sistema de stocks',
             'Vista lateral'
         ],
-        color: '#ff3366'
+        color: '#ff3366',
+        hidden: true
     },
     [GAME_MODES.ARENA]: {
         id: 'arena',
@@ -38,7 +39,8 @@ export const MODE_CONFIG = {
             'Sistema de estamina',
             'Agarres y lanzamientos'
         ],
-        color: '#00ffcc'
+        color: '#00ffcc',
+        hidden: true
     },
     [GAME_MODES.TAG]: {
         id: 'tag',
@@ -149,7 +151,9 @@ class ModeSelector {
             <div class="mode-selector-container">
                 <h1 class="mode-selector-title">SELECCIONA EL MODO</h1>
                 <div class="mode-cards">
-                    ${Object.values(MODE_CONFIG).map(mode => `
+                    ${Object.values(MODE_CONFIG)
+                        .filter(mode => !mode.hidden)
+                        .map(mode => `
                         <div class="mode-card" data-mode="${mode.id}" style="--mode-color: ${mode.color}">
                             <div class="mode-icon">${mode.icon}</div>
                             <h2 class="mode-name">${mode.name}</h2>
