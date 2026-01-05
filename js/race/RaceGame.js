@@ -280,9 +280,12 @@ class RaceGame {
     }
     
     setupScene() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const bgColor = isBabyShower ? 0xFFEFFA : 0x1a1a2e;
+        
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x1a1a2e);
-        this.scene.fog = new THREE.Fog(0x1a1a2e, 50, 150);
+        this.scene.background = new THREE.Color(bgColor);
+        this.scene.fog = new THREE.Fog(bgColor, 50, 150);
     }
     
     setupCamera() {
@@ -316,7 +319,11 @@ class RaceGame {
         this.scene.add(sun);
         
         // Colored accent lights along track
-        const colors = [0x00ff88, 0x00ccff, 0xff6600, 0xff3366];
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const colors = isBabyShower 
+            ? [0xFFC8DD, 0xA2D2FF, 0xFCF6BD, 0xBDB2FF] // Pastel colors
+            : [0x00ff88, 0x00ccff, 0xff6600, 0xff3366]; // Neon colors
+
         for (let i = 0; i < 4; i++) {
             const light = new THREE.PointLight(colors[i], 0.5, 30);
             light.position.set(
@@ -329,10 +336,12 @@ class RaceGame {
     }
     
     createTrack() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         // Ground plane
         const groundGeo = new THREE.PlaneGeometry(50, RACE_CONFIG.TRACK_LENGTH + 40);
         const groundMat = new THREE.MeshStandardMaterial({ 
-            color: 0x2d2d44,
+            color: isBabyShower ? 0xE8F4FF : 0x2d2d44,
             roughness: 0.8
         });
         const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -347,7 +356,7 @@ class RaceGame {
             RACE_CONFIG.TRACK_LENGTH
         );
         const trackMat = new THREE.MeshStandardMaterial({ 
-            color: 0x3d3d5c,
+            color: isBabyShower ? 0xFFFFFF : 0x3d3d5c,
             roughness: 0.6
         });
         const track = new THREE.Mesh(trackGeo, trackMat);
@@ -449,13 +458,22 @@ class RaceGame {
     }
     
     createTrackDecorations() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         // Geometric shapes along the sides
-        const shapes = [
-            { geo: new THREE.OctahedronGeometry(1.5), color: 0x00ff88 },
-            { geo: new THREE.TetrahedronGeometry(1.5), color: 0xff6600 },
-            { geo: new THREE.IcosahedronGeometry(1.2), color: 0x00ccff },
-            { geo: new THREE.DodecahedronGeometry(1.3), color: 0xff3366 }
-        ];
+        const shapes = isBabyShower 
+            ? [
+                { geo: new THREE.SphereGeometry(1.5), color: 0xFFC8DD }, // Pink ball
+                { geo: new THREE.OctahedronGeometry(1.5), color: 0xA2D2FF }, // Blue gem
+                { geo: new THREE.TorusGeometry(1, 0.5), color: 0xFCF6BD }, // Yellow donut
+                { geo: new THREE.IcosahedronGeometry(1.2), color: 0xBDB2FF } // Purple star-like
+            ]
+            : [
+                { geo: new THREE.OctahedronGeometry(1.5), color: 0x00ff88 },
+                { geo: new THREE.TetrahedronGeometry(1.5), color: 0xff6600 },
+                { geo: new THREE.IcosahedronGeometry(1.2), color: 0x00ccff },
+                { geo: new THREE.DodecahedronGeometry(1.3), color: 0xff3366 }
+            ];
         
         for (let z = 10; z < RACE_CONFIG.TRACK_LENGTH; z += 15) {
             const shapeIndex = Math.floor(z / 15) % shapes.length;
@@ -465,8 +483,8 @@ class RaceGame {
             const leftMat = new THREE.MeshStandardMaterial({
                 color: shape.color,
                 emissive: shape.color,
-                emissiveIntensity: 0.2,
-                wireframe: Math.random() > 0.5
+                emissiveIntensity: isBabyShower ? 0.1 : 0.2,
+                wireframe: !isBabyShower && Math.random() > 0.5
             });
             const leftShape = new THREE.Mesh(shape.geo.clone(), leftMat);
             leftShape.position.set(-RACE_CONFIG.TRACK_WIDTH / 2 - 5, 2, z);

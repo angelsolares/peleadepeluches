@@ -952,24 +952,59 @@ body {
     filter: drop-shadow(0 0 5px rgba(0,0,0,0.1));
 }
 
-.baby-theme .controls-panel {
-    background: var(--panel-bg);
-    border: 3px solid var(--secondary-color);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.05), var(--glow-cyan);
-    color: #444;
+.baby-theme .controls-panel,
+.baby-theme #room-code-overlay,
+.baby-theme #camera-selector,
+.baby-theme .camera-selector,
+.baby-theme .scoreboard-label,
+.baby-theme #tournament-hud,
+.baby-theme .room-code-content {
+    background: var(--panel-bg) !important;
+    border: 3px solid var(--secondary-color) !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05), var(--glow-cyan) !important;
+    color: #444 !important;
 }
 
 .baby-theme .controls-panel h3,
 .baby-theme .section-title,
-.baby-theme .key-item {
-    color: #666;
+.baby-theme .key-item,
+.baby-theme #room-code-overlay p,
+.baby-theme #room-code-overlay h2,
+.baby-theme .scoreboard-label,
+.baby-theme .tournament-round-display,
+.baby-theme .camera-label,
+.baby-theme .cam-text,
+.baby-theme .waiting-text {
+    color: #666 !important;
 }
 
-.baby-theme .key {
-    background: #fff;
-    border-color: var(--primary-color);
-    color: #FF85A1;
-    box-shadow: 0 3px 0 #FFC8DD, var(--glow-pink);
+.baby-theme .key,
+.baby-theme .round-btn,
+.baby-theme button,
+.baby-theme #start-race-btn,
+.baby-theme #start-game-btn,
+.baby-theme .camera-btn {
+    background: #fff !important;
+    border: 2px solid var(--primary-color) !important;
+    color: #FF85A1 !important;
+    box-shadow: 0 3px 0 #FFC8DD, var(--glow-pink) !important;
+    text-shadow: none !important;
+}
+
+.baby-theme .round-btn.selected,
+.baby-theme .camera-btn.active {
+    background: var(--primary-color) !important;
+    color: #fff !important;
+    border-color: var(--primary-color) !important;
+}
+
+.baby-theme .camera-btn.active .cam-text {
+    color: #fff !important;
+}
+
+.baby-theme .qr-container {
+    background: #fff !important;
+    border: 2px solid var(--secondary-color) !important;
 }
 
 .baby-theme .player-hud {
@@ -978,13 +1013,15 @@ body {
     box-shadow: 0 5px 15px rgba(0,0,0,0.05);
 }
 
-.baby-theme .player-name {
-    color: #444;
+.baby-theme .player-name,
+.baby-theme .position-name {
+    color: #444 !important;
 }
 
 .baby-theme .player-damage {
     background: #fff;
     color: #555;
+    border-color: var(--secondary-color);
 }
 
 .baby-theme #loading-screen {
@@ -994,6 +1031,47 @@ body {
 .baby-theme #loading-text {
     color: #888;
 }
+
+.baby-theme .state-bar {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 2px solid var(--secondary-color) !important;
+    color: #666 !important;
+    box-shadow: 0 0 20px rgba(162, 210, 255, 0.4) !important;
+}
+
+.baby-theme #room-code-display,
+.baby-theme .room-code {
+    color: #FF85A1 !important;
+    text-shadow: 0 0 10px rgba(255, 133, 161, 0.3) !important;
+}
+
+.baby-theme .progress-container,
+.baby-theme .track-progress-bg {
+    background: rgba(255, 255, 255, 0.5) !important;
+    border: 2px solid var(--secondary-color) !important;
+}
+
+.baby-theme .progress-bar-fill,
+.baby-theme .track-progress-fill {
+    background: linear-gradient(90deg, var(--primary-color), var(--secondary-color)) !important;
+}
+
+.baby-theme #race-positions {
+    background: rgba(255, 255, 255, 0.8) !important;
+    border: 2px solid var(--secondary-color) !important;
+}
+
+.baby-theme .race-position-item {
+    border-bottom: 1px solid rgba(162, 210, 255, 0.3) !important;
+}
+
+.baby-theme .position-number {
+    color: #666 !important;
+}
+
+.baby-theme .position-number.first { color: #FFB703 !important; }
+.baby-theme .position-number.second { color: #8E9AAF !important; }
+.baby-theme .position-number.third { color: #CB997E !important; }
 
 /* Responsive adjustments for tournament UI */
 @media (max-width: 768px) {

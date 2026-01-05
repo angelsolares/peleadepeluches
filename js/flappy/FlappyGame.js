@@ -252,13 +252,15 @@ class FlappyPlayerEntity {
         const labelDiv = document.createElement('div');
         labelDiv.className = 'player-name-label';
         labelDiv.textContent = this.name;
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         labelDiv.style.cssText = `
             font-family: 'Orbitron', monospace;
             font-size: 14px;
             font-weight: bold;
-            color: ${this.color};
-            text-shadow: 0 0 5px ${this.color}, 0 0 10px rgba(0,0,0,0.8);
-            background: rgba(0, 0, 0, 0.5);
+            color: ${isBabyShower ? '#666' : this.color};
+            text-shadow: ${isBabyShower ? 'none' : `0 0 5px ${this.color}, 0 0 10px rgba(0,0,0,0.8)`};
+            background: ${isBabyShower ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.5)'};
             padding: 2px 8px;
             border-radius: 4px;
             white-space: nowrap;
@@ -414,7 +416,8 @@ class FlappyGame {
     
     async init() {
         // Apply baby theme if needed
-        if (window.location.search.includes('mode=baby_shower')) {
+        const isBabyShower = window.location.search.includes('mode=baby_shower');
+        if (isBabyShower) {
             document.documentElement.classList.add('baby-theme');
             const gameTitle = document.querySelector('.game-title');
             if (gameTitle) gameTitle.innerHTML = 'EL VUELO DE LA CIGÜEÑA';
@@ -423,26 +426,13 @@ class FlappyGame {
 
         console.log('[FlappyGame] Initializing...');
         
-        this.setupScene();
-        this.setupLights();
-        await this.loadAssets();
-        this.setupSocket();
-        this.animate();
-        
-        console.log('[FlappyGame] Initialization complete');
-    }
-    
-    setupScene() {
-        const container = document.getElementById('game-container');
-        
-        // Scene
+        const bgColor = isBabyShower ? 0xFFEFFA : 0x87CEEB;
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        this.scene.background = new THREE.Color(bgColor);
         
         // Add fog for depth
-        this.scene.fog = new THREE.Fog(0x87CEEB, 30, 80);
+        this.scene.fog = new THREE.Fog(bgColor, 30, 80);
         
-        // Camera
         this.camera = new THREE.PerspectiveCamera(
             60,
             window.innerWidth / window.innerHeight,
@@ -467,20 +457,35 @@ class FlappyGame {
         this.labelRenderer.domElement.style.position = 'absolute';
         this.labelRenderer.domElement.style.top = '0';
         this.labelRenderer.domElement.style.pointerEvents = 'none';
-        container.appendChild(this.labelRenderer.domElement);
+        document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
+
+        this.setupLights();
+        await this.loadAssets();
+        this.setupSocket();
         
         // Handle resize
         window.addEventListener('resize', () => this.onResize());
         
         // Create environment
         this.createEnvironment();
+        
+        this.animate();
+        
+        console.log('[FlappyGame] Initialization complete');
+    }
+    
+    setupScene() {
+        // Obsoleto - Movido a init() para manejo de temas
     }
     
     createEnvironment() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         // Ground
         const groundGeometry = new THREE.PlaneGeometry(200, 20);
+        const groundColor = isBabyShower ? 0xFFFFFF : 0x228B22;
         const groundMaterial = new THREE.MeshStandardMaterial({
-            color: 0x228B22,
+            color: groundColor,
             roughness: 0.8
         });
         this.ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -489,10 +494,11 @@ class FlappyGame {
         this.ground.receiveShadow = true;
         this.scene.add(this.ground);
         
-        // Ground details (grass lines)
+        // Ground details (grass lines or pastel lines)
         const grassGeometry = new THREE.PlaneGeometry(200, 0.5);
+        const grassColor = isBabyShower ? 0xE8F4FF : 0x32CD32;
         const grassMaterial = new THREE.MeshStandardMaterial({
-            color: 0x32CD32,
+            color: grassColor,
             roughness: 0.9
         });
         for (let i = 0; i < 5; i++) {
@@ -517,9 +523,10 @@ class FlappyGame {
         
         // Sun
         const sunGeometry = new THREE.SphereGeometry(3, 32, 32);
+        const sunColor = isBabyShower ? 0xFFC8DD : 0xFFFF00;
         const sunMaterial = new THREE.MeshBasicMaterial({
-            color: 0xFFFF00,
-            emissive: 0xFFFF00
+            color: sunColor,
+            emissive: sunColor
         });
         const sun = new THREE.Mesh(sunGeometry, sunMaterial);
         sun.position.set(50, 30, -30);
@@ -566,8 +573,10 @@ class FlappyGame {
     }
     
     setupLights() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         // Ambient light
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        const ambient = new THREE.AmbientLight(0xffffff, isBabyShower ? 0.8 : 0.6);
         this.scene.add(ambient);
         
         // Directional light (sun)
@@ -579,7 +588,9 @@ class FlappyGame {
         this.scene.add(directional);
         
         // Hemisphere light for natural sky lighting
-        const hemisphere = new THREE.HemisphereLight(0x87CEEB, 0x228B22, 0.4);
+        const skyColor = isBabyShower ? 0xFFEFFA : 0x87CEEB;
+        const groundColor = isBabyShower ? 0xFFFFFF : 0x228B22;
+        const hemisphere = new THREE.HemisphereLight(skyColor, groundColor, 0.4);
         this.scene.add(hemisphere);
     }
     
@@ -1168,8 +1179,11 @@ class FlappyGame {
             GAME_CONFIG.pipeWidth
         );
         
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const pipeColor = isBabyShower ? 0xA2D2FF : 0x2ECC71;
+        
         const pipeMaterial = new THREE.MeshStandardMaterial({
-            color: 0x2ECC71,
+            color: pipeColor,
             roughness: 0.5,
             metalness: 0.2
         });
@@ -1499,4 +1513,3 @@ class FlappyGame {
 document.addEventListener('DOMContentLoaded', () => {
     new FlappyGame();
 });
-

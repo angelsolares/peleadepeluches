@@ -230,9 +230,12 @@ class TagGame {
     }
 
     setupScene() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const bgColor = isBabyShower ? 0xFFEFFA : 0x0a0a15;
+        
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0a0a15);
-        this.scene.fog = new THREE.Fog(0x0a0a15, 20, 50);
+        this.scene.background = new THREE.Color(bgColor);
+        this.scene.fog = new THREE.Fog(bgColor, 20, 50);
 
         this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.camera.position.set(0, TAG_CONFIG.CAMERA_HEIGHT, TAG_CONFIG.CAMERA_HEIGHT / Math.tan(TAG_CONFIG.CAMERA_ANGLE));
@@ -261,15 +264,17 @@ class TagGame {
         if (document.getElementById('arena-name-styles')) return;
         const style = document.createElement('style');
         style.id = 'arena-name-styles';
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         style.textContent = `
             .arena-player-name-label {
-                color: white;
+                color: ${isBabyShower ? '#666' : 'white'};
                 font-family: 'Orbitron', sans-serif;
                 font-size: 12px;
                 font-weight: bold;
-                text-shadow: 0 0 10px rgba(0,0,0,0.8);
+                text-shadow: ${isBabyShower ? 'none' : '0 0 10px rgba(0,0,0,0.8)'};
                 padding: 4px 12px;
-                background: rgba(0,0,0,0.6);
+                background: ${isBabyShower ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)'};
                 border-radius: 10px;
                 border: 2px solid currentColor;
                 white-space: nowrap;
@@ -281,7 +286,10 @@ class TagGame {
     }
 
     setupLights() {
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const ambientIntensity = isBabyShower ? 0.8 : 0.6;
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, ambientIntensity);
         this.scene.add(ambientLight);
 
         const sunLight = new THREE.DirectionalLight(0xffffff, 1);
@@ -293,9 +301,12 @@ class TagGame {
     }
 
     createFloor() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const floorColor = isBabyShower ? 0xFFFFFF : 0x1a1a2e;
+        
         const geometry = new THREE.PlaneGeometry(TAG_CONFIG.MAP_SIZE, TAG_CONFIG.MAP_SIZE);
         const material = new THREE.MeshPhongMaterial({ 
-            color: 0x1a1a2e,
+            color: floorColor,
             side: THREE.DoubleSide
         });
         const floor = new THREE.Mesh(geometry, material);
@@ -304,7 +315,13 @@ class TagGame {
         this.scene.add(floor);
 
         // Add grid helper
-        const grid = new THREE.GridHelper(TAG_CONFIG.MAP_SIZE, 20, 0xff3366, 0x333333);
+        const grid = new THREE.GridHelper(
+            TAG_CONFIG.MAP_SIZE, 
+            20, 
+            isBabyShower ? 0xFFC8DD : 0xff3366, 
+            isBabyShower ? 0xE8F4FF : 0x333333
+        );
+        grid.position.y = 0.01;
         this.scene.add(grid);
     }
 

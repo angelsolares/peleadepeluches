@@ -60,15 +60,17 @@ class PaintGame {
 
     async init() {
         // Apply baby theme if needed
-        if (window.location.search.includes('mode=baby_shower')) {
+        const isBabyShower = window.location.search.includes('mode=baby_shower');
+        if (isBabyShower) {
             document.documentElement.classList.add('baby-theme');
             const gameTitle = document.querySelector('.game-title');
             if (gameTitle) gameTitle.innerHTML = 'PINTA EL CUARTO';
             document.title = 'Pinta el Cuarto - Baby Shower';
         }
 
+        const bgColor = isBabyShower ? 0xFFEFFA : 0x050510;
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050510);
+        this.scene.background = new THREE.Color(bgColor);
         
         this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
         this.camera.position.set(0, PAINT_CONFIG.CAMERA_HEIGHT, PAINT_CONFIG.CAMERA_HEIGHT * 0.8);
@@ -97,7 +99,10 @@ class PaintGame {
     }
 
     setupLights() {
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const ambientIntensity = isBabyShower ? 0.8 : 0.6;
+        
+        const ambient = new THREE.AmbientLight(0xffffff, ambientIntensity);
         this.scene.add(ambient);
         
         const sun = new THREE.DirectionalLight(0xffffff, 1);
@@ -107,6 +112,8 @@ class PaintGame {
     }
 
     createFloor() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         // Create dynamic texture for the floor
         this.gridCanvas = document.createElement('canvas');
         this.gridCanvas.width = PAINT_CONFIG.GRID_SIZE;
@@ -114,7 +121,7 @@ class PaintGame {
         this.gridCtx = this.gridCanvas.getContext('2d');
         
         // Initial state
-        this.gridCtx.fillStyle = '#1a1a2e';
+        this.gridCtx.fillStyle = isBabyShower ? '#ffffff' : '#1a1a2e';
         this.gridCtx.fillRect(0, 0, this.gridCanvas.width, this.gridCanvas.height);
         
         this.gridTexture = new THREE.CanvasTexture(this.gridCanvas);
@@ -134,7 +141,8 @@ class PaintGame {
         this.scene.add(floor);
 
         // Grid lines (optional visual)
-        const gridHelper = new THREE.GridHelper(PAINT_CONFIG.WORLD_SIZE, PAINT_CONFIG.GRID_SIZE, 0x444444, 0x222222);
+        const gridColor = isBabyShower ? 0xE8F4FF : 0x444444;
+        const gridHelper = new THREE.GridHelper(PAINT_CONFIG.WORLD_SIZE, PAINT_CONFIG.GRID_SIZE, gridColor, gridColor);
         gridHelper.position.y = 0.01;
         this.scene.add(gridHelper);
     }

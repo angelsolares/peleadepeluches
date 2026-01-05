@@ -251,28 +251,18 @@ class BalloonGame {
 
     async init() {
         // Apply baby theme if needed
-        if (window.location.search.includes('mode=baby_shower')) {
+        const isBabyShower = window.location.search.includes('mode=baby_shower');
+        if (isBabyShower) {
             document.documentElement.classList.add('baby-theme');
             const gameTitle = document.querySelector('.game-title');
             if (gameTitle) gameTitle.innerHTML = 'INFLA EL BIBERÓN';
             document.title = 'Infla el Biberón - Baby Shower';
         }
 
-        this.setupScene();
-        this.setupLights();
-        this.createArena();
-        
-        await this.loadAssets();
-        this.connectToServer();
-        this.animate();
-        
-        window.addEventListener('resize', () => this.onWindowResize());
-    }
-
-    setupScene() {
+        const bgColor = isBabyShower ? 0xFFEFFA : 0x0a0a15;
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0a0a15);
-        this.scene.fog = new THREE.Fog(0x0a0a15, 50, 200); // Increased fog distance
+        this.scene.background = new THREE.Color(bgColor);
+        this.scene.fog = new THREE.Fog(bgColor, 50, 200);
 
         this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000); // Increased far plane
         this.camera.position.set(0, BALLOON_CONFIG.CAMERA_HEIGHT, BALLOON_CONFIG.CAMERA_DISTANCE);
@@ -306,10 +296,22 @@ class BalloonGame {
             display: none;
         `;
         document.body.appendChild(this.timerElement);
+
+        this.setupLights();
+        this.createArena();
+        
+        await this.loadAssets();
+        this.connectToServer();
+        this.animate();
+        
+        window.addEventListener('resize', () => this.onWindowResize());
     }
 
     setupLights() {
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const ambientIntensity = isBabyShower ? 0.8 : 0.6;
+        
+        this.scene.add(new THREE.AmbientLight(0xffffff, ambientIntensity));
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(10, 20, 10);
         directionalLight.castShadow = true;
@@ -322,16 +324,21 @@ class BalloonGame {
     }
 
     createArena() {
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        
         // Party Floor
         const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshPhongMaterial({ color: 0x1a1a2e });
+        const floorColor = isBabyShower ? 0xFFFFFF : 0x1a1a2e;
+        const floorMat = new THREE.MeshPhongMaterial({ color: floorColor });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
         floor.receiveShadow = true;
         this.scene.add(floor);
 
         // Grid lines for party look
-        const grid = new THREE.GridHelper(100, 20, 0x4444ff, 0x222244);
+        const gridColor1 = isBabyShower ? 0xA2D2FF : 0x4444ff;
+        const gridColor2 = isBabyShower ? 0xE8F4FF : 0x222244;
+        const grid = new THREE.GridHelper(100, 20, gridColor1, gridColor2);
         grid.position.y = 0.05;
         this.scene.add(grid);
     }
