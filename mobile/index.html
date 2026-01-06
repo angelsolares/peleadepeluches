@@ -314,6 +314,36 @@
                     <span>¡Presiona repetidamente para inflar tu globo!</span>
                 </div>
             </div>
+
+            <!-- Trivia Controller (hidden by default) -->
+            <div id="trivia-controls" class="trivia-controls" style="display: none;">
+                <div class="trivia-info">
+                    <span class="trivia-label">❓ ¡RESPONDE!</span>
+                </div>
+                <div class="trivia-options">
+                    <button class="trivia-btn trivia-btn-a" data-answer="a">A</button>
+                    <button class="trivia-btn trivia-btn-b" data-answer="b">B</button>
+                    <button class="trivia-btn trivia-btn-c" data-answer="c">C</button>
+                    <button class="trivia-btn trivia-btn-d" data-answer="d">D</button>
+                </div>
+                <div class="trivia-hint">
+                    <span>¡Selecciona la respuesta correcta lo más rápido posible!</span>
+                </div>
+            </div>
+
+            <!-- Puzzle/Scramble Controller (hidden by default) -->
+            <div id="puzzle-controls" class="puzzle-controls" style="display: none;">
+                <div class="puzzle-info">
+                    <span class="puzzle-label">🧩 ¡DESCIFRA!</span>
+                </div>
+                <div class="puzzle-input-area">
+                    <input type="text" id="puzzle-input" class="puzzle-input" placeholder="Escribe aquí..." autocomplete="off" autocapitalize="characters">
+                    <button id="puzzle-send-btn" class="puzzle-send-btn">ENVIAR</button>
+                </div>
+                <div class="puzzle-hint">
+                    <span>¡Escribe la palabra correcta y presiona enviar!</span>
+                </div>
+            </div>
         </div>
         
         <!-- Game Over Overlay -->

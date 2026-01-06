@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Trivia - Pelea de Peluches</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/arena.css"> <!-- Reusing arena styles for HUD -->
+    <style>
+        :root {
+            --baby-pink: #FFC8DD;
+            --baby-blue: #A2D2FF;
+            --baby-yellow: #FCF6BD;
+        }
+
+        body.baby-theme {
+            background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
+            color: #555;
+            overflow: hidden;
+        }
+
+        #trivia-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .question-card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 30px;
+            padding: 40px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            max-width: 900px;
+            width: 100%;
+            text-align: center;
+            border: 8px solid var(--baby-blue);
+            margin-bottom: 30px;
+        }
+
+        .question-text {
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            color: #FF85A1;
+            font-weight: 900;
+        }
+
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            width: 100%;
+        }
+
+        .option-item {
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            font-size: 1.5rem;
+            border: 4px solid #eee;
+            display: flex;
+            align-items: center;
+        }
+
+        .option-letter {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-weight: bold;
+            color: white;
+            font-size: 1.5rem;
+        }
+
+        .letter-a { background-color: #FF99C8; }
+        .letter-b { background-color: #A2D2FF; }
+        .letter-c { background-color: #FCF6BD; color: #888; }
+        .letter-d { background-color: #D0F4DE; color: #888; }
+
+        #timer-bar {
+            width: 100%;
+            height: 20px;
+            background: #eee;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 30px;
+        }
+
+        #timer-fill {
+            height: 100%;
+            background: var(--baby-pink);
+            width: 100%;
+            transition: width 0.1s linear;
+        }
+
+        #ranking-panel {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 20px;
+            border-radius: 20px;
+            width: 250px;
+            border: 4px solid var(--baby-yellow);
+        }
+
+        .rank-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="baby-theme">
+    <div id="trivia-container">
+        <div id="ranking-panel">
+            <h3 style="text-align: center; margin-bottom: 15px;">TOP BEBÉS 👶</h3>
+            <div id="ranking-list">
+                <!-- Players will be listed here -->
+            </div>
+        </div>
+
+        <div class="question-card">
+            <div id="question-category" style="color: #888; margin-bottom: 10px; font-weight: bold;">TRIVIA DE BEBÉS</div>
+            <div id="question-text" class="question-text">¿Esperando pregunta...?</div>
+            
+            <div class="options-grid">
+                <div class="option-item">
+                    <div class="option-letter letter-a">A</div>
+                    <div id="option-a-text">Opción A</div>
+                </div>
+                <div class="option-item">
+                    <div class="option-letter letter-b">B</div>
+                    <div id="option-b-text">Opción B</div>
+                </div>
+                <div class="option-item">
+                    <div class="option-letter letter-c">C</div>
+                    <div id="option-c-text">Opción C</div>
+                </div>
+                <div class="option-item">
+                    <div class="option-letter letter-d">D</div>
+                    <div id="option-d-text">Opción D</div>
+                </div>
+            </div>
+
+            <div id="timer-bar">
+                <div id="timer-fill"></div>
+            </div>
+        </div>
+
+        <div id="players-answered" style="font-weight: bold; font-size: 1.2rem; color: #888;">
+            Respondieron: <span id="answered-count">0</span> / <span id="total-players">0</span>
+        </div>
+    </div>
+
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Audio Managers -->
+    <script src="js/audio/BGMManager.js"></script>
+    <script src="js/audio/SFXManager.js"></script>
+    
+    <script type="module" src="js/baby_shower/TriviaGame.js"></script>
+</body>
+</html>
+

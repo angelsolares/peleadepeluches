@@ -18,6 +18,9 @@ import TagStateManager from './tagState.js';
 import TugStateManager from './tugState.js';
 import PaintStateManager from './paintState.js';
 import BalloonStateManager from './balloonState.js';
+import TriviaStateManager from './triviaState.js';
+import WordPuzzleStateManager from './wordPuzzleState.js';
+import MazeStateManager from './mazeState.js';
 
 // ES Module dirname support
 const __filename = fileURLToPath(import.meta.url);
@@ -64,6 +67,9 @@ const tagStateManager = new TagStateManager(lobbyManager);
 const tugStateManager = new TugStateManager(lobbyManager);
 const paintStateManager = new PaintStateManager(lobbyManager);
 const balloonStateManager = new BalloonStateManager(lobbyManager);
+const triviaStateManager = new TriviaStateManager(lobbyManager);
+const wordPuzzleStateManager = new WordPuzzleStateManager(lobbyManager);
+const mazeStateManager = new MazeStateManager(lobbyManager);
 
 // Attach io to lobbyManager so managers can use it for global broadcasts
 lobbyManager.io = io;
@@ -205,6 +211,11 @@ const paintLoops = new Map();
 
 // Balloon game loops
 const balloonLoops = new Map();
+
+// Baby shower game loops
+const triviaLoops = new Map();
+const puzzleLoops = new Map();
+const mazeLoops = new Map();
 
 // =================================
 // REST API Endpoints
@@ -372,6 +383,12 @@ io.on('connection', (socket) => {
                 paintStateManager.initializePaint(roomCode);
             } else if (room.gameMode === 'balloon') {
                 balloonStateManager.initializeBalloon(roomCode);
+            } else if (room.gameMode === 'trivia') {
+                triviaStateManager.initializeTrivia(roomCode);
+            } else if (room.gameMode === 'word_puzzle') {
+                wordPuzzleStateManager.initializePuzzle(roomCode);
+            } else if (room.gameMode === 'maze') {
+                mazeStateManager.initializeMaze(roomCode);
             }
 
             // Common game-started emit
@@ -403,6 +420,12 @@ io.on('connection', (socket) => {
                 startPaintLoop(roomCode);
             } else if (room.gameMode === 'balloon') {
                 startBalloonLoop(roomCode);
+            } else if (room.gameMode === 'trivia') {
+                startTriviaLoop(roomCode);
+            } else if (room.gameMode === 'word_puzzle') {
+                startPuzzleLoop(roomCode);
+            } else if (room.gameMode === 'maze') {
+                startMazeLoop(roomCode);
             } else {
                 startGameLoop(roomCode);
             }
@@ -526,6 +549,31 @@ io.on('connection', (socket) => {
             if (room && room.hostId) {
                 io.to(room.hostId).emit('player-input-update', result);
             }
+
+            // Also handle maze movement if in maze mode
+            if (room && room.gameMode === 'maze') {
+                mazeStateManager.handleMove(socket.id, roomCode, input);
+            }
+        }
+    });
+
+    /**
+     * Trivia answer from mobile controller
+     */
+    socket.on('trivia-answer', (answer) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (roomCode) {
+            triviaStateManager.handleAnswer(socket.id, roomCode, answer);
+        }
+    });
+
+    /**
+     * Word puzzle guess from mobile controller
+     */
+    socket.on('puzzle-guess', (guess) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (roomCode) {
+            wordPuzzleStateManager.handleGuess(socket.id, roomCode, guess);
         }
     });
     
@@ -1607,6 +1655,90 @@ function startFlappyLoop(roomCode) {
 function stopFlappyLoop(roomCode) {
     flappyStateManager.removeGame(roomCode);
     console.log(`[Flappy] Stopped flappy game for room ${roomCode}`);
+}
+
+/**
+ * Trivia Game Loop
+ */
+function startTriviaLoop(roomCode) {
+    stopTriviaLoop(roomCode);
+    const tickRate = 1000 / 10; // 10 FPS is enough for trivia
+    const loop = setInterval(() => {
+        const state = triviaStateManager.processTick(roomCode);
+        if (state) {
+            io.to(roomCode).emit('trivia-state', state);
+            if (state.gameState === 'finished') {
+                stopTriviaLoop(roomCode);
+            }
+        } else {
+            stopTriviaLoop(roomCode);
+        }
+    }, tickRate);
+    triviaLoops.set(roomCode, loop);
+}
+
+function stopTriviaLoop(roomCode) {
+    const loop = triviaLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        triviaLoops.delete(roomCode);
+    }
+}
+
+/**
+ * Word Puzzle Game Loop
+ */
+function startPuzzleLoop(roomCode) {
+    stopPuzzleLoop(roomCode);
+    const tickRate = 1000 / 10;
+    const loop = setInterval(() => {
+        const state = wordPuzzleStateManager.processTick(roomCode);
+        if (state) {
+            io.to(roomCode).emit('puzzle-state', state);
+            if (state.gameState === 'finished') {
+                stopPuzzleLoop(roomCode);
+            }
+        } else {
+            stopPuzzleLoop(roomCode);
+        }
+    }, tickRate);
+    puzzleLoops.set(roomCode, loop);
+}
+
+function stopPuzzleLoop(roomCode) {
+    const loop = puzzleLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        puzzleLoops.delete(roomCode);
+    }
+}
+
+/**
+ * Maze Game Loop
+ */
+function startMazeLoop(roomCode) {
+    stopMazeLoop(roomCode);
+    const tickRate = 1000 / 30; // 30 FPS for smooth character movement
+    const loop = setInterval(() => {
+        const state = mazeStateManager.processTick(roomCode);
+        if (state) {
+            io.to(roomCode).emit('maze-state', state);
+            if (state.gameState === 'finished') {
+                stopMazeLoop(roomCode);
+            }
+        } else {
+            stopMazeLoop(roomCode);
+        }
+    }, tickRate);
+    mazeLoops.set(roomCode, loop);
+}
+
+function stopMazeLoop(roomCode) {
+    const loop = mazeLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        mazeLoops.delete(roomCode);
+    }
 }
 
 // =================================

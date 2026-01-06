@@ -60,6 +60,19 @@ const elements = {
     stocksDisplay: document.getElementById('stocks-display'),
     menuBtn: document.getElementById('menu-btn'),
     
+    // Balloon specific
+    balloonControls: document.getElementById('balloon-controls'),
+    balloonInflateBtn: document.getElementById('balloon-inflate-btn'),
+    balloonProgressFill: document.getElementById('balloon-progress-fill'),
+
+    // Trivia specific
+    triviaControls: document.getElementById('trivia-controls'),
+    
+    // Puzzle specific
+    puzzleControls: document.getElementById('puzzle-controls'),
+    puzzleInput: document.getElementById('puzzle-input'),
+    puzzleSendBtn: document.getElementById('puzzle-send-btn'),
+    
     // Overlays
     gameOverOverlay: document.getElementById('game-over-overlay'),
     gameOverTitle: document.getElementById('game-over-title'),
@@ -1083,6 +1096,8 @@ function updateControllerUIForMode() {
     const flappyControls = document.getElementById('flappy-controls');
     const tugControls = document.getElementById('tug-controls');
     const balloonControls = document.getElementById('balloon-controls');
+    const triviaControls = document.getElementById('trivia-controls');
+    const puzzleControls = document.getElementById('puzzle-controls');
     const controllerScreen = document.getElementById('controller-screen');
     
     // Hide all special controls first
@@ -1090,8 +1105,62 @@ function updateControllerUIForMode() {
     if (flappyControls) flappyControls.style.display = 'none';
     if (tugControls) tugControls.style.display = 'none';
     if (balloonControls) balloonControls.style.display = 'none';
+    if (triviaControls) triviaControls.style.display = 'none';
+    if (puzzleControls) puzzleControls.style.display = 'none';
     
-    if (gameMode === 'balloon') {
+    if (gameMode === 'trivia') {
+        // Trivia mode
+        if (controllerBody) controllerBody.style.display = 'none';
+        if (triviaControls) triviaControls.style.display = 'flex';
+        if (controllerScreen) {
+            controllerScreen.classList.add('trivia-mode');
+            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode', 'puzzle-mode');
+        }
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (healthLabel) healthLabel.textContent = '';
+        
+        setupTriviaControls();
+        console.log('[Controller] Trivia mode UI configured');
+    } else if (gameMode === 'word_puzzle') {
+        // Word Puzzle mode
+        if (controllerBody) controllerBody.style.display = 'none';
+        if (puzzleControls) puzzleControls.style.display = 'flex';
+        if (controllerScreen) {
+            controllerScreen.classList.add('puzzle-mode');
+            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode', 'trivia-mode');
+        }
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (healthLabel) healthLabel.textContent = '';
+        
+        setupPuzzleControls();
+        console.log('[Controller] Puzzle mode UI configured');
+    } else if (gameMode === 'maze') {
+        // Maze mode uses D-pad (same as Tag or Paint)
+        if (controllerBody) controllerBody.style.display = 'flex';
+        if (controllerScreen) {
+            controllerScreen.classList.add('maze-mode');
+            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode', 'trivia-mode', 'puzzle-mode');
+        }
+        
+        if (dpadUp) {
+            dpadUp.dataset.input = 'up';
+            dpadUp.dataset.originalInput = 'up';
+        }
+        if (dpadDown) {
+            dpadDown.dataset.input = 'down';
+            dpadDown.dataset.originalInput = 'down';
+            if (runLabel) runLabel.style.display = 'none';
+        }
+        
+        // Hide action buttons in Maze mode
+        const actionButtons = document.querySelector('.action-buttons');
+        if (actionButtons) actionButtons.style.display = 'none';
+        
+        if (healthLabel) healthLabel.textContent = 'EXPLORA';
+        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        
+        console.log('[Controller] Maze mode UI configured');
+    } else if (gameMode === 'balloon') {
         // Balloon mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (balloonControls) balloonControls.style.display = 'flex';
@@ -1373,6 +1442,62 @@ function setupTugControls() {
 }
 
 // Setup Balloon mode controls
+/**
+ * Setup trivia mode controls
+ */
+function setupTriviaControls() {
+    const triviaButtons = document.querySelectorAll('.trivia-btn');
+    triviaButtons.forEach(btn => {
+        // Remove existing listeners by cloning
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        
+        newBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            newBtn.classList.add('pressed');
+            const answer = newBtn.dataset.answer;
+            if (socket) {
+                socket.emit('trivia-answer', answer);
+                // Visual feedback
+                triviaButtons.forEach(b => b.classList.remove('selected'));
+                newBtn.classList.add('selected');
+            }
+        }, { passive: false });
+
+        newBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            newBtn.classList.remove('pressed');
+        }, { passive: false });
+    });
+}
+
+/**
+ * Setup puzzle mode controls
+ */
+function setupPuzzleControls() {
+    const input = elements.puzzleInput;
+    const sendBtn = elements.puzzleSendBtn;
+    
+    if (!input || !sendBtn) return;
+
+    // Clear input
+    input.value = '';
+
+    // Remove existing listener for sendBtn
+    const newSendBtn = sendBtn.cloneNode(true);
+    sendBtn.parentNode.replaceChild(newSendBtn, sendBtn);
+
+    newSendBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const guess = input.value.trim();
+        if (guess && socket) {
+            socket.emit('puzzle-guess', guess);
+            input.value = ''; // Clear after send
+            input.blur();
+        }
+    }, { passive: false });
+}
+
 function setupBalloonControls() {
     const inflateBtn = document.getElementById('balloon-inflate-btn');
     const fill = document.getElementById('balloon-progress-fill');

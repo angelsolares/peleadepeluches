@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Scramble - Pelea de Peluches</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --baby-pink: #FFC8DD;
+            --baby-blue: #A2D2FF;
+            --baby-yellow: #FCF6BD;
+        }
+
+        body.baby-theme {
+            background: linear-gradient(135deg, #FFEFFA 0%, #E8F4FF 100%);
+            color: #555;
+            overflow: hidden;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .title-container {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .title-container h1 {
+            font-size: 4rem;
+            background: linear-gradient(135deg, #FF99C8, #A2D2FF);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .puzzle-area {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            max-width: 1200px;
+            height: 60vh;
+        }
+
+        .word-list {
+            flex: 1;
+            background: white;
+            border-radius: 30px;
+            padding: 30px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            border: 6px solid var(--baby-pink);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+
+        .word-item {
+            font-size: 2rem;
+            padding: 15px 25px;
+            border-radius: 15px;
+            background: #f8f9fa;
+            border: 2px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .word-item.found {
+            background: #D0F4DE;
+            border-color: #2ecc71;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+
+        .scramble-main {
+            flex: 2;
+            background: white;
+            border-radius: 30px;
+            padding: 40px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            border: 6px solid var(--baby-blue);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .scrambled-letters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 40px;
+        }
+
+        .letter-bubble {
+            width: 80px;
+            height: 80px;
+            background: var(--baby-yellow);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            font-weight: bold;
+            color: #555;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .found-by {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body class="baby-theme">
+    <div id="game-container">
+        <div class="title-container">
+            <h1>BABY SCRAMBLE</h1>
+            <p>¡DESCIFRA LAS PALABRAS DESDE TU CELULAR!</p>
+        </div>
+
+        <div class="puzzle-area">
+            <div class="word-list" id="word-list">
+                <!-- Words to find will be here -->
+            </div>
+
+            <div class="scramble-main">
+                <div id="scrambled-letters" class="scrambled-letters">
+                    <!-- Letters of the current word -->
+                </div>
+                <div id="hint-text" style="font-size: 1.5rem; color: #888; text-align: center;">
+                    ¡Escribe la palabra en tu controlador!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Audio Managers -->
+    <script src="js/audio/BGMManager.js"></script>
+    <script src="js/audio/SFXManager.js"></script>
+    
+    <script type="module" src="js/baby_shower/WordPuzzleGame.js"></script>
+</body>
+</html>
+
