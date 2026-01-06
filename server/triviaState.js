@@ -6,7 +6,7 @@ const TRIVIA_CONFIG = {
     TIME_PER_QUESTION: 15, // seconds
     POINTS_PER_CORRECT: 100,
     SPEED_BONUS_MAX: 50,
-    COOLDOWN_BETWEEN_QUESTIONS: 5000 // ms
+    COOLDOWN_BETWEEN_QUESTIONS: 3000 // ms (Reduced from 5000)
 };
 
 const TRIVIA_QUESTIONS = [
@@ -93,13 +93,22 @@ class TriviaStateManager {
         if (!state || state.gameState === 'finished') return null;
 
         const now = Date.now();
+        const room = this.lobbyManager.rooms.get(roomCode);
         
         if (state.gameState === 'active') {
             const elapsed = (now - state.questionStartTime) / 1000;
             state.timeLeft = Math.max(0, TRIVIA_CONFIG.TIME_PER_QUESTION - elapsed);
 
-            // Check if everyone answered or time is up
-            const allAnswered = Array.from(state.players.values()).every(p => p.currentAnswer !== null);
+            // Check if everyone (who is still in the room) answered
+            let allAnswered = true;
+            if (room) {
+                for (const [playerId, player] of state.players) {
+                    if (room.players.has(playerId) && player.currentAnswer === null) {
+                        allAnswered = false;
+                        break;
+                    }
+                }
+            }
             
             if (state.timeLeft <= 0 || allAnswered) {
                 this.endQuestion(roomCode);

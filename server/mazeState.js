@@ -85,14 +85,61 @@ class MazeStateManager {
         const now = Date.now();
         state.timeLeft = Math.max(0, (state.endTime - now) / 1000);
 
-        if (state.timeLeft <= 0 && state.gameState === 'active') {
-            state.gameState = 'finished';
+        if (state.gameState === 'active') {
+            if (state.timeLeft <= 0) {
+                state.gameState = 'finished';
+            }
+
+            // Process movement for all players
+            const room = this.lobbyManager.rooms.get(roomCode);
+            if (room) {
+                state.players.forEach(player => {
+                    if (player.finished) return;
+                    
+                    const lobbyPlayer = room.players.get(player.id);
+                    if (!lobbyPlayer || !lobbyPlayer.input) return;
+
+                    let nx = player.x;
+                    let nz = player.z;
+                    const moveSpeed = 0.15; // Adjusted for 30fps
+
+                    if (lobbyPlayer.input.up) nz -= moveSpeed;
+                    if (lobbyPlayer.input.down) nz += moveSpeed;
+                    if (lobbyPlayer.input.left) nx -= moveSpeed;
+                    if (lobbyPlayer.input.right) nx += moveSpeed;
+
+                    // Simple collision detection
+                    const gridX = Math.round(nx);
+                    const gridZ = Math.round(nz);
+
+                    if (gridX >= 0 && gridX < state.size && gridZ >= 0 && gridZ < state.size) {
+                        if (state.grid[gridZ][gridX] === 0) {
+                            player.x = nx;
+                            player.z = nz;
+                        }
+                    }
+
+                    // Check finish
+                    if (Math.abs(player.x - MAZE_CONFIG.FINISH_X) < 0.5 && Math.abs(player.z - MAZE_CONFIG.FINISH_Z) < 0.5) {
+                        player.finished = true;
+                        player.finishTime = Date.now();
+                        state.winners.push({ id: player.id, name: player.name });
+
+                        // Check if everyone finished
+                        const allFinished = Array.from(state.players.values()).every(p => p.finished);
+                        if (allFinished) {
+                            state.gameState = 'finished';
+                        }
+                    }
+                });
+            }
         }
 
         return {
             roomCode,
             gameState: state.gameState,
             grid: state.grid,
+            size: state.size,
             timeLeft: Math.ceil(state.timeLeft),
             players: Array.from(state.players.values()),
             winners: state.winners
@@ -100,45 +147,7 @@ class MazeStateManager {
     }
 
     handleMove(playerId, roomCode, direction) {
-        const state = this.mazeStates.get(roomCode);
-        if (!state || state.gameState !== 'active') return;
-
-        const player = state.players.get(playerId);
-        if (!player || player.finished) return;
-
-        let nx = player.x;
-        let nz = player.z;
-
-        const moveSpeed = 0.2; // Slow movement for maze precision
-
-        if (direction === 'up') nz -= moveSpeed;
-        if (direction === 'down') nz += moveSpeed;
-        if (direction === 'left') nx -= moveSpeed;
-        if (direction === 'right') nx += moveSpeed;
-
-        // Collision detection (simple grid-based)
-        const gridX = Math.round(nx);
-        const gridZ = Math.round(nz);
-
-        if (gridX >= 0 && gridX < state.size && gridZ >= 0 && gridZ < state.size) {
-            if (state.grid[gridZ][gridX] === 0) {
-                player.x = nx;
-                player.z = nz;
-            }
-        }
-
-        // Check finish
-        if (Math.abs(player.x - MAZE_CONFIG.FINISH_X) < 0.5 && Math.abs(player.z - MAZE_CONFIG.FINISH_Z) < 0.5) {
-            player.finished = true;
-            player.finishTime = Date.now();
-            state.winners.push({ id: player.id, name: player.name });
-
-            // Check if everyone finished
-            const allFinished = Array.from(state.players.values()).every(p => p.finished);
-            if (allFinished) {
-                state.gameState = 'finished';
-            }
-        }
+        // Now handled in processTick
     }
 
     cleanup(roomCode) {

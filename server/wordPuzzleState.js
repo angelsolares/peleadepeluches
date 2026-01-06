@@ -14,7 +14,7 @@ const BABY_WORDS = [
     { word: "CHUPON", hint: "Para calmar al bebé" },
     { word: "SONAJA", hint: "Hace ruido al agitarla" },
     { word: "CARRIOLA", hint: "Para pasear al bebé" },
-    { word: "GATREAR", hint: "Como se mueven antes de caminar" },
+    { word: "GATEAR", hint: "Como se mueven antes de caminar" },
     { word: "PAPILLA", hint: "Comida suavecita" },
     { word: "TALCO", hint: "Para las rozaduras" },
     { word: "MAMILA", hint: "Sinónimo de biberón" }

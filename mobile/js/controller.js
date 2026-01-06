@@ -1149,7 +1149,10 @@ function updateControllerUIForMode() {
         if (dpadDown) {
             dpadDown.dataset.input = 'down';
             dpadDown.dataset.originalInput = 'down';
-            if (runLabel) runLabel.style.display = 'none';
+            if (runLabel) {
+                runLabel.textContent = 'ABAJO';
+                runLabel.style.display = 'block';
+            }
         }
         
         // Hide action buttons in Maze mode
@@ -1487,15 +1490,27 @@ function setupPuzzleControls() {
     const newSendBtn = sendBtn.cloneNode(true);
     sendBtn.parentNode.replaceChild(newSendBtn, sendBtn);
 
-    newSendBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
+    const sendGuess = () => {
         const guess = input.value.trim();
         if (guess && socket) {
             socket.emit('puzzle-guess', guess);
             input.value = ''; // Clear after send
             input.blur();
         }
-    }, { passive: false });
+    };
+
+    // Use click for better reliability with inputs
+    newSendBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        sendGuess();
+    });
+
+    // Also support Enter key
+    input.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') {
+            sendGuess();
+        }
+    });
 }
 
 function setupBalloonControls() {
