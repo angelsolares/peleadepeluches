@@ -326,4 +326,54 @@
     }
 }
 
+/* ==================================
+   End-of-match actions (REVANCHA / MENU)
+   ================================== */
 
+.victory-actions,
+.tournament-end-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    margin-top: 30px;
+}
+
+.victory-actions button {
+    padding: 15px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 50px;
+    color: #fff;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    background: linear-gradient(135deg, #ff3366 0%, #cc2952 100%);
+    box-shadow: 0 0 20px rgba(255, 51, 102, 0.5);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.victory-actions .arena-rematch-btn,
+#tournament-end-overlay .arena-rematch-btn {
+    background: linear-gradient(135deg, #00ffcc 0%, #9966ff 100%);
+    color: #0a0a15;
+    box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
+}
+
+.tournament-end-actions .btn-return-menu {
+    margin-top: 0;
+}
+
+.victory-actions button:hover:not(:disabled),
+#tournament-end-overlay .arena-rematch-btn:hover:not(:disabled) {
+    transform: scale(1.05);
+}
+
+.victory-actions button:disabled,
+#tournament-end-overlay .arena-rematch-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+}

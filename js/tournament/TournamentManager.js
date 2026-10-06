@@ -5,6 +5,16 @@
 
 const STORAGE_KEY = 'peluches_tournament';
 
+/** Escape player-provided text before putting it into innerHTML */
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 class TournamentManager {
     constructor(socket, gameMode) {
         this.socket = socket;
@@ -52,6 +62,17 @@ class TournamentManager {
         this.socket.on('round-starting', (data) => {
             console.log('[Tournament] Round starting:', data);
             this.currentRound = data.round;
+            
+            // Rematch: start a brand new tournament (scores, winners and saved state)
+            if (data.rematch) {
+                this.roundWinners = [];
+                this.playerScores = {};
+                if (data.totalRounds) this.tournamentRounds = data.totalRounds;
+                this.clearLocalStorage?.();
+                const tournamentEnd = document.getElementById('tournament-end-overlay');
+                if (tournamentEnd) tournamentEnd.classList.add('hidden');
+            }
+            
             this.hideRoundEndOverlay();
             this.updateHUD();
         });
@@ -193,8 +214,8 @@ class TournamentManager {
             .sort((a, b) => b[1] - a[1])
             .map(([name, wins]) => `
                 <div class="round-score-player ${wins === maxWins ? 'leader' : ''}">
-                    <div class="player-name">${name}</div>
-                    <div class="player-wins">${wins}</div>
+                    <div class="player-name">${escapeHtml(name)}</div>
+                    <div class="player-wins">${Number(wins) || 0}</div>
                 </div>
             `).join('');
     }
@@ -208,8 +229,8 @@ class TournamentManager {
             .map(([name, wins], index) => `
                 <div class="final-score-player ${name === champion ? 'champion' : ''}">
                     <div class="player-rank">${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}°`}</div>
-                    <div class="player-name">${name}</div>
-                    <div class="player-wins">${wins}</div>
+                    <div class="player-name">${escapeHtml(name)}</div>
+                    <div class="player-wins">${Number(wins) || 0}</div>
                 </div>
             `).join('');
     }
@@ -247,12 +268,14 @@ class TournamentManager {
             roundIndicators.innerHTML = dotsHTML;
         }
         
-        // Update scores
-        if (scoresContainer && Object.keys(this.playerScores).length > 0) {
+        // Update scores (clear the list when a new tournament has no scores yet)
+        if (scoresContainer && Object.keys(this.playerScores).length === 0) {
+            scoresContainer.innerHTML = '';
+        } else if (scoresContainer) {
             scoresContainer.innerHTML = Object.entries(this.playerScores)
                 .map(([name, wins]) => `
                     <span class="tournament-score-item">
-                        ${name}: <span class="wins">${wins}</span>
+                        ${escapeHtml(name)}: <span class="wins">${Number(wins) || 0}</span>
                     </span>
                 `).join('');
         }

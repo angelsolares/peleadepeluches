@@ -223,10 +223,14 @@ class TagStateManager {
         if (!itPlayer) return;
 
         const now = Date.now();
+        const itId = tagState.itPlayerId;
 
+        // Tag only the closest eligible player, once per tick
+        let closestId = null;
+        let closestDistance = TAG_CONFIG.TAG_RANGE;
         tagState.players.forEach((targetState, targetId) => {
-            if (targetId === tagState.itPlayerId) return;
-            
+            if (targetId === itId) return;
+
             // Check if target has grace period
             if (now < targetState.graceUntil) return;
 
@@ -234,10 +238,15 @@ class TagStateManager {
             const dz = targetState.position.z - itPlayer.position.z;
             const distance = Math.sqrt(dx * dx + dz * dz);
 
-            if (distance < TAG_CONFIG.TAG_RANGE) {
-                this.transferIt(tagState, tagState.itPlayerId, targetId);
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestId = targetId;
             }
         });
+
+        if (closestId) {
+            this.transferIt(tagState, itId, closestId);
+        }
     }
 
     transferIt(tagState, oldItId, newItId) {

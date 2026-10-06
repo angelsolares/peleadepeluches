@@ -7,6 +7,7 @@
 const RACE_CONFIG = {
     TRACK_LENGTH: 100,
     MAX_PLAYERS: 8,
+    FINISH_TIMEOUT: 15000,  // ms the others get after the first finisher before the race ends
     
     // Movement physics - increased for faster races
     TAP_BOOST: 1.5,         // Speed boost per valid alternating tap (was 0.8)
@@ -205,7 +206,8 @@ class RaceStateManager {
                     player.finishTime = Date.now() - raceState.startTime;
                     player.finishPosition = raceState.finishOrder.length + 1;
                     raceState.finishOrder.push(socketId);
-                    
+                    if (!raceState.firstFinishAt) raceState.firstFinishAt = Date.now();
+                                        
                     console.log(`[Race] ${player.name} finished in position ${player.finishPosition}!`);
                 }
             }
@@ -227,6 +229,16 @@ class RaceStateManager {
         
         let raceOver = false;
         if (finishedCount > 0 && finishedCount === totalPlayers) {
+            raceOver = true;
+        }
+
+        // Once someone finishes, the rest get FINISH_TIMEOUT to cross the line (AFK players can't stall the room)
+        if (raceState.firstFinishAt && Date.now() - raceState.firstFinishAt >= RACE_CONFIG.FINISH_TIMEOUT) {
+            raceOver = true;
+        }
+
+        // Everyone left
+        if (totalPlayers === 0) {
             raceOver = true;
         }
         
@@ -290,6 +302,18 @@ class RaceStateManager {
         }
     }
     
+    /**
+     * Drop a player who left mid-race. Finished players are kept so results stay complete.
+     */
+    removePlayer(roomCode, socketId) {
+        const raceState = this.raceStates.get(roomCode);
+        if (!raceState) return;
+        const player = raceState.players.get(socketId);
+        if (player && !player.finished) {
+            raceState.players.delete(socketId);
+        }
+    }
+
     /**
      * Remove race state
      */

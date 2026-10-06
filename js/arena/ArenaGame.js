@@ -90,7 +90,31 @@ const ANIMATION_FILES = {
     knockdown: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
 };
 
-const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff'];
+// One color per player slot (rooms support up to 8 players)
+const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff', '#ff8800', '#33ccff', '#66ff33', '#ff66cc'];
+
+/**
+ * Escape player-provided text before inserting it with innerHTML
+ */
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+}
+
+/**
+ * Spawn position for slot `index` out of `total` players, evenly spread around the ring
+ */
+function getSpawnPosition(index, total) {
+    const slots = Math.max(total || 0, 2);
+    const angle = (index / slots) * Math.PI * 2;
+    const radius = ARENA_CONFIG.RING_SIZE / 3;
+    return new THREE.Vector3(
+        Math.cos(angle) * radius,
+        ARENA_CONFIG.RING_HEIGHT,
+        Math.sin(angle) * radius
+    );
+}
 
 // =================================
 // Arena Player Entity
@@ -312,7 +336,9 @@ class ArenaGame {
         this.roomCode = null;
         this.isHost = false;
         this.gameState = 'loading';
-        
+        this.matchId = 0;            // Bumped on every new round/rematch to cancel stale timers
+        this.rematchPending = false; // A 'request-rematch' is in flight
+
         // HUD
         this.hud = null;
         
@@ -827,7 +853,10 @@ class ArenaGame {
             
             setTimeout(() => {
                 this.loadingScreen.classList.add('hidden');
-                this.updateAnimationDisplay('Conectando al servidor...');
+                // The socket may have created the room while models were loading: don't overwrite its status
+                if (!this.roomCode) {
+                    this.updateAnimationDisplay('Conectando al servidor...');
+                }
                 this.gameState = 'lobby';
             }, 500);
             
@@ -992,6 +1021,13 @@ class ArenaGame {
         });
         
         this.socket.on('connect', () => {
+            // Recovered reconnect (connectionStateRecovery): same socket id and room,
+            // missed events are replayed. Creating a room here would orphan every phone.
+            if (this.socket.recovered) {
+                console.log(`[Socket] Connection recovered, keeping room ${this.roomCode}`);
+                return;
+            }
+
             console.log('[Socket] Connected to server');
             this.isHost = true;
             
@@ -1046,24 +1082,76 @@ class ArenaGame {
         
         this.socket.on('round-ended', (data) => {
             console.log('[Arena] Round ended:', data);
-            // Hide game over overlay since tournament overlay will show
-            const gameOverOverlay = document.getElementById('game-over-overlay');
-            if (gameOverOverlay) {
-                gameOverOverlay.classList.add('hidden');
-            }
+            // The tournament overlay shows the round result: drop any single-match victory overlay
+            this.gameState = 'finished';
+            this.removeVictoryOverlay();
         });
-        
+
         this.socket.on('tournament-ended', (data) => {
             console.log('[Arena] Tournament ended:', data);
-            // Hide game over overlay since tournament end overlay will show
-            const gameOverOverlay = document.getElementById('game-over-overlay');
-            if (gameOverOverlay) {
-                gameOverOverlay.classList.add('hidden');
-            }
+            // The tournament end overlay (with its REVANCHA button) takes over
+            this.gameState = 'finished';
+            this.removeVictoryOverlay();
+            this.setRematchButtonsPending(false);
         });
         
         // Initialize tournament manager
         this.tournamentManager = new TournamentManager(this.socket, 'arena');
+
+        // REVANCHA button on the static tournament end overlay
+        this.setupRematchButtons();
+    }
+
+    /**
+     * Wire the static REVANCHA button(s) once
+     */
+    setupRematchButtons() {
+        if (this.rematchButtonsWired) return;
+        this.rematchButtonsWired = true;
+        const btn = document.getElementById('arena-tournament-rematch-btn');
+        btn?.addEventListener('click', () => this.requestRematch());
+    }
+
+    /**
+     * Ask the server to restart the match from round 1 with the same players.
+     * The actual reset happens on 'round-starting' (rematch: true) + 'game-started'.
+     */
+    requestRematch() {
+        if (!this.socket || this.rematchPending) return;
+        this.setRematchButtonsPending(true);
+
+        this.socket.timeout(5000).emit('request-rematch', (err, res) => {
+            if (err || !res || !res.success) {
+                console.warn('[Arena] Rematch failed:', err || res?.error);
+                this.setRematchButtonsPending(false, res?.error ? 'NO SE PUDO: REINTENTAR' : 'REINTENTAR');
+                return;
+            }
+            console.log('[Arena] Rematch accepted, waiting for round-starting');
+            // Safety net: if the restart never arrives, let the host try again
+            clearTimeout(this.rematchFallbackTimer);
+            this.rematchFallbackTimer = setTimeout(() => {
+                if (this.rematchPending) this.setRematchButtonsPending(false, 'REINTENTAR');
+            }, 5000);
+        });
+    }
+
+    /**
+     * Disable/enable every REVANCHA button while a request is in flight
+     */
+    setRematchButtonsPending(pending, idleLabel = 'REVANCHA') {
+        this.rematchPending = pending;
+        if (!pending) clearTimeout(this.rematchFallbackTimer);
+        document.querySelectorAll('.arena-rematch-btn').forEach((btn) => {
+            btn.disabled = pending;
+            btn.textContent = pending ? 'PREPARANDO...' : idleLabel;
+        });
+    }
+
+    /**
+     * Remove the single-match victory overlay (if any)
+     */
+    removeVictoryOverlay() {
+        document.getElementById('victory-overlay')?.remove();
     }
     
     showRoomCode(code) {
@@ -1078,12 +1166,12 @@ class ArenaGame {
             overlay.innerHTML = `
                 <div class="room-code-content">
                     <h2>🏟️ ARENA DE PELUCHES</h2>
-                    <div class="room-code">${code}</div>
+                    <div class="room-code">${escapeHtml(code)}</div>
                     <div class="qr-container">
                         <img src="${qrCodeUrl}" alt="QR Code" class="qr-code" />
                     </div>
                     <p>Escanea o ingresa este código en tu celular</p>
-                    <a href="${mobileUrl}" target="_blank" class="url">${mobileUrl}</a>
+                    <a href="${escapeHtml(mobileUrl)}" target="_blank" class="url">${escapeHtml(mobileUrl)}</a>
                     
                     <div class="rounds-selector">
                         <span class="rounds-label">RONDAS:</span>
@@ -1183,7 +1271,8 @@ class ArenaGame {
     
     handlePlayerJoined(data) {
         console.log('[Arena] Player joined:', data.player);
-        this.addPlayer(data.player);
+        const index = this.players.size;
+        this.addPlayer(data.player, index, Math.max(index + 1, data.room?.playerCount || 0));
         this.updateRoomOverlay(data.room.playerCount);
     }
     
@@ -1195,14 +1284,32 @@ class ArenaGame {
     handleGameStarted(data) {
         console.log('[Arena] Game started!', data);
         this.gameState = 'playing';
-        
-        // Clear and add all players
-        this.players.forEach((player, id) => {
-            if (id !== 'local') this.removePlayer(id);
+        this.updateAnimationDisplay('¡A LUCHAR!');
+
+        const list = Array.isArray(data.players) ? data.players : [];
+        const total = list.length;
+        const incoming = new Map(list.map(p => [p.id, p]));
+
+        // Drop players that are no longer in the match (or whose character changed)
+        Array.from(this.players.keys()).forEach((id) => {
+            const next = incoming.get(id);
+            const player = this.players.get(id);
+            if (id !== 'local' && (!next || (next.character || 'edgar') !== player.characterId)) {
+                this.removePlayer(id);
+            }
         });
-        
-        data.players.forEach((playerData, index) => {
-            this.addPlayer(playerData, index);
+
+        // Reuse existing entities (fully reset) and create the missing ones
+        list.forEach((playerData, index) => {
+            const player = this.players.get(playerData.id);
+            if (player) {
+                if (playerData.name) player.setName(playerData.name);
+                this.resetPlayerVisuals(player, getSpawnPosition(index, total));
+                this.hud?.addPlayer(player);
+                this.hud?.resetPlayer?.(player.id);
+            } else {
+                this.addPlayer(playerData, index, total);
+            }
         });
     }
     
@@ -1245,6 +1352,7 @@ class ArenaGame {
                     !player.isFlying) {
                     console.log('[Arena] Grab released for player:', state.id);
                     player.isBeingCarried = false;
+                    this.endCarryAnimation(player);
                     
                     // Reset rotation to upright
                     player.model.rotation.x = 0;
@@ -1283,9 +1391,9 @@ class ArenaGame {
             // Play sound effect
             if (this.sfxManager) {
                 if (data.attackType === 'punch') {
-                    this.sfxManager.playPunchSwing?.();
+                    this.sfxManager.playPunchWhoosh?.();
                 } else if (data.attackType === 'kick') {
-                    this.sfxManager.playKickSwing?.();
+                    this.sfxManager.playKickWhoosh?.();
                 }
             }
         }
@@ -1427,13 +1535,30 @@ class ArenaGame {
     }
     
     /**
+     * Undo the carried-victim animation setup from handleArenaGrab: the 'hit' action was
+     * switched to LoopRepeat (never fires 'finished'), which left animController.isAttacking
+     * stuck and blocked every later idle/walk/punch animation.
+     */
+    endCarryAnimation(player) {
+        const anim = player?.animController;
+        if (!anim) return;
+        const hitAction = anim.actions?.hit;
+        if (hitAction) {
+            hitAction.setLoop(THREE.LoopOnce);
+            hitAction.clampWhenFinished = true;
+            hitAction.timeScale = ANIMATION_CONFIG.defaultSpeeds?.hit || 1;
+        }
+        anim.isAttacking = false;
+    }
+
+    /**
      * Show visual indicator when someone is grabbed
      */
     showGrabIndicator(grabber, victim) {
         // Create a floating text indicator
         const indicator = document.createElement('div');
         indicator.className = 'grab-indicator';
-        indicator.innerHTML = `🤼 ${grabber.name} → ${victim.name}`;
+        indicator.textContent = `🤼 ${grabber.name} → ${victim.name}`;
         indicator.style.cssText = `
             position: fixed;
             top: 50%;
@@ -1507,7 +1632,8 @@ class ArenaGame {
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
             victim.isBeingCarried = false;
-            
+            this.endCarryAnimation(victim);
+
             // Set victim position to where they were visually (carried position)
             victim.controller.position.x = currentVisualPos.x;
             victim.controller.position.y = currentVisualPos.y;
@@ -1591,7 +1717,9 @@ class ArenaGame {
             player.controller.isEliminated = true;
             
             // Show elimination announcement
-            const reason = data.reason === 'ringout' ? '¡RING OUT!' : '¡K.O.!';
+            const reason = data.reason === 'ringout' ? '¡RING OUT!'
+                : data.reason === 'disconnect' ? '¡DESCONECTADO!'
+                : '¡K.O.!';
             this.showEliminationAnnouncement(data.playerName, reason);
             
             // Play fall animation
@@ -1633,9 +1761,10 @@ class ArenaGame {
             // Start fade out effect
             this.fadeOutPlayer(player);
             
-            // Hide HUD for this player after delay
+            // Hide HUD for this player after delay (unless a rematch/new round started meanwhile)
+            const matchId = this.matchId;
             setTimeout(() => {
-                if (this.hud) {
+                if (this.hud && matchId === this.matchId) {
                     this.hud.hidePlayer(data.playerId);
                 }
             }, 2000);
@@ -1662,13 +1791,14 @@ class ArenaGame {
             // Check for winner after a short delay
             console.log('[Arena] Will check for winner in 2.5 seconds...');
             setTimeout(() => {
-                this.checkForWinner();
+                if (matchId === this.matchId) this.checkForWinner();
             }, 2500);
         } else {
             console.log(`[Arena] Player ${data.playerId} not found in local players map!`);
             // Still check for winner - the player might have been removed
+            const matchId = this.matchId;
             setTimeout(() => {
-                this.checkForWinner();
+                if (matchId === this.matchId) this.checkForWinner();
             }, 2500);
         }
     }
@@ -1716,76 +1846,122 @@ class ArenaGame {
      * Show victory screen for the winner
      */
     showVictoryScreen(winner) {
+        // Game is over
+        this.gameState = 'finished';
+
         // Play victory animation
-        if (winner.player && winner.player.playAnimation) {
+        if (winner?.player && winner.player.playAnimation) {
             winner.player.playAnimation('taunt');
         }
-        
+
+        // Zoom camera on winner
+        if (winner?.player) this.focusCameraOnWinner(winner.player);
+
+        // In a tournament the round/tournament overlays show the result (and the REVANCHA button)
+        if (this.tournamentManager?.isActive) {
+            console.log('[Arena] Tournament round won by:', winner?.name);
+            return;
+        }
+
+        // Victory music
+        this.bgmManager?.playVictory?.();
+
+        // Never stack two overlays
+        this.removeVictoryOverlay();
+        this.ensureVictoryStyles();
+
+        const isDraw = !winner || !winner.name;
+
         // Create victory overlay
         const victoryOverlay = document.createElement('div');
         victoryOverlay.id = 'victory-overlay';
         victoryOverlay.innerHTML = `
+            <div class="confetti-container">
+                ${isDraw ? '' : Array(20).fill().map(() => `<div class="confetti"></div>`).join('')}
+            </div>
             <div class="victory-content">
-                <div class="victory-crown">👑</div>
-                <div class="victory-title">¡VICTORIA!</div>
-                <div class="winner-name">${winner.name}</div>
-                <div class="winner-label">CAMPEÓN DE LA ARENA</div>
-                <div class="confetti-container">
-                    ${Array(20).fill().map(() => `<div class="confetti"></div>`).join('')}
+                <div class="victory-crown">${isDraw ? '🤝' : '👑'}</div>
+                <div class="victory-title">${isDraw ? '¡EMPATE!' : '¡VICTORIA!'}</div>
+                ${isDraw ? '' : `<div class="winner-name">${escapeHtml(winner.name)}</div>`}
+                <div class="winner-label">${isDraw ? 'NADIE QUEDÓ EN PIE' : 'CAMPEÓN DE LA ARENA'}</div>
+                <div class="victory-actions">
+                    <button type="button" class="arena-rematch-btn">REVANCHA</button>
+                    <button type="button" class="arena-menu-btn">VOLVER AL MENÚ</button>
                 </div>
             </div>
         `;
-        
-        victoryOverlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0, 0, 0, 0.85);
-            z-index: 10000;
-            animation: victoryFadeIn 0.5s ease-out;
-        `;
-        
-        // Add styles
+
+        victoryOverlay.querySelector('.arena-rematch-btn')
+            .addEventListener('click', () => this.requestRematch());
+        victoryOverlay.querySelector('.arena-menu-btn')
+            .addEventListener('click', () => { window.location.href = 'index.html'; });
+
+        document.body.appendChild(victoryOverlay);
+
+        // Reflect a request that may already be in flight
+        this.setRematchButtonsPending(!!this.rematchPending);
+
+        console.log('[Arena] Victory screen shown for:', isDraw ? '(draw)' : winner.name);
+    }
+
+    /**
+     * Inject the victory overlay styles once
+     */
+    ensureVictoryStyles() {
+        if (document.getElementById('arena-victory-styles')) return;
+
         const style = document.createElement('style');
+        style.id = 'arena-victory-styles';
         style.textContent = `
+            #victory-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.85);
+                z-index: 10000;
+                animation: victoryFadeIn 0.5s ease-out;
+            }
+
             @keyframes victoryFadeIn {
                 from { opacity: 0; }
                 to { opacity: 1; }
             }
-            
+
             @keyframes victoryCrown {
                 0%, 100% { transform: translateY(0) rotate(0deg); }
                 25% { transform: translateY(-20px) rotate(-10deg); }
                 50% { transform: translateY(-30px) rotate(0deg); }
                 75% { transform: translateY(-20px) rotate(10deg); }
             }
-            
+
             @keyframes victoryPulse {
                 0%, 100% { transform: scale(1); text-shadow: 0 0 30px rgba(255, 215, 0, 0.5); }
                 50% { transform: scale(1.1); text-shadow: 0 0 60px rgba(255, 215, 0, 0.8); }
             }
-            
+
             @keyframes confettiFall {
                 0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
                 100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
             }
-            
+
             .victory-content {
+                position: relative;
+                z-index: 1;
                 text-align: center;
                 font-family: 'Orbitron', sans-serif;
             }
-            
+
             .victory-crown {
                 font-size: 100px;
                 animation: victoryCrown 2s ease-in-out infinite;
                 margin-bottom: 20px;
             }
-            
+
             .victory-title {
                 font-size: 4rem;
                 font-weight: 900;
@@ -1796,7 +1972,7 @@ class ArenaGame {
                 animation: victoryPulse 1.5s ease-in-out infinite;
                 margin-bottom: 20px;
             }
-            
+
             .winner-name {
                 font-size: 3rem;
                 font-weight: 700;
@@ -1804,14 +1980,14 @@ class ArenaGame {
                 text-shadow: 0 0 30px rgba(0, 255, 204, 0.7);
                 margin-bottom: 10px;
             }
-            
+
             .winner-label {
                 font-size: 1.2rem;
                 color: #ff3366;
                 letter-spacing: 5px;
                 text-transform: uppercase;
             }
-            
+
             .confetti-container {
                 position: absolute;
                 top: 0;
@@ -1821,7 +1997,7 @@ class ArenaGame {
                 pointer-events: none;
                 overflow: hidden;
             }
-            
+
             .confetti {
                 position: absolute;
                 width: 15px;
@@ -1829,12 +2005,12 @@ class ArenaGame {
                 top: -20px;
                 animation: confettiFall 3s linear infinite;
             }
-            
+
             .confetti:nth-child(odd) { background: #ffd700; }
             .confetti:nth-child(even) { background: #00ffcc; }
             .confetti:nth-child(3n) { background: #ff3366; }
             .confetti:nth-child(4n) { background: #9966ff; }
-            
+
             ${Array(20).fill().map((_, i) => `
                 .confetti:nth-child(${i + 1}) {
                     left: ${Math.random() * 100}%;
@@ -1844,24 +2020,10 @@ class ArenaGame {
                 }
             `).join('')}
         `;
-        
+
         document.head.appendChild(style);
-        document.body.appendChild(victoryOverlay);
-        
-        // Play victory sound
-        if (this.sfxManager) {
-            this.sfxManager.playVictory?.();
-        }
-        
-        // Zoom camera on winner
-        this.focusCameraOnWinner(winner.player);
-        
-        // Game is over
-        this.gameState = 'finished';
-        
-        console.log('[Arena] Victory screen shown for:', winner.name);
     }
-    
+
     /**
      * Focus camera on the winner
      */
@@ -1895,8 +2057,8 @@ class ArenaGame {
         const announcement = document.createElement('div');
         announcement.className = 'elimination-announcement';
         announcement.innerHTML = `
-            <div class="elimination-text">${reason}</div>
-            <div class="eliminated-name">${playerName}</div>
+            <div class="elimination-text">${escapeHtml(reason)}</div>
+            <div class="eliminated-name">${escapeHtml(playerName)}</div>
             <div class="eliminated-label">ELIMINADO</div>
         `;
         announcement.style.cssText = `
@@ -1957,15 +2119,19 @@ class ArenaGame {
      */
     fadeOutPlayer(player) {
         if (!player.model) return;
-        
+
         const duration = 3500; // ms - longer fade out for dramatic effect
         const startTime = Date.now();
-        
+        // A reset (new round / rematch) bumps this token and cancels the fade
+        const fadeToken = player.fadeToken = (player.fadeToken || 0) + 1;
+
         const fadeOut = () => {
+            if (player.fadeToken !== fadeToken) return;
+
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / duration, 1);
             const opacity = 1 - progress;
-            
+
             // Apply opacity to all materials
             player.model.traverse((child) => {
                 if (child.isMesh && child.material) {
@@ -1976,7 +2142,7 @@ class ArenaGame {
                     });
                 }
             });
-            
+
             // Continue fading or hide completely
             if (progress < 1) {
                 requestAnimationFrame(fadeOut);
@@ -1991,106 +2157,142 @@ class ArenaGame {
                 }
             }
         };
-        
+
         fadeOut();
     }
-    
+
     handleArenaGameOver(data) {
         console.log('[Arena] Game Over from server:', data);
-        
+
         // Don't show twice
         if (this.gameState === 'finished') {
             console.log('[Arena] Game already finished, ignoring duplicate');
             return;
         }
-        
-        this.gameState = 'finished';
-        
-        // Show full victory screen with confetti
+
+        // Show full victory screen with confetti (or the draw screen), both with REVANCHA
         if (data.winner) {
-            // Find the winner player entity
-            let winnerPlayer = null;
-            this.players.forEach((player, playerId) => {
-                if (player.name === data.winner.name || playerId === data.winner.id) {
-                    winnerPlayer = player;
-                }
-            });
-            
+            // Find the winner player entity (by id first, name as a fallback)
+            let winnerPlayer = this.players.get(data.winner.id) || null;
+            if (!winnerPlayer) {
+                this.players.forEach((player) => {
+                    if (player.name === data.winner.name) winnerPlayer = player;
+                });
+            }
+
             const winnerData = {
                 id: data.winner.id,
                 name: data.winner.name,
                 player: winnerPlayer
             };
-            
+
             console.log('[Arena] Showing victory screen for:', winnerData.name);
             this.showVictoryScreen(winnerData);
         } else {
-            this.showRoundAnnouncement('¡EMPATE!');
-        }
-        
-        // Play victory music
-        if (this.bgmManager) {
-            this.bgmManager.playVictory?.();
+            this.showVictoryScreen(null);
         }
     }
-    
+
     /**
-     * Reset game state for the next round in a tournament
+     * Reset game state for the next round in a tournament, or for a rematch
+     * ('round-starting' with rematch: true). 'game-started' follows ~1 s later and
+     * re-syncs the player list (handleGameStarted).
      */
-    resetForNextRound(data) {
-        console.log('[Arena] Resetting for next round:', data.round);
-        
-        // Hide overlays
-        const gameOverOverlay = document.getElementById('game-over-overlay');
-        const roundEndOverlay = document.getElementById('round-end-overlay');
-        const roomOverlay = document.getElementById('room-code-overlay');
-        
-        if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
-        if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
-        if (roomOverlay) roomOverlay.classList.add('hidden');
-        
-        // Reset game state
-        this.gameState = 'playing';
-        
-        // Reset all players
-        this.players.forEach((player, playerId) => {
-            // Reset health and position
-            player.health = 100;
-            player.stocks = 3;
-            player.isAlive = true;
-            player.controller?.reset?.();
-            
-            // Reset position to spawn point
-            const spawnPoints = [
-                new THREE.Vector3(-5, 0, 0),
-                new THREE.Vector3(5, 0, 0),
-                new THREE.Vector3(-3, 0, 3),
-                new THREE.Vector3(3, 0, -3)
-            ];
-            const spawnIndex = Array.from(this.players.keys()).indexOf(playerId);
-            const spawnPoint = spawnPoints[spawnIndex % spawnPoints.length];
-            
-            player.model.position.copy(spawnPoint);
-            player.model.visible = true;
-            
-            if (player.nameLabel) {
-                player.nameLabel.element.style.display = 'block';
-            }
-            
-            player.playAnimation('idle');
-        });
-        
-        // Reset HUD
-        if (this.hud) {
-            this.hud.updateAllPlayers?.(this.players);
+    resetForNextRound(data = {}) {
+        console.log('[Arena] Resetting for round:', data.round, data.rematch ? '(rematch)' : '');
+
+        // Invalidate timers from the previous match (winner checks, HUD fades...)
+        this.matchId = (this.matchId || 0) + 1;
+
+        // Hide/remove every end-of-match overlay
+        this.removeVictoryOverlay();
+        document.getElementById('round-end-overlay')?.classList.add('hidden');
+        document.getElementById('tournament-end-overlay')?.classList.add('hidden');
+        document.getElementById('room-code-overlay')?.classList.add('hidden');
+        document.querySelectorAll('.elimination-announcement, .grab-indicator').forEach(el => el.remove());
+        this.setRematchButtonsPending(false);
+
+        if (data.rematch) {
+            // Fresh tournament: old scores must not linger in the tournament HUD
+            const scores = document.getElementById('tournament-scores');
+            if (scores) scores.innerHTML = '';
+            const currentRound = document.getElementById('current-round');
+            if (currentRound) currentRound.textContent = '1';
+            this.bgmManager?.playBattle?.();
         }
-        
+
+        // Reset game state (also stops the winner camera zoom loop)
+        this.gameState = 'playing';
+        this.cameraShake = null;
+
+        // Reset all players
+        const total = this.players.size;
+        Array.from(this.players.values()).forEach((player, index) => {
+            this.resetPlayerVisuals(player, getSpawnPosition(index, total));
+            this.hud?.resetPlayer?.(player.id);
+        });
+
         // Show round announcement
-        this.showRoundAnnouncement(`¡RONDA ${data.round}!`);
-        
+        this.showRoundAnnouncement(data.rematch ? '¡REVANCHA!' : `¡RONDA ${data.round}!`);
+
         console.log('[Arena] Reset complete');
     }
-    
+
+    /**
+     * Bring a player entity back to a clean, alive, upright, idle state
+     */
+    resetPlayerVisuals(player, spawnPosition) {
+        // Cancel a running elimination fade
+        player.fadeToken = (player.fadeToken || 0) + 1;
+
+        // Logic state
+        player.controller?.reset?.();
+        if (spawnPosition) {
+            player.controller.position.copy(spawnPosition);
+            player.controller.facingAngle = Math.atan2(-spawnPosition.x, -spawnPosition.z); // face the center
+        }
+
+        // Host-side visual flags
+        player.isBeingThrown = false;
+        player.isFlying = false;
+        player.isBeingCarried = false;
+        player.isEscaping = false;
+        player.isBeingHit = false;
+        player.grabbedEntity = null;
+        player.throwSpin = null;
+        player.ropeSoundPlayed = false;
+
+        // Model back in the scene, visible, opaque and upright
+        if (player.model) {
+            if (!player.model.parent) this.scene.add(player.model);
+            player.model.visible = true;
+            player.model.position.copy(player.controller.position);
+            player.model.rotation.set(0, player.controller.facingAngle || 0, 0);
+            player.model.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach(mat => {
+                        mat.transparent = false;
+                        mat.opacity = 1.0;
+                        mat.needsUpdate = true;
+                    });
+                }
+            });
+        }
+
+        // Floating name label
+        if (player.nameLabel) {
+            if (player.nameLabel.parent !== player.model) player.model.add(player.nameLabel);
+            player.nameLabel.visible = true;
+            if (player.nameLabel.element) player.nameLabel.element.style.display = '';
+        }
+
+        // Animations: clear every lock (attack/block/taunt/carry) and go idle
+        this.endCarryAnimation(player);
+        player.animController?.stopAll?.();
+        player.playAnimation('idle');
+    }
+
     /**
      * Handle block state change
      */
@@ -2109,7 +2311,9 @@ class ArenaGame {
                     this.vfxManager.createBlockShield?.(pos, 0x00bfff);
                 }
             } else {
-                player.playAnimation('idle');
+                // releaseBlock() clears animController.isBlocking (playIdle alone left it set,
+                // so updateFromMovementState bailed out forever) and returns to idle
+                player.animController.releaseBlock();
             }
         }
     }
@@ -2168,7 +2372,8 @@ class ArenaGame {
             victim.controller.isGrabbed = false;
             victim.controller.grabbedBy = null;
             victim.isBeingCarried = false;
-            
+            this.endCarryAnimation(victim);
+
             // Mark as escaping to prevent other animations from interrupting
             victim.isEscaping = true;
             grabber.isBeingHit = true;
@@ -2246,10 +2451,16 @@ class ArenaGame {
         }
     }
     
-    async addPlayer(playerData, index = 0) {
+    async addPlayer(playerData, index = 0, total = Math.max(this.players.size + 1, 4)) {
         if (this.players.has(playerData.id)) return;
         
-        const characterId = playerData.character || 'edgar';
+        // Several events (player-joined, game-started) can add the same player while its
+        // model is still loading: only the latest call for an id may create the entity
+        if (!this.pendingPlayerLoads) this.pendingPlayerLoads = new Map();
+        const loadToken = {};
+        this.pendingPlayerLoads.set(playerData.id, loadToken);
+        
+        const characterId = CHARACTER_MODELS[playerData.character] ? playerData.character : 'edgar';
         let playerModel = this.characterModelCache[characterId];
         
         if (!playerModel) {
@@ -2259,24 +2470,26 @@ class ArenaGame {
             this.characterModelCache[characterId] = playerModel;
         }
         
+        // Superseded by a newer addPlayer, removed meanwhile, or already created
+        if (this.pendingPlayerLoads.get(playerData.id) !== loadToken) return;
+        this.pendingPlayerLoads.delete(playerData.id);
+        if (this.players.has(playerData.id)) return;
+        
+        const number = playerData.number || (index + 1);
         const player = new ArenaPlayerEntity(
             playerData.id,
-            playerData.number,
-            playerData.color || PLAYER_COLORS[(playerData.number - 1) % PLAYER_COLORS.length],
+            number,
+            playerData.color || PLAYER_COLORS[(number - 1) % PLAYER_COLORS.length],
             playerModel,
             this.baseAnimations
         );
+        player.characterId = playerData.character || 'edgar';
         
-        player.setName(playerData.name || `Player ${playerData.number}`);
+        player.setName(playerData.name || `Player ${number}`);
         
-        // Position players around the ring
-        const angle = (index / 4) * Math.PI * 2;
-        const radius = ARENA_CONFIG.RING_SIZE / 3;
-        player.controller.position.set(
-            Math.cos(angle) * radius,
-            ARENA_CONFIG.RING_HEIGHT,
-            Math.sin(angle) * radius
-        );
+        // Position players evenly around the ring (supports up to 8+ players)
+        player.controller.position.copy(getSpawnPosition(index, total));
+        player.controller.facingAngle = Math.atan2(-player.controller.position.x, -player.controller.position.z);
         
         this.scene.add(player.model);
         this.players.set(playerData.id, player);
@@ -2287,6 +2500,7 @@ class ArenaGame {
     }
     
     removePlayer(playerId) {
+        this.pendingPlayerLoads?.delete(playerId); // cancel an in-flight addPlayer
         const player = this.players.get(playerId);
         if (player) {
             this.scene.remove(player.model);

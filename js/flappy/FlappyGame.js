@@ -1,6 +1,6 @@
 /**
  * FlappyGame.js - Multiplayer Flappy Bird mode
- * Up to 4 players compete to fly the farthest without hitting obstacles
+ * Up to 8 players compete to fly the farthest without hitting obstacles
  */
 
 import * as THREE from 'three';
@@ -41,18 +41,40 @@ const GAME_CONFIG = {
     gravity: -25,
     flapStrength: 12,
     gameSpeed: 8,
-    pipeGap: 6,
+    pipeGap: 8,             // Fallback only: each server pipe carries its own gapSize (8 -> 5)
     pipeWidth: 2,
     pipeSpacing: 12,
     groundY: -8,
     ceilingY: 10,
     playerStartX: -5,
     playerSpacing: 1.5,
-    maxPlayers: 4
+    maxLaneSpan: 7,         // Max total depth used by all lanes (keeps 8 players in frame)
+    maxPlayers: 8
 };
 
-// Lane colors for players
-const LANE_COLORS = ['#ff4444', '#44ff44', '#4444ff', '#ffff44'];
+// Lane colors for players (one per possible player)
+const LANE_COLORS = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff', '#ff8844', '#aa66ff'];
+
+/**
+ * Z position of a lane, centered on the current number of players.
+ * Spacing shrinks when there are many players so all lanes stay in frame.
+ */
+function getLaneZ(lane, playerCount) {
+    const count = Math.max(1, playerCount || 1);
+    const spacing = count > 1
+        ? Math.min(GAME_CONFIG.playerSpacing, GAME_CONFIG.maxLaneSpan / (count - 1))
+        : GAME_CONFIG.playerSpacing;
+    return (lane - (count - 1) / 2) * spacing;
+}
+
+/**
+ * Escape text before inserting it with innerHTML
+ */
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
 
 /**
  * FlappyPlayerEntity - Represents a player in Flappy mode
@@ -62,7 +84,7 @@ class FlappyPlayerEntity {
         this.id = playerData.id;
         this.name = playerData.name;
         this.lane = playerData.lane || 0;
-        this.color = LANE_COLORS[this.lane] || '#ffffff';
+        this.color = LANE_COLORS[this.lane % LANE_COLORS.length] || '#ffffff';
         this.scene = scene;
         
         this.isAlive = true;
@@ -75,9 +97,9 @@ class FlappyPlayerEntity {
         this.model = SkeletonUtils.clone(model);
         this.model.scale.set(0.01, 0.01, 0.01);
         
-        // Position based on lane
+        // Position based on lane (re-centered later by FlappyGame.layoutLanes)
         const startX = GAME_CONFIG.playerStartX;
-        const laneZ = (this.lane - (GAME_CONFIG.maxPlayers - 1) / 2) * GAME_CONFIG.playerSpacing;
+        const laneZ = getLaneZ(this.lane, playerData.playerCount || this.lane + 1);
         this.model.position.set(startX, 0, laneZ);
         
         // Rotate to face right (direction of flight)
@@ -355,7 +377,46 @@ class FlappyPlayerEntity {
         }
     }
     
+    /**
+     * Move to a lane (and take its color)
+     */
+    setLane(lane, playerCount) {
+        this.lane = lane;
+        this.color = LANE_COLORS[lane % LANE_COLORS.length] || '#ffffff';
+        if (this.model) {
+            this.model.position.z = getLaneZ(lane, playerCount);
+        }
+        
+        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const el = this.nameLabel?.element;
+        if (el && !isBabyShower) {
+            el.style.color = this.color;
+            el.style.textShadow = `0 0 5px ${this.color}, 0 0 10px rgba(0,0,0,0.8)`;
+        }
+    }
+    
+    /**
+     * Undo the death fade (opacity/transparency) so the model is fully visible again
+     */
+    restoreMaterials() {
+        if (!this.model) return;
+        this.model.traverse((child) => {
+            if (!child.isMesh || !child.material) return;
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach((mat) => {
+                mat.opacity = 1.0;
+                mat.transparent = false;
+                mat.depthWrite = true;
+                mat.needsUpdate = true;
+            });
+        });
+    }
+    
     dispose(scene) {
+        if (this.fadeInterval) {
+            clearInterval(this.fadeInterval);
+            this.fadeInterval = null;
+        }
         if (this.nameLabel) {
             this.model.remove(this.nameLabel);
         }
@@ -390,6 +451,7 @@ class FlappyGame {
         this.animations = {};
         
         this.pipes = [];
+        this.pipeAssets = null; // Shared pipe geometry/material (created once)
         this.ground = null;
         this.gameStarted = false;
         
@@ -402,6 +464,7 @@ class FlappyGame {
         // Host controls
         this.isHost = true; // Host creates the room
         this.currentSpeedMultiplier = 1;
+        this.rematchPending = false;
         
         // Character selection from URL
         this.selectedCharacter = this.getCharacterFromURL() || 'angel';
@@ -462,6 +525,7 @@ class FlappyGame {
         this.setupLights();
         await this.loadAssets();
         this.setupSocket();
+        this.setupRematchButtons();
         
         // Handle resize
         window.addEventListener('resize', () => this.onResize());
@@ -655,6 +719,22 @@ class FlappyGame {
         this.socket = io(SERVER_URL);
         
         this.socket.on('connect', () => {
+            // Reconnected within the recovery window: same socket id, same room, missed events replayed.
+            // Creating a room here would orphan every phone.
+            if (this.socket.recovered) {
+                console.log('[FlappyGame] Connection recovered, keeping room', this.roomCode);
+                return;
+            }
+            
+            if (this.roomCode) {
+                // Session could not be recovered: the old room is gone, start clean in a new one
+                console.warn('[FlappyGame] Could not recover session, creating a new room');
+                this.clearAllPlayers();
+                ['game-over-overlay', 'round-end-overlay', 'tournament-end-overlay', 'countdown-overlay'].forEach((id) => {
+                    document.getElementById(id)?.classList.add('hidden');
+                });
+            }
+            
             console.log('[FlappyGame] Connected to server');
             this.createRoom();
         });
@@ -711,7 +791,7 @@ class FlappyGame {
                         
                         // Keep same position
                         const startX = GAME_CONFIG.playerStartX;
-                        const laneZ = (player.lane - (GAME_CONFIG.maxPlayers - 1) / 2) * GAME_CONFIG.playerSpacing;
+                        const laneZ = player.model ? player.model.position.z : getLaneZ(player.lane, this.players.size);
                         newModel.position.set(startX, 0, laneZ);
                         newModel.rotation.y = Math.PI / 2;
                         
@@ -784,13 +864,23 @@ class FlappyGame {
         
         this.socket.on('player-left', (data) => {
             console.log('[FlappyGame] Player left:', data);
-            this.removePlayer(data.id);
+            this.removePlayer(data?.playerId ?? data?.player?.id ?? data?.id);
             this.updateRoomOverlay();
         });
         
         this.socket.on('game-started', (data) => {
             console.log('[FlappyGame] Game started:', data);
             if (data.gameMode === 'flappy') {
+                // Keep the local roster in sync with the server (players may have left between rounds)
+                if (Array.isArray(data.players)) {
+                    this.syncPlayers(data.players);
+                }
+                
+                // The server re-creates the game every round/rematch at x1: re-apply the host's speed
+                if (this.currentSpeedMultiplier !== 1) {
+                    this.setSpeed(this.currentSpeedMultiplier);
+                }
+                
                 this.showCountdown();
             }
         });
@@ -836,6 +926,9 @@ class FlappyGame {
         
         this.socket.on('tournament-ended', (data) => {
             console.log('[FlappyGame] Tournament ended:', data);
+            this.gameOver = true;
+            this.gameStarted = false;
+            this.resetRematchButtons();
             // Hide game over overlay since tournament end overlay will show
             const gameOverOverlay = document.getElementById('game-over-overlay');
             if (gameOverOverlay) {
@@ -869,7 +962,11 @@ class FlappyGame {
         
         // Show speed control for host
         speedControl.classList.remove('hidden');
-        
+
+        // Bind only once (showRoomCode can run again after a new room is created)
+        if (this.speedControlsBound) return;
+        this.speedControlsBound = true;
+
         const speedButtons = speedControl.querySelectorAll('.speed-btn');
         speedButtons.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -966,6 +1063,10 @@ class FlappyGame {
     }
     
     setupRoundsSelector() {
+        // Bind only once (showRoomCode can run again after a new room is created)
+        if (this.roundsSelectorBound) return;
+        this.roundsSelectorBound = true;
+
         const roundBtns = document.querySelectorAll('.round-btn');
         roundBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -1020,7 +1121,8 @@ class FlappyGame {
                 id: playerData.id,
                 name: playerName,
                 character: characterKey,
-                lane: this.players.size
+                lane: this.players.size,
+                playerCount: this.players.size + 1
             },
             sourceModel,
             this.animations,
@@ -1028,22 +1130,69 @@ class FlappyGame {
         );
         
         this.players.set(playerData.id, player);
+        this.layoutLanes();
         this.updatePlayersPanel();
         console.log(`[FlappyGame] Added player: ${playerName} (${characterKey})`);
     }
-    
+
     removePlayer(playerId) {
+        if (playerId === undefined || playerId === null) return;
         const player = this.players.get(playerId);
         if (player) {
             player.dispose(this.scene);
             this.players.delete(playerId);
+            // Mid-flight keep everyone's lane/color; re-pack lanes between rounds
+            if (!this.gameStarted) {
+                this.layoutLanes();
+            }
             this.updatePlayersPanel();
         }
+    }
+
+    /**
+     * Assign consecutive lanes (and colors) and center them on the player count
+     */
+    layoutLanes() {
+        const count = this.players.size;
+        let lane = 0;
+        this.players.forEach((player) => {
+            player.setLane(lane, count);
+            lane++;
+        });
+    }
+
+    /**
+     * Remove players that are no longer in the room and add any we are missing
+     */
+    syncPlayers(serverPlayers) {
+        const ids = new Set(serverPlayers.map(p => p.id));
+        Array.from(this.players.keys()).forEach((id) => {
+            if (!ids.has(id)) this.removePlayer(id);
+        });
+        serverPlayers.forEach((p) => {
+            if (!this.players.has(p.id)) this.addPlayer(p);
+        });
+        this.layoutLanes();
+        this.updatePlayersPanel();
+    }
+
+    /**
+     * Dispose every player entity (used when the room has to be re-created)
+     */
+    clearAllPlayers() {
+        this.players.forEach((player) => player.dispose(this.scene));
+        this.players.clear();
+        this.clearPipes();
+        this.gameStarted = false;
+        this.gameOver = false;
+        this.updatePlayersPanel();
     }
     
     updatePlayersPanel() {
         const panel = document.getElementById('players-status');
         panel.innerHTML = '';
+        // Compact layout when many players are in the room (up to 8)
+        document.getElementById('players-panel')?.classList.toggle('many-players', this.players.size > 4);
         
         this.players.forEach((player, id) => {
             const slot = document.createElement('div');
@@ -1052,7 +1201,7 @@ class FlappyGame {
             
             slot.innerHTML = `
                 <div class="player-badge" style="background: ${player.color}">${player.lane + 1}</div>
-                <span class="player-name">${player.name}</span>
+                <span class="player-name">${escapeHtml(player.name)}</span>
                 <span class="player-status-icon"></span>
             `;
             
@@ -1074,7 +1223,15 @@ class FlappyGame {
         roomOverlay?.classList.add('hidden');
         gameOverOverlay?.classList.add('hidden');
         roundEndOverlay?.classList.add('hidden');
+        document.getElementById('tournament-end-overlay')?.classList.add('hidden');
         countdownOverlay?.classList.remove('hidden');
+
+        // Undo the previous round's '¡VUELA!' styling
+        const countdownNumber = document.getElementById('countdown-number');
+        if (countdownNumber) {
+            countdownNumber.textContent = '3';
+            countdownNumber.style.color = '';
+        }
     }
     
     updateCountdown(count) {
@@ -1149,8 +1306,7 @@ class FlappyGame {
         
         this.pipes = this.pipes.filter(pipe => {
             if (!serverPipeIds.has(pipe.id)) {
-                this.scene.remove(pipe.topMesh);
-                this.scene.remove(pipe.bottomMesh);
+                this.removePipe(pipe);
                 return false;
             }
             return true;
@@ -1172,27 +1328,48 @@ class FlappyGame {
         }
     }
     
+    /**
+     * Geometry/material shared by every pipe (created once, never disposed per pipe)
+     */
+    getPipeAssets() {
+        if (!this.pipeAssets) {
+            const isBabyShower = document.documentElement.classList.contains('baby-theme');
+            const pipeColor = isBabyShower ? 0xA2D2FF : 0x2ECC71;
+            this.pipeAssets = {
+                pipeGeometry: new THREE.BoxGeometry(GAME_CONFIG.pipeWidth, 20, GAME_CONFIG.pipeWidth),
+                capGeometry: new THREE.BoxGeometry(GAME_CONFIG.pipeWidth + 0.5, 0.8, GAME_CONFIG.pipeWidth + 0.5),
+                material: new THREE.MeshStandardMaterial({
+                    color: pipeColor,
+                    roughness: 0.5,
+                    metalness: 0.2
+                })
+            };
+        }
+        return this.pipeAssets;
+    }
+
+    removePipe(pipe) {
+        // Geometry/material are shared, so only detach the meshes
+        if (pipe.topMesh) this.scene.remove(pipe.topMesh);
+        if (pipe.bottomMesh) this.scene.remove(pipe.bottomMesh);
+    }
+
+    clearPipes() {
+        this.pipes.forEach(pipe => this.removePipe(pipe));
+        this.pipes = [];
+    }
+
     createPipe(pipeData) {
-        const pipeGeometry = new THREE.BoxGeometry(
-            GAME_CONFIG.pipeWidth,
-            20,
-            GAME_CONFIG.pipeWidth
-        );
-        
-        const isBabyShower = document.documentElement.classList.contains('baby-theme');
-        const pipeColor = isBabyShower ? 0xA2D2FF : 0x2ECC71;
-        
-        const pipeMaterial = new THREE.MeshStandardMaterial({
-            color: pipeColor,
-            roughness: 0.5,
-            metalness: 0.2
-        });
-        
+        const { pipeGeometry, capGeometry, material: pipeMaterial } = this.getPipeAssets();
+
+        // Draw the same gap the server collides against (it shrinks as the run goes on)
+        const gapSize = Number.isFinite(pipeData.gapSize) ? pipeData.gapSize : GAME_CONFIG.pipeGap;
+
         // Top pipe
         const topMesh = new THREE.Mesh(pipeGeometry, pipeMaterial);
         topMesh.position.set(
             pipeData.x,
-            pipeData.gapY + GAME_CONFIG.pipeGap / 2 + 10,
+            pipeData.gapY + gapSize / 2 + 10,
             0
         );
         topMesh.castShadow = true;
@@ -1202,19 +1379,13 @@ class FlappyGame {
         const bottomMesh = new THREE.Mesh(pipeGeometry, pipeMaterial);
         bottomMesh.position.set(
             pipeData.x,
-            pipeData.gapY - GAME_CONFIG.pipeGap / 2 - 10,
+            pipeData.gapY - gapSize / 2 - 10,
             0
         );
         bottomMesh.castShadow = true;
         this.scene.add(bottomMesh);
         
         // Pipe caps
-        const capGeometry = new THREE.BoxGeometry(
-            GAME_CONFIG.pipeWidth + 0.5,
-            0.8,
-            GAME_CONFIG.pipeWidth + 0.5
-        );
-        
         const topCap = new THREE.Mesh(capGeometry, pipeMaterial);
         topCap.position.y = -10;
         topMesh.add(topCap);
@@ -1265,7 +1436,7 @@ class FlappyGame {
         notification.className = 'death-notification';
         notification.innerHTML = `
             <span class="death-icon">💀</span>
-            <span class="death-text">${playerName} ha caído!</span>
+            <span class="death-text">${escapeHtml(playerName)} ha caído!</span>
         `;
         
         // Add to game container
@@ -1289,12 +1460,14 @@ class FlappyGame {
     fadeOutPlayer(player) {
         if (!player.model) return;
         
-        // Fade out the model over 1 second
+        // Fade out the model over 1 second (tracked so a reset can cancel it)
+        if (player.fadeInterval) clearInterval(player.fadeInterval);
         let opacity = 1;
         const fadeInterval = setInterval(() => {
             opacity -= 0.05;
             if (opacity <= 0) {
                 clearInterval(fadeInterval);
+                if (player.fadeInterval === fadeInterval) player.fadeInterval = null;
                 player.model.visible = false;
                 if (player.nameLabel) {
                     player.nameLabel.element.style.display = 'none';
@@ -1308,8 +1481,9 @@ class FlappyGame {
                 });
             }
         }, 50);
+        player.fadeInterval = fadeInterval;
     }
-    
+
     showGameOver(data) {
         this.gameOver = true;
         this.gameStarted = false;
@@ -1355,84 +1529,150 @@ class FlappyGame {
                 item.className = `final-score-item ${result.isAlive ? 'survivor' : 'eliminated'}`;
                 item.innerHTML = `
                     <span class="rank">${medal}</span>
-                    <span class="name">${result.name}</span>
+                    <span class="name">${escapeHtml(result.name)}</span>
                     <span class="status">${status}</span>
                 `;
                 finalScores.appendChild(item);
             });
         }
         
-        // Play again button
-        document.getElementById('play-again-btn').onclick = () => {
-            window.location.reload();
-        };
-        
+        // Rematch button (handler bound once in setupRematchButtons)
+        this.resetRematchButtons();
+
         document.getElementById('state-text').textContent = 'FIN DEL JUEGO';
     }
     
     /**
-     * Reset game state for the next round in a tournament
+     * Bind the REVANCHA buttons once (game-over overlay and tournament-end overlay)
      */
-    resetForNextRound(data) {
-        console.log('[FlappyGame] Resetting for next round:', data.round);
-        
-        // Hide overlays
-        const gameOverOverlay = document.getElementById('game-over-overlay');
-        const roundEndOverlay = document.getElementById('round-end-overlay');
-        
-        if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
-        if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
-        
+    setupRematchButtons() {
+        if (this.rematchButtonsBound) return;
+        this.rematchButtonsBound = true;
+        this.getRematchButtons().forEach((btn) => {
+            btn.addEventListener('click', () => this.requestRematch());
+        });
+        this.resetRematchButtons();
+    }
+
+    getRematchButtons() {
+        return ['play-again-btn', 'tournament-rematch-btn']
+            .map(id => document.getElementById(id))
+            .filter(Boolean);
+    }
+
+    setRematchButtons(disabled, label) {
+        this.getRematchButtons().forEach((btn) => {
+            btn.disabled = disabled;
+            btn.textContent = label;
+        });
+    }
+
+    resetRematchButtons() {
+        this.rematchPending = false;
+        this.setRematchButtons(false, 'REVANCHA');
+    }
+
+    /**
+     * Ask the server to restart Flappy with the same room and players.
+     * On success the server emits 'round-starting' (rematch: true) and then 'game-started'.
+     */
+    requestRematch() {
+        if (this.rematchPending || !this.socket) return;
+
+        this.rematchPending = true;
+        this.setRematchButtons(true, 'PREPARANDO...');
+
+        this.socket.timeout(8000).emit('request-rematch', (err, res) => {
+            if (!err && res && res.success) {
+                // 'round-starting' (already received, it is emitted before this ack) resets the UI
+                return;
+            }
+
+            const reason = err ? 'Sin respuesta del servidor' : (res?.error || 'Error desconocido');
+            console.warn('[FlappyGame] Rematch failed:', reason);
+            this.resetRematchButtons();
+            document.getElementById('state-text').textContent = `No se pudo iniciar la revancha: ${reason}`;
+        });
+    }
+
+    /**
+     * Reset game state for the next tournament round or a rematch (round 1 from scratch)
+     */
+    resetForNextRound(data = {}) {
+        const isRematch = !!data.rematch;
+        console.log('[FlappyGame] Resetting for round:', data.round, isRematch ? '(rematch)' : '');
+
+        // Hide every end-of-game overlay
+        ['game-over-overlay', 'round-end-overlay', 'tournament-end-overlay'].forEach((id) => {
+            document.getElementById(id)?.classList.add('hidden');
+        });
+        this.resetRematchButtons();
+
         // Reset game state
         this.gameStarted = false;
         this.gameOver = false;
         this.currentDistance = 0;
-        
+
         // Remove all pipes from the scene
-        this.pipes.forEach(pipe => {
-            if (pipe.topMesh) this.scene.remove(pipe.topMesh);
-            if (pipe.bottomMesh) this.scene.remove(pipe.bottomMesh);
-        });
-        this.pipes = [];
-        
+        this.clearPipes();
+
         // Reset all players to starting positions
-        let laneIndex = 0;
-        this.players.forEach((player, playerId) => {
+        this.players.forEach((player) => {
+            // Cancel a death fade that may still be running
+            if (player.fadeInterval) {
+                clearInterval(player.fadeInterval);
+                player.fadeInterval = null;
+            }
+
             // Reset player state
             player.isAlive = true;
+            player.deathOrder = undefined;
             player.y = 0;
             player.velocity = 0;
             player.lastVelocity = 0;
             player.distance = 0;
-            player.lane = laneIndex;
-            
-            // Reset position
-            const startX = -5; // GAME_CONFIG.playerStartX
-            const laneZ = (player.lane - (4 - 1) / 2) * 1.5; // GAME_CONFIG.playerSpacing
-            player.model.position.set(startX, 0, laneZ);
+
+            // Reset position (lane z is set by layoutLanes below)
+            player.model.position.set(GAME_CONFIG.playerStartX, 0, player.model.position.z);
             player.model.rotation.set(0, Math.PI / 2, 0);
-            
-            // Reset model visibility
+
+            // Reset model visibility and undo the death fade on the materials
+            player.restoreMaterials();
             player.model.visible = true;
             if (player.nameLabel) {
-                player.nameLabel.element.style.display = 'block';
+                player.nameLabel.element.style.display = '';
             }
-            
-            laneIndex++;
+            if (player.currentAction) {
+                player.currentAction.timeScale = 1.0;
+            }
         });
-        
+        this.layoutLanes();
+
+        if (isRematch) {
+            // Fresh match: forget the previous tournament (scores, winners, confetti)
+            if (this.tournamentManager) {
+                this.tournamentManager.roundWinners = [];
+                this.tournamentManager.playerScores = {};
+                this.tournamentManager.currentRound = 1;
+            }
+            const scores = document.getElementById('tournament-scores');
+            if (scores) scores.innerHTML = '';
+            const confetti = document.getElementById('tournament-confetti');
+            if (confetti) confetti.innerHTML = '';
+        }
+
         // Reset camera
         this.camera.position.set(0, 5, 25);
         this.camera.lookAt(0, 0, 0);
-        
+
         // Reset HUD
         document.getElementById('distance-value').textContent = '0m';
-        document.getElementById('state-text').textContent = 'Preparando siguiente ronda...';
+        document.getElementById('state-text').textContent = isRematch ? '¡Revancha! Preparando...' : 'Preparando siguiente ronda...';
         this.updatePlayersPanel();
-        
+
         console.log('[FlappyGame] Reset complete, waiting for countdown');
     }
-    
+
     updateCamera() {
         if (!this.gameStarted || this.players.size === 0) return;
         

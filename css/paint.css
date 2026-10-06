@@ -123,3 +123,51 @@
     to { transform: translateX(0); opacity: 1; }
 }
 
+
+/* Elements inside the results overlay that use the generic .hidden class */
+#results-overlay .hidden {
+    display: none !important;
+}
+
+.results-buttons {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+.btn-rematch,
+#results-overlay .btn-return-menu {
+    padding: 15px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.btn-rematch {
+    background: #ffcc00;
+    color: #000;
+    box-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+}
+
+#results-overlay .btn-return-menu {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.btn-rematch:hover:not(:disabled),
+#results-overlay .btn-return-menu:hover {
+    transform: scale(1.05);
+}
+
+.btn-rematch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}

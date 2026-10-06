@@ -50,12 +50,43 @@ app.use(express.static(projectRoot)); // Serve HTML files from root
 const httpServer = createServer(app);
 
 // Initialize Socket.IO with CORS
+// How long a dropped connection (Wi-Fi blip, phone screen lock) can come back
+// with the same socket id, rooms and missed events before the player is removed.
+const RECONNECT_GRACE_MS = 30000;
+
 const io = new Server(httpServer, {
     cors: {
         origin: CORS_ORIGIN,
         methods: ['GET', 'POST']
+    },
+    connectionStateRecovery: {
+        maxDisconnectionDuration: RECONNECT_GRACE_MS,
+        skipMiddlewares: true
     }
 });
+
+// Sockets that dropped without leaving on purpose: socketId -> removal timer
+const pendingDisconnects = new Map();
+
+/**
+ * Clean user-provided text before it is stored or broadcast.
+ * Removes characters that could inject HTML (hosts and phones render names with innerHTML)
+ * and control characters, trims and caps the length.
+ */
+function sanitizeText(value, maxLength = 20) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/[<>"'`&\\]/g, '')
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength);
+}
+
+/** Character ids are short slugs like "edgar" or "lia" */
+function isValidCharacterId(value) {
+    return typeof value === 'string' && /^[a-z0-9_-]{1,32}$/i.test(value);
+}
 
 // Initialize managers
 const lobbyManager = new LobbyManager();
@@ -102,7 +133,7 @@ flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
                 results: results
             });
             // Start next round after 5 seconds
-            setTimeout(() => startNextRoundFlappy(roomCode), 5000);
+            scheduleRoomTimer(roomCode, () => startNextRoundFlappy(roomCode), 5000);
             return false; // Don't emit default game-over
         }
     }
@@ -168,7 +199,7 @@ function startNextRoundFlappy(roomCode) {
     }));
     
     // Small delay before actually starting
-    setTimeout(() => {
+    scheduleRoomTimer(roomCode, () => {
         // Reinitialize flappy game
         flappyStateManager.initializeGame(roomCode, players);
         flappyStateManager.startCountdown(roomCode, io);
@@ -246,7 +277,14 @@ app.get('/api/room/:code', (req, res) => {
 // =================================
 
 io.on('connection', (socket) => {
-    console.log(`[Socket] Client connected: ${socket.id}`);
+    console.log(`[Socket] Client connected: ${socket.id}${socket.recovered ? ' (recovered)' : ''}`);
+
+    // A dropped client came back in time: keep its room, player slot and game state
+    if (socket.recovered && pendingDisconnects.has(socket.id)) {
+        clearTimeout(pendingDisconnects.get(socket.id));
+        pendingDisconnects.delete(socket.id);
+        console.log(`[Socket] ${socket.id} reconnected within the grace period`);
+    }
     
     // ========== HOST EVENTS (Main Screen) ==========
     
@@ -442,8 +480,9 @@ io.on('connection', (socket) => {
      * Join an existing room
      */
     socket.on('join-room', (data, callback) => {
-        const { roomCode, playerName } = data;
-        
+        const roomCode = typeof data?.roomCode === 'string' ? data.roomCode.trim() : '';
+        const playerName = sanitizeText(data?.playerName) || undefined;
+                
         const result = lobbyManager.joinRoom(roomCode, socket.id, playerName);
         
         if (result.success) {
@@ -466,9 +505,12 @@ io.on('connection', (socket) => {
     /**
      * Update player name (specifically for baby shower mode)
      */
-    socket.on('update-player-name', (newName) => {
+    socket.on('update-player-name', (rawName) => {
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
         if (!roomCode) return;
+
+        const newName = sanitizeText(rawName);
+        if (!newName) return;
 
         const room = lobbyManager.rooms.get(roomCode);
         if (!room) return;
@@ -512,9 +554,16 @@ io.on('connection', (socket) => {
      */
     socket.on('select-character', (data, callback) => {
         // Support both old format (string) and new format (object with characterId and characterName)
-        const characterId = typeof data === 'string' ? data : data.characterId;
-        const characterName = typeof data === 'object' ? data.characterName : null;
-        
+        const characterId = typeof data === 'string' ? data : data?.characterId;
+        const characterName = (data && typeof data === 'object') ? (sanitizeText(data.characterName) || null) : null;
+
+        if (!isValidCharacterId(characterId)) {
+            if (typeof callback === 'function') {
+                callback({ success: false, error: 'Invalid character' });
+            }
+            return;
+        }
+                
         const result = lobbyManager.selectCharacter(socket.id, characterId, characterName);
         
         if (result.success) {
@@ -573,7 +622,7 @@ io.on('connection', (socket) => {
     socket.on('puzzle-guess', (guess) => {
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
         if (roomCode) {
-            wordPuzzleStateManager.handleGuess(socket.id, roomCode, guess);
+            wordPuzzleStateManager.handleGuess(socket.id, roomCode, sanitizeText(guess, 40));
         }
     });
     
@@ -920,34 +969,56 @@ io.on('connection', (socket) => {
     /**
      * Request rematch
      */
+    /**
+     * Rematch: restart the current mode from round 1 with the same players.
+     * The host can restart any time; a phone only after the match/round has ended.
+     * Clients receive 'round-starting' ({ round: 1, rematch: true }) and then 'game-started',
+     * the same events as a tournament's next round.
+     */
     socket.on('request-rematch', (callback) => {
+        const reply = (result) => { if (typeof callback === 'function') callback(result); };
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
-        
-        if (!roomCode) {
-            if (typeof callback === 'function') {
-                callback({ success: false, error: 'Not in a room' });
-            }
-            return;
+        if (!roomCode) return reply({ success: false, error: 'Not in a room' });
+
+        const room = lobbyManager.rooms.get(roomCode);
+        if (!room) return reply({ success: false, error: 'Room not found' });
+        if (room.players.size === 0) return reply({ success: false, error: 'No players in room' });
+        if (room.state === 'lobby') return reply({ success: false, error: 'Game has not started' });
+
+        const mode = room.gameMode || 'smash';
+        const isHost = room.hostId === socket.id;
+        if (!isHost && isModeRunning(roomCode, mode)) {
+            return reply({ success: false, error: 'Match in progress' });
         }
-        
-        const result = gameStateManager.resetGame(roomCode);
-        
-        if (result.success) {
-            stopGameLoop(roomCode);
-            io.to(roomCode).emit('game-reset', result);
-        }
-        
-        if (typeof callback === 'function') {
-            callback(result);
-        }
+
+        restartMatch(roomCode);
+        reply({ success: true });
     });
     
     /**
      * Handle disconnection
      */
-    socket.on('disconnect', () => {
-        console.log(`[Socket] Client disconnected: ${socket.id}`);
-        handleDisconnect(socket);
+    socket.on('disconnect', (reason) => {
+        console.log(`[Socket] Client disconnected: ${socket.id} (${reason})`);
+
+        // Leaving on purpose (socket.disconnect() / server kick): remove right away
+        if (reason === 'client namespace disconnect' || reason === 'server namespace disconnect') {
+            handleDisconnect(socket);
+            return;
+        }
+
+        // Network drop: keep everything for a grace period so the client can recover.
+        // Stop the player's movement meanwhile so they don't keep running.
+        lobbyManager.updatePlayerInput(socket.id, {
+            left: false, right: false, up: false, down: false,
+            jump: false, punch: false, kick: false, run: false
+        });
+        if (pendingDisconnects.has(socket.id)) clearTimeout(pendingDisconnects.get(socket.id));
+        pendingDisconnects.set(socket.id, setTimeout(() => {
+            pendingDisconnects.delete(socket.id);
+            console.log(`[Socket] ${socket.id} did not come back, removing`);
+            handleDisconnect(socket);
+        }, RECONNECT_GRACE_MS + 2000));
     });
 });
 
@@ -1017,62 +1088,187 @@ function startNextRound(roomCode, gameMode) {
         totalRounds: advanceResult.totalRounds
     });
     
-    // Get players for the new round
-    const players = Array.from(room.players.values()).map(p => ({
+    // Small delay before actually starting
+    scheduleRoomTimer(roomCode, () => startModeRound(roomCode, gameMode), 1000);
+}
+
+/**
+ * Players payload for 'game-started' (same shape as start-game)
+ */
+function buildPlayersData(room, gameMode) {
+    return Array.from(room.players.values()).map(p => ({
         id: p.id,
-        name: p.name,
+        name: gameMode === 'race'
+            ? (p.characterName || (p.character ? p.character.charAt(0).toUpperCase() + p.character.slice(1) : p.name))
+            : p.name,
         number: p.number,
         color: p.color,
         character: p.character || 'edgar'
     }));
-    
-    // Small delay before actually starting
-    setTimeout(() => {
-        // Reinitialize game state based on mode
-        if (gameMode === 'arena') {
-            arenaStateManager.initializeArena(roomCode);
-            stopArenaLoop(roomCode);
-            startArenaLoop(roomCode);
-        } else if (gameMode === 'race') {
-            raceStateManager.initializeRace(roomCode);
-            stopRaceLoop(roomCode);
-            raceStateManager.startCountdown(roomCode, io, () => {
-                startRaceLoop(roomCode);
-            });
-        } else if (gameMode === 'flappy') {
-            flappyStateManager.initializeGame(roomCode, players);
-            flappyStateManager.startCountdown(roomCode, io);
-        } else if (gameMode === 'tag') {
-            tagStateManager.initializeTag(roomCode);
-            stopTagLoop(roomCode);
-            startTagLoop(roomCode);
-        } else if (gameMode === 'paint') {
-            paintStateManager.initializePaint(roomCode);
-            stopPaintLoop(roomCode);
-            startPaintLoop(roomCode);
-        } else if (gameMode === 'balloon') {
-            balloonStateManager.initializeBalloon(roomCode);
-            stopBalloonLoop(roomCode);
-            startBalloonLoop(roomCode);
-        } else {
-            // Smash mode
-            stopGameLoop(roomCode);
-            startGameLoop(roomCode);
-        }
-        
-        // Get tournament state
-        const tournamentState = lobbyManager.getTournamentState(roomCode);
-        
-        // Emit game-started for the new round
-        io.to(roomCode).emit('game-started', {
-            success: true,
-            players: players,
-            gameMode: gameMode,
-            tournamentRounds: tournamentState?.tournamentRounds || 1,
-            currentRound: tournamentState?.currentRound || 1,
-            playerScores: tournamentState?.playerScores || {}
+}
+
+/**
+ * (Re)initialize a mode's state, start its loop and announce 'game-started'.
+ * Used by tournament rounds and rematches.
+ */
+function startModeRound(roomCode, gameMode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return;
+
+    let players = buildPlayersData(room, gameMode);
+
+    if (gameMode === 'arena') {
+        arenaStateManager.initializeArena(roomCode);
+        stopArenaLoop(roomCode);
+        startArenaLoop(roomCode);
+    } else if (gameMode === 'race') {
+        raceStateManager.initializeRace(roomCode);
+        stopRaceLoop(roomCode);
+        raceStateManager.startCountdown(roomCode, io, () => {
+            startRaceLoop(roomCode);
         });
-    }, 1000);
+    } else if (gameMode === 'flappy') {
+        flappyStateManager.initializeGame(roomCode, players);
+        flappyStateManager.startCountdown(roomCode, io);
+    } else if (gameMode === 'tag') {
+        tagStateManager.initializeTag(roomCode);
+        stopTagLoop(roomCode);
+        startTagLoop(roomCode);
+    } else if (gameMode === 'tug') {
+        const tugPlayers = tugStateManager.initializeTug(roomCode);
+        if (tugPlayers) players = tugPlayers;
+        stopTugLoop(roomCode);
+        startTugLoop(roomCode);
+    } else if (gameMode === 'paint') {
+        paintStateManager.initializePaint(roomCode);
+        stopPaintLoop(roomCode);
+        startPaintLoop(roomCode);
+    } else if (gameMode === 'balloon') {
+        balloonStateManager.initializeBalloon(roomCode);
+        stopBalloonLoop(roomCode);
+        startBalloonLoop(roomCode);
+    } else if (gameMode === 'trivia') {
+        triviaStateManager.initializeTrivia(roomCode);
+        stopTriviaLoop(roomCode);
+        startTriviaLoop(roomCode);
+    } else if (gameMode === 'word_puzzle') {
+        wordPuzzleStateManager.initializePuzzle(roomCode);
+        stopPuzzleLoop(roomCode);
+        startPuzzleLoop(roomCode);
+    } else if (gameMode === 'maze') {
+        mazeStateManager.initializeMaze(roomCode);
+        stopMazeLoop(roomCode);
+        startMazeLoop(roomCode);
+    } else {
+        // Smash mode
+        stopGameLoop(roomCode);
+        startGameLoop(roomCode);
+    }
+
+    // Get tournament state
+    const tournamentState = lobbyManager.getTournamentState(roomCode);
+
+    // Emit game-started for the new round
+    io.to(roomCode).emit('game-started', {
+        success: true,
+        players: players,
+        gameMode: gameMode,
+        tournamentRounds: tournamentState?.tournamentRounds || 1,
+        currentRound: tournamentState?.currentRound || 1,
+        playerScores: tournamentState?.playerScores || {}
+    });
+}
+
+// One pending round/rematch timer per room, so a rematch cancels a queued tournament round
+const roomTimers = new Map();
+
+function scheduleRoomTimer(roomCode, fn, delayMs) {
+    clearRoomTimer(roomCode);
+    roomTimers.set(roomCode, setTimeout(() => {
+        roomTimers.delete(roomCode);
+        fn();
+    }, delayMs));
+}
+
+function clearRoomTimer(roomCode) {
+    const timer = roomTimers.get(roomCode);
+    if (timer) {
+        clearTimeout(timer);
+        roomTimers.delete(roomCode);
+    }
+}
+
+/**
+ * Stop every mode loop for a room
+ */
+function stopAllLoops(roomCode) {
+    stopGameLoop(roomCode);
+    stopArenaLoop(roomCode);
+    stopRaceLoop(roomCode);
+    stopFlappyLoop(roomCode);
+    stopTagLoop(roomCode);
+    stopTugLoop(roomCode);
+    stopPaintLoop(roomCode);
+    stopBalloonLoop(roomCode);
+    stopTriviaLoop(roomCode);
+    stopPuzzleLoop(roomCode);
+    stopMazeLoop(roomCode);
+}
+
+/**
+ * Whether a match/round is currently being played (used to stop phones from restarting it)
+ */
+function isModeRunning(roomCode, gameMode) {
+    if (roomTimers.has(roomCode)) return true; // A round is about to start
+    switch (gameMode) {
+        case 'arena': return arenaLoops.has(roomCode);
+        case 'race': {
+            const race = raceStateManager.raceStates.get(roomCode);
+            return raceLoops.has(roomCode) || (race && (race.state === 'countdown' || race.state === 'racing'));
+        }
+        case 'flappy': {
+            const game = flappyStateManager.games.get(roomCode);
+            return !!game && !game.gameOver;
+        }
+        case 'tag': return tagLoops.has(roomCode);
+        case 'tug': return tugLoops.has(roomCode);
+        case 'paint': return paintLoops.has(roomCode);
+        case 'balloon': return balloonLoops.has(roomCode);
+        case 'trivia': return triviaLoops.has(roomCode);
+        case 'word_puzzle': return puzzleLoops.has(roomCode);
+        case 'maze': return mazeLoops.has(roomCode);
+        default: return gameLoops.has(roomCode);
+    }
+}
+
+/**
+ * Restart the room's current mode from round 1 with the same players
+ */
+function restartMatch(roomCode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return false;
+    const gameMode = room.gameMode || 'smash';
+
+    clearRoomTimer(roomCode);
+    stopAllLoops(roomCode);
+
+    // Fresh tournament and player state
+    room.currentRound = 1;
+    room.roundWinners = [];
+    room.playerScores = {};
+    lobbyManager.resetPlayersForRound(room);
+    room.state = 'playing';
+
+    console.log(`[Rematch] Restarting ${gameMode} in room ${roomCode}`);
+
+    io.to(roomCode).emit('round-starting', {
+        round: 1,
+        totalRounds: room.tournamentRounds || 1,
+        rematch: true
+    });
+
+    scheduleRoomTimer(roomCode, () => startModeRound(roomCode, gameMode), 1000);
+    return true;
 }
 
 /**
@@ -1092,7 +1288,12 @@ function handleDisconnect(socket) {
             stopTugLoop(result.roomCode);
             stopPaintLoop(result.roomCode);
             stopBalloonLoop(result.roomCode);
+            stopTriviaLoop(result.roomCode);
+            stopPuzzleLoop(result.roomCode);
+            stopMazeLoop(result.roomCode);
+            clearRoomTimer(result.roomCode);
             arenaStateManager.cleanup(result.roomCode);
+            raceStateManager.removeRace(result.roomCode);
 
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
@@ -1119,6 +1320,9 @@ function handleDisconnect(socket) {
                     reason: 'disconnect'
                 });
             }
+
+            // Race: unfinished leavers are dropped so the race can still end
+            raceStateManager.removePlayer(result.roomCode, socket.id);
 
             // Smash: if the leaver leaves one player standing, end the match
             const room = lobbyManager.rooms.get(result.roomCode);
@@ -1199,7 +1403,7 @@ function finishSmashMatch(roomCode, gameOver) {
         } else if (roundResult.action === 'round-end') {
             io.to(roomCode).emit('round-ended', roundResult);
             // Start next round after 5 seconds
-            setTimeout(() => startNextRound(roomCode, 'smash'), 5000);
+            scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'smash'), 5000);
         }
     } else {
         // Single round, just emit game-over
@@ -1315,7 +1519,7 @@ function finishArenaRound(roomCode, gameOver) {
                 gameMode: 'arena'
             });
             // Start next round after 5 seconds
-            setTimeout(() => startNextRound(roomCode, 'arena'), 5000);
+            scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'arena'), 5000);
         }
     } else {
         // Single round, just emit game-over
@@ -1377,7 +1581,7 @@ function startTagLoop(roomCode) {
                             gameMode: 'tag'
                         });
                         // Start next round after 5 seconds
-                        setTimeout(() => startNextRound(roomCode, 'tag'), 5000);
+                        scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'tag'), 5000);
                     }
                 } else {
                     // Single round, just emit game-over
@@ -1444,7 +1648,7 @@ function startTugLoop(roomCode) {
                             ...roundResult,
                             gameMode: 'tug'
                         });
-                        setTimeout(() => startNextRound(roomCode, 'tug'), 5000);
+                        scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'tug'), 5000);
                     }
                 } else {
                     io.to(roomCode).emit('tug-game-over', state);
@@ -1493,8 +1697,8 @@ function startPaintLoop(roomCode) {
                 if (room && room.tournamentRounds > 1) {
                     const roundResult = handleRoundEnd(
                         roomCode, 
-                        state.winner.id,
-                        state.winner.name,
+                        state.winner?.id,
+                        state.winner?.name,
                         'paint'
                     );
                     
@@ -1510,7 +1714,7 @@ function startPaintLoop(roomCode) {
                             gameMode: 'paint',
                             paintResults: state.results
                         });
-                        setTimeout(() => startNextRound(roomCode, 'paint'), 5000);
+                        scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'paint'), 5000);
                     }
                 } else {
                     io.to(roomCode).emit('paint-game-over', state);
@@ -1559,8 +1763,8 @@ function startBalloonLoop(roomCode) {
                 if (room && room.tournamentRounds > 1) {
                     const roundResult = handleRoundEnd(
                         roomCode, 
-                        state.winner.id,
-                        state.winner.name,
+                        state.winner?.id,
+                        state.winner?.name,
                         'balloon'
                     );
                     
@@ -1574,7 +1778,7 @@ function startBalloonLoop(roomCode) {
                             ...roundResult,
                             gameMode: 'balloon'
                         });
-                        setTimeout(() => startNextRound(roomCode, 'balloon'), 5000);
+                        scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'balloon'), 5000);
                     }
                 } else {
                     io.to(roomCode).emit('balloon-game-over', state);
@@ -1612,7 +1816,8 @@ function startRaceLoop(roomCode) {
     
     const tickRate = 1000 / 30; // 30 FPS for race
     let lastTime = Date.now();
-    
+    let announcedFinishers = 0; // 'race-finish' is sent once per finisher
+        
     const loop = setInterval(() => {
         const now = Date.now();
         const delta = (now - lastTime) / 1000; // Delta in seconds
@@ -1624,16 +1829,16 @@ function startRaceLoop(roomCode) {
             // Send state to all clients in room
             io.to(roomCode).emit('race-state', state);
             
-            // Check for race finish (first player crossed)
-            if (state.finishOrder && state.finishOrder.length > 0) {
-                const latestFinisher = state.players.find(p => 
-                    p.id === state.finishOrder[state.finishOrder.length - 1] && p.finished
-                );
-                if (latestFinisher) {
+            // Announce each new finisher exactly once
+            const finishOrder = state.finishOrder || [];
+            while (announcedFinishers < finishOrder.length) {
+                const finisher = state.players.find(p => p.id === finishOrder[announcedFinishers]);
+                announcedFinishers++;
+                if (finisher) {
                     io.to(roomCode).emit('race-finish', {
-                        playerId: latestFinisher.id,
-                        time: latestFinisher.finishTime,
-                        position: latestFinisher.finishPosition
+                        playerId: finisher.id,
+                        time: finisher.finishTime,
+                        position: finisher.finishPosition
                     });
                 }
             }
@@ -1647,9 +1852,9 @@ function startRaceLoop(roomCode) {
                 const room = lobbyManager.rooms.get(roomCode);
                 if (room && room.tournamentRounds > 1 && winnerInfo) {
                     const roundResult = handleRoundEnd(
-                        roomCode, 
-                        winnerInfo.id, 
-                        winnerInfo.name,
+                        roomCode,
+                        winnerInfo.winnerId,
+                        winnerInfo.winnerName,
                         'race'
                     );
                     
@@ -1666,7 +1871,7 @@ function startRaceLoop(roomCode) {
                             raceWinner: winnerInfo
                         });
                         // Start next round after 5 seconds
-                        setTimeout(() => startNextRound(roomCode, 'race'), 5000);
+                        scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'race'), 5000);
                     }
                 } else if (winnerInfo) {
                     // Single round, just emit race-winner

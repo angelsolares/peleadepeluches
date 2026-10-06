@@ -180,23 +180,18 @@
             </div>
             
             <div class="controller-body">
-                <!-- D-Pad (Left side) -->
-                <div class="dpad-container">
-                    <div class="dpad">
-                        <button class="dpad-btn dpad-up" data-input="jump">
-                            <span class="arrow">▲</span>
-                        </button>
-                        <button class="dpad-btn dpad-left" data-input="left">
-                            <span class="arrow">◀</span>
-                        </button>
-                        <div class="dpad-center"></div>
-                        <button class="dpad-btn dpad-right" data-input="right">
-                            <span class="arrow">▶</span>
-                        </button>
-                        <button class="dpad-btn dpad-down" data-input="run">
-                            <span class="arrow">▼</span>
-                            <span class="label">RUN</span>
-                        </button>
+                <!-- Analog joystick (Left side): one thumb, 8 directions -->
+                <div class="dpad-container joystick-container">
+                    <div class="joystick-zone" id="joystick-zone" aria-label="Joystick de movimiento">
+                        <div class="joystick-base" id="joystick-base">
+                            <span class="joystick-arrow joy-up">▲</span>
+                            <span class="joystick-arrow joy-down">▼</span>
+                            <span class="joystick-arrow joy-left">◀</span>
+                            <span class="joystick-arrow joy-right">▶</span>
+                            <div class="joystick-run-ring"></div>
+                            <div class="joystick-knob" id="joystick-knob"></div>
+                        </div>
+                        <span class="joystick-hint" id="joystick-hint"></span>
                     </div>
                 </div>
                 
@@ -351,7 +346,8 @@
             <div class="overlay-content">
                 <h2 id="game-over-title">¡JUEGO TERMINADO!</h2>
                 <p id="game-over-message">Ganador: Player 1</p>
-                <button id="rematch-btn" class="btn-primary">REVANCHA</button>
+                <button id="rematch-btn" class="btn-primary rematch-btn">REVANCHA</button>
+                <p id="rematch-error" class="rematch-error" role="status" aria-live="polite"></p>
                 <button id="exit-btn" class="btn-secondary">SALIR</button>
             </div>
         </div>
@@ -375,8 +371,16 @@
                 <h2 class="tournament-title">¡TORNEO TERMINADO!</h2>
                 <p id="tournament-winner" class="tournament-champion"></p>
                 <div id="tournament-mobile-scores" class="tournament-scores"></div>
-                <button id="tournament-exit-btn" class="btn-primary">VOLVER</button>
+                <button id="tournament-rematch-btn" class="btn-primary rematch-btn">REVANCHA</button>
+                <p id="tournament-rematch-error" class="rematch-error" role="status" aria-live="polite"></p>
+                <button id="tournament-exit-btn" class="btn-secondary">VOLVER</button>
             </div>
+        </div>
+
+        <!-- Non-blocking reconnection notice -->
+        <div id="reconnect-notice" class="reconnect-notice hidden" role="status" aria-live="polite">
+            <span class="status-dot"></span>
+            <span class="reconnect-text">Reconectando...</span>
         </div>
         
         <!-- Tournament HUD (shown during game) -->

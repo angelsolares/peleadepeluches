@@ -3,6 +3,19 @@
  * Displays player health, stamina, and status indicators
  */
 
+// Player-provided text must be escaped before going through innerHTML
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+}
+
+// Only allow plain CSS colors (hex / named) inside the inline style
+function safeColor(value) {
+    const color = String(value ?? '');
+    return /^#[0-9a-f]{3,8}$/i.test(color) || /^[a-z]+$/i.test(color) ? color : '#ffffff';
+}
+
 class ArenaHUD {
     constructor() {
         this.container = document.getElementById('arena-player-huds');
@@ -38,13 +51,14 @@ class ArenaHUD {
         hud.dataset.playerId = player.id;
         
         const controller = player.controller;
-        
+        const color = safeColor(player.color);
+
         hud.innerHTML = `
             <div class="arena-hud-header">
-                <div class="arena-player-badge" style="background: ${player.color}; box-shadow: 0 0 15px ${player.color};">
-                    P${player.number}
+                <div class="arena-player-badge" style="background: ${color}; box-shadow: 0 0 15px ${color};">
+                    P${escapeHtml(player.number)}
                 </div>
-                <span class="arena-player-name">${player.name}</span>
+                <span class="arena-player-name">${escapeHtml(player.name)}</span>
             </div>
             
             <div class="arena-health-container">
@@ -130,6 +144,26 @@ class ArenaHUD {
         }
     }
     
+    /**
+     * Undo hidePlayer()/showElimination() for a new round or rematch
+     * @param {string} playerId - Player ID
+     */
+    resetPlayer(playerId) {
+        const hudData = this.playerHUDs.get(playerId);
+        if (!hudData) return;
+
+        const hud = hudData.element;
+        hud.classList.remove('eliminated', 'fading-out');
+        hud.style.transition = '';
+        hud.style.opacity = '';
+        hud.style.transform = '';
+        hud.style.animation = '';
+        hud.querySelectorAll('.eliminated-overlay, .arena-eliminated-overlay, .arena-status-indicator, .arena-damage-number')
+            .forEach(el => el.remove());
+
+        this.updatePlayer(hudData.player);
+    }
+
     /**
      * Update a player's HUD display
      * @param {object} player - Player entity

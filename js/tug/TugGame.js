@@ -44,6 +44,16 @@ const ANIMATION_FILES = {
     crawling: 'Crawling.fbx'
 };
 
+// Escape text before inserting it with innerHTML (defense in depth; names are sanitized server-side)
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 class TugPlayerEntity {
     constructor(id, number, color, team, baseModel, baseAnimations) {
         this.id = id;
@@ -65,6 +75,8 @@ class TugPlayerEntity {
         this.animController.play('idle'); // Ensure idle plays immediately
         this.isPulling = false;
         this.pullEndTime = 0;
+        this.homeX = 0;          // Position relative to the rope center
+        this.finalAnim = null;   // 'win' / 'lose' once the match is over
     }
     
     createNameLabel(color) {
@@ -98,24 +110,56 @@ class TugPlayerEntity {
         }
     }
 
-    update(delta, state) {
-        if (state) {
-            if (state.pullQuality > 0) {
-                this.isPulling = true;
-                this.pullEndTime = Date.now() + 500;
+    /**
+     * Apply a server snapshot (no animation work here)
+     */
+    applyState(state) {
+        if (state && state.pullQuality > 0) {
+            this.isPulling = true;
+            this.pullEndTime = Date.now() + 500;
+        }
+    }
+
+    /**
+     * Final win/lose animation; keeps playing after the server stops sending state
+     */
+    setFinalAnim(animName) {
+        this.finalAnim = animName;
+        this.isPulling = false;
+        if (animName === 'lose') {
+            // Fall once and stay down instead of looping the fall
+            const action = this.animController.actions.lose;
+            if (action) {
+                action.setLoop(THREE.LoopOnce);
+                action.clampWhenFinished = true;
             }
         }
+        this.animController.play(animName, 0.2);
+    }
 
-        if (this.isPulling && Date.now() > this.pullEndTime) {
-            this.isPulling = false;
+    clearFinalAnim() {
+        this.finalAnim = null;
+        this.isPulling = false;
+        this.animController.play('idle', 0.2);
+    }
+
+    /**
+     * Per-frame update from the render loop (single shared delta)
+     */
+    tick(delta) {
+        if (!this.finalAnim) {
+            if (this.isPulling && Date.now() > this.pullEndTime) {
+                this.isPulling = false;
+            }
+            // play() is a no-op if the animation is already running
+            this.animController.play(this.isPulling ? 'pull' : 'idle', 0.1);
         }
-
-        let animName = 'idle';
-        if (this.isPulling) animName = 'pull';
-        
-        // Use play() to switch animations and update() for mixer
-        this.animController.play(animName, 0.1);
         this.animController.update(delta);
+    }
+
+    dispose() {
+        this.animController?.dispose();
+        this.nameLabel?.element?.parentNode?.removeChild(this.nameLabel.element);
     }
 }
 
@@ -137,7 +181,10 @@ class TugGame {
         this.rope = null;
         this.marker = null;
         this.markerPos = 0;
-        
+        this.ropeTargetX = 0;   // World X the rope should reach (from server markerPos)
+        this.ropeX = 0;         // Smoothed world X of rope, marker and teams
+        this.rematchPending = false;
+
         this.init();
     }
 
@@ -292,6 +339,45 @@ class TugGame {
                 from { transform: translateX(-50%) scale(1); }
                 to { transform: translateX(-50%) scale(1.1); }
             }
+            #tug-rematch-panel {
+                position: fixed;
+                bottom: 12%;
+                left: 50%;
+                transform: translateX(-50%);
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+                z-index: 150;
+                pointer-events: auto;
+            }
+            #tug-rematch-panel.visible { display: flex; }
+            #tug-rematch-btn {
+                padding: 15px 50px;
+                font-family: 'Orbitron', sans-serif;
+                font-size: 1.3rem;
+                font-weight: 900;
+                letter-spacing: 3px;
+                background: linear-gradient(135deg, #9966ff, #ff3366);
+                color: #fff;
+                border: none;
+                border-radius: 50px;
+                cursor: pointer;
+                box-shadow: 0 0 25px rgba(153, 102, 255, 0.6);
+                transition: all 0.3s ease;
+            }
+            #tug-rematch-btn:not(:disabled):hover {
+                transform: scale(1.05);
+                box-shadow: 0 0 35px rgba(153, 102, 255, 0.9);
+            }
+            #tug-rematch-btn:disabled { opacity: 0.6; cursor: wait; }
+            #tug-rematch-error {
+                min-height: 1.2em;
+                font-family: 'Orbitron', sans-serif;
+                font-size: 0.85rem;
+                color: #ff3366;
+                text-shadow: 0 0 6px rgba(0,0,0,0.8);
+            }
         `;
         document.head.appendChild(style);
     }
@@ -413,11 +499,25 @@ class TugGame {
         script.onload = () => {
             this.socket = io(SERVER_URL);
             this.socket.on('connect', () => {
+                // Recovered connection (Socket.IO connectionStateRecovery): same id, same room,
+                // missed events are replayed. Creating a room here would orphan all phones.
+                if (this.socket.recovered) {
+                    console.log(`[Tug] Connection recovered, keeping room ${this.roomCode}`);
+                    return;
+                }
+
+                // Reconnected but the session could not be recovered: the old room is gone
+                if (this.roomCode) {
+                    console.warn('[Tug] Session lost, creating a new room');
+                    this.cleanupGame();
+                    this.gameStarted = false;
+                }
+
                 const isBabyShower = document.documentElement.classList.contains('baby-theme');
-            this.socket.emit('create-room', { 
-                gameMode: 'tug',
-                isBabyShower: isBabyShower
-            }, (response) => {
+                this.socket.emit('create-room', {
+                    gameMode: 'tug',
+                    isBabyShower: isBabyShower
+                }, (response) => {
                     if (response.success) {
                         this.roomCode = response.roomCode;
                         this.showRoomUI(this.roomCode);
@@ -425,11 +525,29 @@ class TugGame {
                 });
             });
 
+            // Lobby counters (registered once, not per room UI)
+            this.socket.on('player-joined', (data) => {
+                this.updateLobbyCount(data?.room?.playerCount ?? this.players.size);
+            });
+            this.socket.on('player-left', (data) => {
+                this.updateLobbyCount(data?.room ? data.room.playerCount : this.players.size);
+            });
+
+            // Rematch (and tournament rounds): announced ~1 s before 'game-started'
+            this.socket.on('round-starting', (data) => {
+                console.log('[Tug] Round starting', data);
+                this.hideRematchPanel();
+                this.ropeTargetX = 0;
+                this.players.forEach(entity => entity.clearFinalAnim());
+                const status = document.getElementById('tug-game-status');
+                if (status) status.textContent = data?.rematch ? '¡REVANCHA!' : '¡PREPÁRENSE!';
+            });
+
             this.socket.on('game-started', (data) => {
                 this.cleanupGame();
                 this.gameStarted = true;
                 this.hideRoomUI();
-                this.setupPlayers(data.players);
+                this.setupPlayers(data.players || []);
                 this.setupRhythmHUD();
             });
 
@@ -440,6 +558,7 @@ class TugGame {
     }
 
     showRoomUI(code) {
+        this.hideRoomUI(); // Never stack overlays (e.g. new room after a lost session)
         const overlay = document.createElement('div');
         overlay.id = 'tug-room-overlay';
         overlay.style.cssText = `
@@ -472,39 +591,23 @@ class TugGame {
         `;
         document.body.appendChild(overlay);
 
-        this.socket.on('player-joined', (data) => {
-            const count = data.room.playerCount;
-            const playerCountElem = document.getElementById('player-count');
-            if (playerCountElem) playerCountElem.textContent = `Jugadores: ${count} / 8`;
-            
-            const btn = document.getElementById('start-btn');
-            if (btn && count >= 2) {
+        document.getElementById('start-btn').onclick = () => this.socket.emit('start-game');
+    }
+
+    updateLobbyCount(count) {
+        const playerCountElem = document.getElementById('player-count');
+        if (playerCountElem) playerCountElem.textContent = `Jugadores: ${count} / 8`;
+
+        const btn = document.getElementById('start-btn');
+        if (btn) {
+            if (count >= 2) {
                 btn.disabled = false;
                 btn.textContent = '¡INICIAR!';
-            } else if (btn) {
+            } else {
                 btn.disabled = true;
                 btn.textContent = 'ESPERANDO JUGADORES...';
             }
-        });
-
-        this.socket.on('player-left', (data) => {
-            const count = data.room ? data.room.playerCount : this.players.size;
-            const playerCountElem = document.getElementById('player-count');
-            if (playerCountElem) playerCountElem.textContent = `Jugadores: ${count} / 8`;
-            
-            const btn = document.getElementById('start-btn');
-            if (btn) {
-                if (count >= 2) {
-                    btn.disabled = false;
-                    btn.textContent = '¡INICIAR!';
-                } else {
-                    btn.disabled = true;
-                    btn.textContent = 'ESPERANDO JUGADORES...';
-                }
-            }
-        });
-
-        document.getElementById('start-btn').onclick = () => this.socket.emit('start-game');
+        }
     }
 
     hideRoomUI() {
@@ -516,12 +619,11 @@ class TugGame {
         this.players.forEach(entity => {
             if (entity.model) {
                 this.scene.remove(entity.model);
-                if (entity.animController) {
-                    entity.animController.dispose();
-                }
+                entity.dispose();
             }
         });
         this.players.clear();
+        this.hideRematchPanel();
 
         // Clear existing UI elements to prevent overlap
         const elementsToRemove = [
@@ -539,6 +641,8 @@ class TugGame {
 
         // Reset positions
         this.markerPos = 0;
+        this.ropeTargetX = 0;
+        this.ropeX = 0;
         if (this.marker) this.marker.position.x = 0;
         if (this.rope) this.rope.position.x = 0;
     }
@@ -568,7 +672,8 @@ class TugGame {
             const pIdx = teamPlayers.findIndex(tp => tp.id === p.id);
             const x = (team === 'left' ? -1 : 1) * (TUG_CONFIG.SIDE_OFFSET + pIdx * TUG_CONFIG.PLAYER_SPACING);
             const z = (pIdx % 2 === 0 ? 1 : -1) * 0.8; // Closer to the rope
-            entity.model.position.set(x, 0.8, z); // Raised even more to align hands perfectly with rope at 1.2
+            entity.homeX = x; // Teams slide with the rope from this offset (see animate)
+            entity.model.position.set(x + this.ropeX, 0.8, z); // Raised even more to align hands perfectly with rope at 1.2
             // Swapped signs: Left team faces X+, Right team faces X-
             entity.model.rotation.y = (team === 'left' ? -1 : 1) * Math.PI / 2;
         });
@@ -603,8 +708,6 @@ class TugGame {
     updateGameState(state) {
         if (!state) return;
 
-        const delta = this.clock.getDelta();
-
         // Handle countdown and timer
         const countdownEl = document.getElementById('tug-countdown');
         const timerEl = document.getElementById('tug-timer');
@@ -617,9 +720,8 @@ class TugGame {
             }
             if (timerEl) timerEl.style.display = 'none';
             if (statusEl) statusEl.textContent = '¡PREPÁRENSE!';
-            
-            // Still update animations during countdown
-            this.players.forEach(entity => entity.update(delta, null));
+
+            // Animations keep running in the render loop
             return;
         } else if (state.gameState === 'active') {
             if (countdownEl) countdownEl.style.display = 'none';
@@ -638,27 +740,19 @@ class TugGame {
             if (timerEl) timerEl.style.display = 'none';
         }
 
-        // Update rope and marker position
+        // Rope target position (rope, marker and both teams are moved in animate())
         // Map server -100...100 to world -25...25
-        const worldPos = (state.markerPos / 100) * 25;
-        this.marker.position.x = worldPos;
-        this.rope.position.x = worldPos;
+        this.markerPos = state.markerPos || 0;
+        this.ropeTargetX = (this.markerPos / 100) * 25;
 
-        // Update rhythm cursor
-        const now = Date.now();
-        const pulseInterval = 1500;
-        const progress = (now % pulseInterval) / pulseInterval;
-        const cursor = document.getElementById('tug-rhythm-cursor');
-        if (cursor) cursor.style.left = `${progress * 100}%`;
-
-        // Update each player animation and sync names if they changed
-        state.players.forEach(pState => {
+        // Apply player state and sync names if they changed (animations run in animate())
+        (state.players || []).forEach(pState => {
             const entity = this.players.get(pState.id);
             if (entity) {
                 if (pState.name && entity.name !== pState.name) {
                     entity.setName(pState.name);
                 }
-                entity.update(delta, pState);
+                entity.applyState(pState);
             }
         });
     }
@@ -667,12 +761,13 @@ class TugGame {
         let winnerTeamName = 'EMPATE';
         let winners = [];
         
+        const resultPlayers = data.players || [];
         if (data.winnerTeam === 'left') {
             winnerTeamName = 'EQUIPO IZQUIERDO';
-            winners = data.players.filter(p => p.team === 'left').map(p => p.name);
+            winners = resultPlayers.filter(p => p.team === 'left').map(p => escapeHtml(p.name));
         } else if (data.winnerTeam === 'right') {
             winnerTeamName = 'EQUIPO DERECHO';
-            winners = data.players.filter(p => p.team === 'right').map(p => p.name);
+            winners = resultPlayers.filter(p => p.team === 'right').map(p => escapeHtml(p.name));
         }
 
         const status = document.getElementById('tug-game-status');
@@ -695,16 +790,100 @@ class TugGame {
         const timer = document.getElementById('tug-timer');
         if (timer) timer.style.display = 'none';
         
-        // Final animations
+        // Final animations (kept alive by the render loop; draw = both teams idle)
         this.players.forEach(entity => {
-            const isWinner = entity.team === data.winnerTeam;
-            entity.animController.play(isWinner ? 'win' : 'lose', 0.2);
+            if (data.winnerTeam === 'draw') {
+                entity.setFinalAnim('idle');
+            } else {
+                entity.setFinalAnim(entity.team === data.winnerTeam ? 'win' : 'lose');
+            }
+        });
+
+        this.showRematchPanel();
+    }
+
+    // =================================
+    // Rematch
+    // =================================
+
+    ensureRematchPanel() {
+        let panel = document.getElementById('tug-rematch-panel');
+        if (panel) return panel;
+
+        panel = document.createElement('div');
+        panel.id = 'tug-rematch-panel';
+        const btn = document.createElement('button');
+        btn.id = 'tug-rematch-btn';
+        btn.type = 'button';
+        btn.textContent = 'REVANCHA';
+        btn.addEventListener('click', () => this.requestRematch());
+        const error = document.createElement('div');
+        error.id = 'tug-rematch-error';
+        panel.appendChild(btn);
+        panel.appendChild(error);
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    setRematchButtonState(pending, errorText) {
+        this.rematchPending = pending;
+        const btn = document.getElementById('tug-rematch-btn');
+        if (btn) {
+            btn.disabled = pending;
+            btn.textContent = pending ? 'PREPARANDO...' : 'REVANCHA';
+        }
+        const error = document.getElementById('tug-rematch-error');
+        if (error) error.textContent = errorText || '';
+    }
+
+    showRematchPanel() {
+        this.ensureRematchPanel().classList.add('visible');
+        this.setRematchButtonState(false);
+    }
+
+    hideRematchPanel() {
+        document.getElementById('tug-rematch-panel')?.classList.remove('visible');
+        this.setRematchButtonState(false);
+    }
+
+    requestRematch() {
+        if (this.rematchPending || !this.socket) return;
+        this.setRematchButtonState(true);
+
+        // Timeout so the button never stays stuck if the ack is lost
+        this.socket.timeout(5000).emit('request-rematch', (err, res) => {
+            if (err || !res?.success) {
+                const reason = err ? 'Sin respuesta del servidor' : (res?.error || 'No se pudo iniciar la revancha');
+                console.warn('[Tug] Rematch failed:', reason);
+                this.setRematchButtonState(false, reason);
+            }
+            // On success the panel stays until 'round-starting' hides it
         });
     }
 
     animate() {
         requestAnimationFrame(() => this.animate());
-        const delta = this.clock.getDelta();
+        // One shared delta per frame (clamped to avoid jumps after tab switches)
+        const delta = Math.min(this.clock.getDelta(), 0.1);
+
+        // Smoothly slide rope, marker and both teams towards the server position
+        this.ropeX += (this.ropeTargetX - this.ropeX) * Math.min(1, delta * 10);
+        if (this.rope) this.rope.position.x = this.ropeX;
+        if (this.marker) this.marker.position.x = this.ropeX;
+
+        this.players.forEach(entity => {
+            entity.model.position.x = entity.homeX + this.ropeX;
+            entity.tick(delta);
+        });
+
+        // Rhythm cursor (purely visual, independent of server ticks)
+        const cursor = document.getElementById('tug-rhythm-cursor');
+        if (cursor) {
+            const pulseInterval = 1500;
+            const progress = (Date.now() % pulseInterval) / pulseInterval;
+            cursor.style.left = `${progress * 100}%`;
+        }
+
         this.renderer.render(this.scene, this.camera);
         this.labelRenderer.render(this.scene, this.camera);
     }

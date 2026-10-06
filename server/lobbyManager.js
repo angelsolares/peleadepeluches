@@ -584,24 +584,9 @@ class LobbyManager {
         
         room.currentRound++;
         room.state = 'playing';
-        
+
         // Reset player states for new round (keep character selections)
-        const playerCount = room.players.size;
-        let index = 0;
-        room.players.forEach((player) => {
-            player.health = 0;
-            player.stocks = 3;
-            player.ready = false;
-            // Physics state (used by Smash) must not carry over from the previous round
-            player.position = { x: (index - (playerCount - 1) / 2) * 2.5, y: 0, z: 0 };
-            player.velocity = { x: 0, y: 0, z: 0 };
-            player.previousY = 0;
-            player.hitstunUntil = 0;
-            player.attackReadyAt = 0;
-            player.isBlocking = false;
-            player.isTaunting = false;
-            index++;
-        });
+        this.resetPlayersForRound(room);
         
         console.log(`[Lobby] Room ${roomCode} advancing to round ${room.currentRound}`);
         
@@ -644,6 +629,33 @@ class LobbyManager {
         };
     }
     
+    /**
+     * Reset per-round player state (keeps names, characters and seats).
+     * Physics state (used by Smash) must not carry over between rounds/rematches.
+     * @param {object} room - Room object
+     */
+    resetPlayersForRound(room) {
+        const playerCount = room.players.size;
+        let index = 0;
+        room.players.forEach((player) => {
+            player.health = 0;
+            player.stocks = 3;
+            player.ready = false;
+            player.position = { x: (index - (playerCount - 1) / 2) * 2.5, y: 0, z: 0 };
+            player.velocity = { x: 0, y: 0, z: 0 };
+            player.previousY = 0;
+            player.hitstunUntil = 0;
+            player.attackReadyAt = 0;
+            player.isBlocking = false;
+            player.isTaunting = false;
+            player.input = {
+                left: false, right: false, up: false, down: false,
+                jump: false, punch: false, kick: false, run: false
+            };
+            index++;
+        });
+    }
+
     /**
      * Get tournament state for a room
      * @param {string} roomCode - Room code

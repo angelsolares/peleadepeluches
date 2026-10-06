@@ -1592,8 +1592,12 @@ async function addPlayer(playerData) {
     // If model not in cache, load it
     if (!playerModel) {
         playerModel = await loadCharacterModel(characterId);
+        // Another call may have added this player while the model was loading
+        if (players.has(playerData.id)) {
+            return players.get(playerData.id);
+        }
     }
-    
+
     const player = new PlayerEntity(
         playerData.id,
         playerData.number,
@@ -1686,9 +1690,16 @@ function initializeSocket() {
     });
     
     socket.on('connect', () => {
+        // Recovered reconnect (connectionStateRecovery): same socket id, same room, missed
+        // events replayed by the server. Creating a room here would orphan every phone.
+        if (socket.recovered) {
+            console.log(`[Socket] Connection recovered, still in room ${roomCode}`);
+            return;
+        }
+
         console.log('[Socket] Connected to server');
         isHost = true;
-        
+
         // Create room as host with selected game mode (host is display only, not a player)
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
         socket.emit('create-room', { 
@@ -1733,9 +1744,12 @@ function initializeSocket() {
     socket.on('player-block-state', handlePlayerBlockState);
     socket.on('player-taunting', handlePlayerTaunt);
     
-    // Tournament events - listen for round transitions
+    // Tournament events - listen for round transitions (also used for rematches: data.rematch)
     socket.on('round-starting', (data) => {
         console.log('[Smash] Round starting:', data);
+        if (data && data.rematch) {
+            resetTournamentForRematch();
+        }
         resetForNextRound(data);
     });
     
@@ -1759,6 +1773,13 @@ function initializeSocket() {
     
     // Initialize tournament manager
     window.tournamentManager = new TournamentManager(socket, 'smash');
+
+    // REVANCHA on the tournament-end screen (button lives in smash.html; wire it once)
+    const tournamentRematchBtn = document.getElementById('tournament-rematch-btn');
+    if (tournamentRematchBtn && !tournamentRematchBtn.dataset.wired) {
+        tournamentRematchBtn.dataset.wired = 'true';
+        tournamentRematchBtn.addEventListener('click', () => requestRematch());
+    }
 }
 
 function showRoomCode(code) {
@@ -1976,10 +1997,17 @@ function handleReadyChanged(data) {
     console.log('[Game] Ready changed:', data);
 }
 
+// Bumped on every 'game-started'; an older (still loading) handler stops when it sees a newer one
+let gameStartGeneration = 0;
+
 async function handleGameStarted(data) {
     console.log('[Game] Game started!', data);
+    const generation = ++gameStartGeneration;
     gameState = 'playing';
-    
+
+    // A new match/round never keeps the previous end-of-match screens
+    hideEndOfMatchUI();
+
     // Remove local test player
     if (players.has('local')) {
         removePlayer('local');
@@ -2002,7 +2030,8 @@ async function handleGameStarted(data) {
     for (const playerData of data.players) {
         console.log(`[Game] Creating player ${playerData.name} with character: ${playerData.character}`);
         const player = await addPlayer(playerData);
-        
+        if (generation !== gameStartGeneration) return; // superseded by a newer game-started
+
         // Reset player state for new game
         if (player) {
             player.controller.health = 0;
@@ -2248,16 +2277,10 @@ function handleGameOver(data) {
  */
 function resetForNextRound(data) {
     console.log('[Smash] Resetting for next round:', data.round);
-    
-    // Hide overlays
-    const gameOverOverlay = document.getElementById('game-over-overlay');
-    const roundEndOverlay = document.getElementById('round-end-overlay');
-    const roomOverlay = document.getElementById('room-code-overlay');
-    
-    if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
-    if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
-    if (roomOverlay) roomOverlay.classList.add('hidden');
-    
+
+    // Hide overlays (game over, round end, tournament end, confetti, room code)
+    hideEndOfMatchUI();
+
     // Reset game state
     gameState = 'playing';
     
@@ -2275,31 +2298,42 @@ function resetForNextRound(data) {
     
     let playerIndex = 0;
     players.forEach((player, playerId) => {
+        const spawnPoint = spawnPoints[playerIndex % spawnPoints.length];
+
         // Reset controller state
         if (player.controller) {
             player.controller.health = 0;
             player.controller.stocks = 3;
             player.controller.velocity = new THREE.Vector3();
+            player.controller.position.copy(spawnPoint);
             player.controller.isGrounded = false;
+            player.controller.isAttacking = false;
+            player.controller.isBlocking = false;
+            player.controller.isTaunting = false;
+            player.controller.input = {
+                left: false, right: false, jump: false, punch: false,
+                kick: false, run: false, block: false
+            };
         }
-        
-        // Reset position
-        const spawnPoint = spawnPoints[playerIndex % spawnPoints.length];
+
+        // Reset position and visibility (eliminated players were hidden by handleGameState)
         player.model.position.copy(spawnPoint);
         player.model.visible = true;
-        
+
         if (player.nameLabel) {
-            player.nameLabel.element.style.display = 'block';
+            player.nameLabel.visible = true;
         }
-        
+
+        // Clear any attack/block/taunt/fall lock so idle can actually play
+        player.animController?.stopAll();
         player.playAnimation('idle');
+
+        updatePlayerHUD(player);
+        const playerHud = document.getElementById(`hud-${playerId}`);
+        if (playerHud) playerHud.classList.remove('hit', 'ko');
+
         playerIndex++;
     });
-    
-    // Update HUD
-    if (hud) {
-        hud.updateAllPlayers?.(players);
-    }
     
     // BGM: Back to battle music
     if (bgmManager) {
@@ -2312,10 +2346,13 @@ function resetForNextRound(data) {
     console.log('[Smash] Reset complete');
 }
 
+// Legacy: the server no longer emits 'game-reset' (rematch now uses round-starting + game-started).
+// Kept harmless in case an older server sends it.
 function handleGameReset(data) {
     console.log('[Game] Game reset');
     gameState = 'lobby';
-    
+    hideEndOfMatchUI();
+
     // BGM: Back to character select music
     if (bgmManager) {
         bgmManager.playCharacterSelect();
@@ -2388,6 +2425,10 @@ function showGameOverUI(data) {
                 color: #0a0a15;
                 cursor: pointer;
             }
+            .game-over-content button:disabled {
+                opacity: 0.5;
+                cursor: wait;
+            }
             #game-over-overlay.hidden {
                 display: none;
             }
@@ -2395,14 +2436,12 @@ function showGameOverUI(data) {
         document.head.appendChild(style);
         document.body.appendChild(overlay);
         
-        document.getElementById('rematch-btn').addEventListener('click', () => {
-            if (socket) {
-                socket.emit('request-rematch');
-            }
-            overlay.classList.add('hidden');
-        });
+        document.getElementById('rematch-btn').addEventListener('click', () => requestRematch());
     }
-    
+
+    // Fresh button for every game over (it may have been left disabled by a previous request)
+    resetRematchButtons();
+
     const winnerText = overlay.querySelector('#winner-text');
     const winnerName = overlay.querySelector('#winner-name');
     
@@ -2415,6 +2454,85 @@ function showGameOverUI(data) {
     }
     
     overlay.classList.remove('hidden');
+}
+
+// =================================
+// Rematch
+// =================================
+
+const REMATCH_BUTTON_IDS = ['rematch-btn', 'tournament-rematch-btn'];
+let rematchPending = false;
+
+/**
+ * Ask the server for a rematch. On success the server emits 'round-starting' ({ rematch: true })
+ * and then 'game-started'; those handlers reset the screen (see resetForNextRound / handleGameStarted).
+ */
+function requestRematch() {
+    if (!socket || !socket.connected || rematchPending) return;
+
+    rematchPending = true;
+    REMATCH_BUTTON_IDS.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'ESPERANDO...';
+        }
+    });
+
+    socket.timeout(8000).emit('request-rematch', (err, res) => {
+        rematchPending = false;
+        if (err || !res || !res.success) {
+            const reason = err ? 'sin respuesta del servidor' : (res?.error || 'error desconocido');
+            console.warn('[Rematch] Request failed:', reason);
+            updateAnimationDisplay(`No se pudo iniciar la revancha (${reason})`);
+            resetRematchButtons();
+        }
+        // On success the overlays are closed by the 'round-starting' handler
+    });
+}
+
+function resetRematchButtons() {
+    REMATCH_BUTTON_IDS.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'REVANCHA';
+        }
+    });
+}
+
+/**
+ * Hide every end-of-match screen (game over, round end, tournament end, confetti, room code)
+ */
+function hideEndOfMatchUI() {
+    ['game-over-overlay', 'round-end-overlay', 'tournament-end-overlay', 'room-code-overlay'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+
+    const confetti = document.getElementById('tournament-confetti');
+    if (confetti) confetti.innerHTML = '';
+
+    resetRematchButtons();
+}
+
+/**
+ * A rematch restarts the tournament from round 1 with no scores.
+ * Runs before TournamentManager's own 'round-starting' listener (registered later),
+ * so its HUD refresh already sees the cleared scores.
+ */
+function resetTournamentForRematch() {
+    const tm = window.tournamentManager;
+    if (tm) {
+        tm.currentRound = 1;
+        tm.roundWinners = [];
+        tm.playerScores = {};
+        tm.clearLocalStorage?.();
+    }
+
+    // TournamentManager.updateHUD() leaves the old scores in place when there are none, so clear them here
+    const scores = document.getElementById('tournament-scores');
+    if (scores) scores.innerHTML = '';
 }
 
 // =================================
@@ -2546,23 +2664,33 @@ function updateAnimationDisplay(name) {
 
 const playerHudsContainer = document.getElementById('player-huds');
 
+/**
+ * Escape player-provided text before putting it in innerHTML
+ */
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
+
 function createPlayerHUD(player) {
     const hud = document.createElement('div');
     hud.className = 'player-hud';
     hud.id = `hud-${player.id}`;
     hud.dataset.playerId = player.id;
-    
+
+    const color = escapeHtml(player.color);
     hud.innerHTML = `
         <div class="player-hud-header">
-            <div class="player-badge" style="background: ${player.color}; box-shadow: 0 0 15px ${player.color};">
-                P${player.number}
+            <div class="player-badge" style="background: ${color}; box-shadow: 0 0 15px ${color};">
+                P${escapeHtml(player.number)}
             </div>
-            <span class="player-name">${player.name}</span>
+            <span class="player-name">${escapeHtml(player.name)}</span>
         </div>
         <div class="player-damage low">0%</div>
         <div class="player-stocks">
             ${[0, 1, 2].map(i => `
-                <div class="stock-icon" style="border-color: ${player.color}; background: ${player.color};"></div>
+                <div class="stock-icon" style="border-color: ${color}; background: ${color};"></div>
             `).join('')}
         </div>
     `;

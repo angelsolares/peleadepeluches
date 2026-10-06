@@ -45,6 +45,15 @@ const ANIMATION_FILES = {
     crawling: 'Crawling.fbx'
 };
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 class BalloonPlayerEntity {
     constructor(id, name, number, color, baseModel, baseAnimations, sfxManager, vfxManager) {
         this.id = id;
@@ -77,8 +86,30 @@ class BalloonPlayerEntity {
         this.pumpEndTime = 0;
         this.isPopped = false;
         this.lastServerState = null;
-        
+        this.isFinished = false; // Match over: keep the win/lose animation
+
         this.originalBalloonPos = this.balloon.position.clone();
+        // Smoothed rise height (the tension shake is applied as an offset on top of it)
+        this.baseBalloonY = this.originalBalloonPos.y;
+
+        // Reused per frame to avoid allocations
+        this._targetScale = new THREE.Vector3();
+        this._baseColor = new THREE.Color(color);
+        this._tensionRed = new THREE.Color(0xff0000);
+    }
+
+    /**
+     * Remove from the scene and free resources (CSS2D label elements are not
+     * removed from the DOM automatically when the parent model is removed)
+     */
+    dispose(scene) {
+        this.model.traverse(obj => {
+            if (obj.isCSS2DObject && obj.element) obj.element.remove();
+        });
+        if (scene) scene.remove(this.model);
+        this.animController?.dispose?.();
+        this.balloon.geometry?.dispose();
+        this.balloon.material?.dispose();
     }
     
     pop() {
@@ -165,7 +196,7 @@ class BalloonPlayerEntity {
     }
 
     update(delta) {
-        if (this.isPopped) {
+        if (this.isPopped || this.isFinished) {
             this.animController.update(delta);
             return;
         }
@@ -198,26 +229,32 @@ class BalloonPlayerEntity {
             const progress = state.balloonSize / 100;
             // Use power function for exponential growth feel
             const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + Math.pow(progress, 1.3) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
-            this.balloon.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+            this._targetScale.set(targetScale, targetScale, targetScale);
+            this.balloon.scale.lerp(this._targetScale, 0.1);
 
-            // Move balloon up as it grows to avoid floor clipping
-            const targetY = 200 + Math.pow(progress, 1.1) * 600; 
-            this.balloon.position.y = THREE.MathUtils.lerp(this.balloon.position.y, targetY, 0.1);
+            // Move balloon up as it grows to avoid floor clipping (smooth from the start)
+            const targetY = this.originalBalloonPos.y + Math.pow(Math.max(0, progress), 1.1) * 600;
+            this.baseBalloonY = THREE.MathUtils.lerp(this.baseBalloonY, targetY, 0.1);
 
-            // TENSION VISUALS
+            // TENSION VISUALS: shake is an offset on top of the risen position
+            let shakeX = 0;
+            let shakeY = 0;
             if (state.balloonSize > 80) {
-                // Shake effect
-                const shakeIntensity = (state.balloonSize - 80) / 20 * 10; // Increased shake
-                this.balloon.position.x = (Math.random() - 0.5) * shakeIntensity;
-                this.balloon.position.y += (Math.random() - 0.5) * shakeIntensity;
-                
+                const tension = Math.min(1, (state.balloonSize - 80) / 20);
+                const shakeIntensity = tension * 10;
+                shakeX = (Math.random() - 0.5) * shakeIntensity;
+                shakeY = (Math.random() - 0.5) * shakeIntensity;
+
                 // Red tension color
-                const tensionColor = new THREE.Color(this.color).lerp(new THREE.Color(0xff0000), (state.balloonSize - 80) / 20);
-                this.balloon.material.color.copy(tensionColor);
+                this.balloon.material.color.copy(this._baseColor).lerp(this._tensionRed, tension);
             } else {
-                this.balloon.position.copy(this.originalBalloonPos);
-                this.balloon.material.color.set(this.color);
+                this.balloon.material.color.copy(this._baseColor);
             }
+            this.balloon.position.set(
+                this.originalBalloonPos.x + shakeX,
+                this.baseBalloonY + shakeY,
+                this.originalBalloonPos.z
+            );
         }
 
         if (this.isPumping && Date.now() > this.pumpEndTime) {
@@ -381,6 +418,12 @@ class BalloonGame {
             this.socket = io(SERVER_URL);
             
             this.socket.on('connect', () => {
+                // Recovered reconnect: same socket id and room, missed events are replayed.
+                // Creating a room here would orphan every phone.
+                if (this.socket.recovered) {
+                    console.log('[Balloon] Connection recovered, keeping room', this.roomCode);
+                    return;
+                }
                 console.log('[Balloon] Connected to server');
                 const isBabyShower = document.documentElement.classList.contains('baby-theme');
                 this.socket.emit('create-room', { 
@@ -398,7 +441,14 @@ class BalloonGame {
                 console.log('[Balloon] Game started signal received:', data);
                 this.gameStarted = true;
                 this.hideRoomUI();
+                this.resetMatchUI();
                 this.setupPlayers(data.players);
+            });
+
+            this.socket.on('round-starting', (data) => {
+                console.log('[Balloon] Round starting:', data);
+                // Clear the end screen right away; 'game-started' rebuilds players
+                this.resetMatchUI();
             });
 
             this.socket.on('player-joined', (data) => {
@@ -410,13 +460,32 @@ class BalloonGame {
 
             this.socket.on('player-left', (data) => {
                 console.log('[Balloon] Player left event received:', data);
+                if (data && data.playerId) {
+                    this.removePlayer(data.playerId);
+                }
                 if (data && data.room) {
                     this.updatePlayerCountUI(data.room);
                 }
             });
 
             this.socket.on('balloon-state', (state) => this.updateGameState(state));
-            this.socket.on('balloon-game-over', (data) => this.showGameOver(data));
+            this.socket.on('balloon-game-over', (data) => this.showGameOver(data, { final: true }));
+
+            // Tournament: the server sends these instead of 'balloon-game-over'
+            this.socket.on('round-ended', (data) => {
+                if (data.gameMode && data.gameMode !== 'balloon') return;
+                this.showGameOver(this.lastState || {}, {
+                    final: false,
+                    subtitle: `Ronda ${data.currentRound || ''}/${data.totalRounds || ''} · Siguiente ronda...`
+                });
+            });
+            this.socket.on('tournament-ended', (data) => {
+                if (data.gameMode && data.gameMode !== 'balloon') return;
+                this.showGameOver(this.lastState || {}, {
+                    final: true,
+                    subtitle: data.tournamentWinner ? `CAMPEÓN: ${data.tournamentWinner}` : ''
+                });
+            });
         };
         document.head.appendChild(script);
     }
@@ -496,11 +565,10 @@ class BalloonGame {
     }
 
     setupPlayers(playersData) {
-        // LIMPIEZA: Eliminar jugadores anteriores de la escena
-        this.players.forEach(entity => {
-            this.scene.remove(entity.model);
-        });
+        // LIMPIEZA: Eliminar jugadores anteriores de la escena (incluye etiquetas CSS2D)
+        this.players.forEach(entity => entity.dispose(this.scene));
         this.players.clear();
+        this.lastState = null;
 
         const total = playersData.length;
         const startX = -(total - 1) * BALLOON_CONFIG.PLAYER_SPACING / 2;
@@ -518,8 +586,48 @@ class BalloonGame {
         });
     }
 
+    removePlayer(playerId) {
+        const entity = this.players.get(playerId);
+        if (!entity) return;
+        entity.dispose(this.scene);
+        this.players.delete(playerId);
+    }
+
+    /**
+     * Clear end-of-match UI and timer so a new round/rematch starts clean
+     */
+    resetMatchUI() {
+        document.getElementById('game-over-status')?.remove();
+        this.lastState = null;
+        if (this.timerElement) {
+            this.timerElement.style.display = 'none';
+            this.timerElement.textContent = '';
+            this.timerElement.style.color = 'white';
+            this.timerElement.style.borderColor = '#ff66ff';
+        }
+    }
+
+    requestRematch(btn) {
+        if (!this.socket || btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = 'PREPARANDO...';
+        this.socket.emit('request-rematch', (res) => {
+            if (res && res.success) {
+                console.log('[Balloon] Rematch accepted');
+                return; // 'round-starting' (rematch) clears this screen
+            }
+            console.warn('[Balloon] Rematch failed:', res);
+            btn.textContent = 'NO SE PUDO';
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'REVANCHA';
+            }, 1500);
+        });
+    }
+
     updateGameState(state) {
         if (!state) return;
+        this.lastState = state;
 
         // Update Timer
         if (this.timerElement) {
@@ -539,7 +647,25 @@ class BalloonGame {
         });
     }
 
-    showGameOver(data) {
+    /**
+     * How the round ended, mirroring server/balloonState.js processTick:
+     * no winner -> everyone popped; one survivor among several players -> last survivor;
+     * otherwise the timer ran out (biggest balloon wins).
+     */
+    getEndReason(data) {
+        if (!data || !data.winner) return 'all-popped';
+        const players = Array.isArray(data.players) ? data.players : [];
+        const survivors = players.filter(p => !p.isDQ).length;
+        if (players.length > 1 && survivors === 1) return 'last-survivor';
+        return 'time';
+    }
+
+    showGameOver(data, options = {}) {
+        data = data || {};
+        const { final = true, subtitle = '' } = options;
+        // Avoid stacking overlays (e.g. state + tournament events)
+        document.getElementById('game-over-status')?.remove();
+
         const status = document.createElement('div');
         status.id = 'game-over-status';
         status.style.cssText = `
@@ -549,15 +675,48 @@ class BalloonGame {
             animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         `;
         
-        if (data.winner) {
-            status.innerHTML = `¡TIEMPO!<br><span style="color: #ff66ff">${data.winner.name}</span><br>GANA LA FIESTA`;
+        const reason = this.getEndReason(data);
+        if (reason === 'last-survivor') {
+            status.innerHTML = `¡ÚLTIMO EN PIE!<br><span style="color: #ff66ff">${escapeHtml(data.winner.name)}</span><br>GANA LA FIESTA`;
+        } else if (reason === 'time') {
+            status.innerHTML = `¡TIEMPO!<br><span style="color: #ff66ff">${escapeHtml(data.winner.name)}</span><br>GANA LA FIESTA`;
         } else {
             status.innerHTML = `¡BOOM!<br><span style="color: #ff3366">TODOS ELIMINADOS</span><br>NADIE GANA`;
         }
-        
+
+        if (subtitle) {
+            const sub = document.createElement('div');
+            sub.style.cssText = 'font-size: 1.5rem; margin-top: 20px; color: #ffcc00;';
+            sub.textContent = subtitle;
+            status.appendChild(sub);
+        }
+
+        if (final) {
+            const buttons = document.createElement('div');
+            buttons.style.cssText = 'display: flex; gap: 20px; justify-content: center; margin-top: 30px; flex-wrap: wrap;';
+
+            const rematchBtn = document.createElement('button');
+            rematchBtn.className = 'balloon-end-btn balloon-rematch-btn';
+            rematchBtn.type = 'button';
+            rematchBtn.textContent = 'REVANCHA';
+            rematchBtn.addEventListener('click', () => this.requestRematch(rematchBtn));
+
+            const menuBtn = document.createElement('button');
+            menuBtn.className = 'balloon-end-btn balloon-menu-btn';
+            menuBtn.type = 'button';
+            menuBtn.textContent = 'VOLVER AL MENÚ';
+            menuBtn.addEventListener('click', () => { window.location.href = 'index.html'; });
+
+            buttons.append(rematchBtn, menuBtn);
+            status.appendChild(buttons);
+        }
+
         document.body.appendChild(status);
-        
+
         this.players.forEach(entity => {
+            // A balloon that burst on the very last tick still has to pop
+            if (entity.lastServerState?.isDQ && !entity.isPopped) entity.pop();
+            entity.isFinished = true;
             const isWinner = data.winner && entity.id === data.winner.id;
             if (isWinner) {
                 // Winner celebrates and balloon stays intact

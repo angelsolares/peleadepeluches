@@ -578,86 +578,139 @@ input, textarea {
     gap: 10px; /* Reduced gap for portrait mode */
 }
 
-/* D-Pad */
+/* Analog joystick (replaces the old 4-button D-Pad) */
 .dpad-container {
-    flex: 0 0 auto; /* Don't grow, don't shrink */
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     justify-content: center;
     align-items: center;
     margin-left: 5px;
 }
 
-.dpad {
+.joystick-zone {
+    --joy-size: 160px;
     position: relative;
-    width: 160px;
-    height: 160px;
-}
-
-.dpad-btn {
-    position: absolute;
-    width: 60px;
-    height: 60px;
-    background: var(--panel);
-    border: 3px solid var(--secondary);
-    border-radius: 12px;
-    color: var(--secondary);
-    font-size: 1.2rem;
-    cursor: pointer;
+    width: 100%;
+    min-width: calc(var(--joy-size) + 10px);
+    height: calc(var(--joy-size) + 70px);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    transition: all 0.1s ease;
+    gap: 8px;
+    /* The whole zone is a touch target: no scroll, zoom or double-tap gestures */
+    touch-action: none;
+    -ms-touch-action: none;
+    overscroll-behavior: contain;
 }
 
-.dpad-btn:active,
-.dpad-btn.pressed {
-    background: var(--secondary);
-    color: var(--dark);
-    transform: scale(0.95);
-    box-shadow: var(--glow-cyan);
+.joystick-zone * {
+    touch-action: none;
+    pointer-events: none;
 }
 
-.dpad-up {
-    top: 0;
-    left: 50%;
-    transform: translateX(-50%);
+.joystick-base {
+    position: relative;
+    width: var(--joy-size);
+    height: var(--joy-size);
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, var(--dark-lighter) 0%, var(--panel) 70%);
+    border: 3px solid var(--secondary);
+    box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.5);
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-.dpad-down {
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
+.joystick-zone.active .joystick-base {
+    box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.5), var(--glow-cyan);
 }
 
-.dpad-left {
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
+/* Outer ring that lights up when the stick is pushed far enough to run */
+.joystick-run-ring {
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+    border: 2px dashed transparent;
+    transition: border-color 0.1s ease;
 }
 
-.dpad-right {
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
+.joystick-zone.running .joystick-run-ring {
+    border-color: var(--accent);
 }
 
-.dpad-center {
+.joystick-zone.running .joystick-base {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.5), var(--glow-yellow);
+}
+
+.joystick-arrow {
+    position: absolute;
+    font-size: 0.9rem;
+    line-height: 1;
+    color: var(--secondary);
+    opacity: 0.45;
+    transition: opacity 0.1s ease, transform 0.1s ease;
+}
+
+.joy-up { top: 8px; left: 50%; transform: translateX(-50%); }
+.joy-down { bottom: 8px; left: 50%; transform: translateX(-50%); }
+.joy-left { left: 9px; top: 50%; transform: translateY(-50%); }
+.joy-right { right: 9px; top: 50%; transform: translateY(-50%); }
+
+.joystick-arrow.on {
+    opacity: 1;
+    text-shadow: 0 0 10px var(--secondary);
+}
+
+.joystick-knob {
     position: absolute;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%);
-    width: 40px;
-    height: 40px;
-    background: var(--dark-lighter);
+    width: 44%;
+    height: 44%;
+    margin-left: -22%;
+    margin-top: -22%;
     border-radius: 50%;
-    border: 2px solid var(--text-muted);
+    background: radial-gradient(circle at 35% 30%, #ffffff 0%, var(--secondary) 45%, #00997a 100%);
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    transform: translate3d(0, 0, 0);
+    transition: transform 0.12s ease-out;
+    will-change: transform;
 }
 
-.dpad-btn .label {
-    font-size: 0.6rem;
+.joystick-zone.active .joystick-knob {
+    /* Follow the thumb without lag while held; spring back on release */
+    transition: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), var(--glow-cyan);
+}
+
+.joystick-hint {
+    min-height: 1em;
+    font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 1px;
+    color: var(--text-muted);
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Modes without action buttons (Tag, Paint, Maze): one big centered stick */
+.joystick-only .controller-body {
+    justify-content: center;
+}
+
+.joystick-only .dpad-container {
+    margin-left: 0;
+}
+
+.joystick-only .joystick-zone {
+    --joy-size: min(62vw, 230px);
+}
+
+.baby-theme .joystick-knob {
+    background: radial-gradient(circle at 35% 30%, #ffffff 0%, var(--secondary) 55%, var(--accent) 100%);
 }
 
 /* Action Buttons - 4 button diamond layout like Xbox/Nintendo */
@@ -1035,14 +1088,8 @@ input, textarea {
         margin-left: 0;
     }
     
-    .dpad {
-        width: 130px;
-        height: 130px;
-    }
-    
-    .dpad-btn {
-        width: 45px;
-        height: 45px;
+    .joystick-zone {
+        --joy-size: 135px;
     }
     
     .action-buttons {
@@ -1075,14 +1122,8 @@ input, textarea {
         gap: 8px;
     }
     
-    .dpad {
-        width: 145px;
-        height: 145px;
-    }
-    
-    .dpad-btn {
-        width: 50px;
-        height: 50px;
+    .joystick-zone {
+        --joy-size: 148px;
     }
     
     .action-buttons {
@@ -1108,14 +1149,13 @@ input, textarea {
 
 /* Short screens (landscape or small devices) */
 @media (max-height: 600px) {
-    .dpad {
-        width: 140px;
-        height: 140px;
+    .joystick-zone {
+        --joy-size: 140px;
+        height: calc(var(--joy-size) + 40px);
     }
     
-    .dpad-btn {
-        width: 48px;
-        height: 48px;
+    .joystick-only .joystick-zone {
+        --joy-size: min(45vh, 200px);
     }
     
     .action-buttons {
@@ -2062,3 +2102,48 @@ input, textarea {
     font-family: 'Orbitron', sans-serif;
 }
 
+
+/* ==================================
+   Rematch + reconnection
+   ================================== */
+
+.overlay-content .rematch-error {
+    min-height: 1.2em;
+    margin: 8px 0 0;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.rematch-btn.pending {
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.reconnect-notice {
+    position: fixed;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 2px solid var(--accent);
+    color: var(--text);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    box-shadow: var(--glow-yellow);
+    pointer-events: none; /* never blocks the controls */
+}
+
+.reconnect-notice .status-dot {
+    background: var(--accent);
+}
+
+.reconnect-notice.hidden {
+    display: none;
+}

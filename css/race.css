@@ -299,6 +299,64 @@
 }
 
 /* ==================================
+   Rematch / end-of-race actions
+   ================================== */
+
+.winner-actions,
+.tournament-end-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 30px;
+}
+
+#tournament-end-overlay .tournament-end-actions .btn-return-menu {
+    margin-top: 0;
+}
+
+.btn-rematch,
+.btn-winner-menu {
+    padding: 15px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.btn-rematch {
+    background: linear-gradient(135deg, #00ff88, #00ccff);
+    color: #0a0a15;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.btn-winner-menu {
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+}
+
+.btn-rematch:hover:not(:disabled),
+.btn-winner-menu:hover {
+    transform: scale(1.05);
+}
+
+.btn-rematch:hover:not(:disabled) {
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.8);
+}
+
+.btn-rematch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+/* ==================================
    Player Name Labels (3D floating)
    ================================== */
 

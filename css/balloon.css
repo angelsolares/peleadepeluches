@@ -142,3 +142,38 @@
     text-align: center;
 }
 
+
+/* End-of-match buttons (REVANCHA / VOLVER AL MENÚ) */
+.balloon-end-btn {
+    padding: 15px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: none;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.balloon-rematch-btn {
+    background: #ff66ff;
+    color: #fff;
+    box-shadow: 0 0 20px rgba(255, 102, 255, 0.5);
+}
+
+.balloon-menu-btn {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.balloon-end-btn:hover:not(:disabled) {
+    transform: scale(1.05);
+}
+
+.balloon-end-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}

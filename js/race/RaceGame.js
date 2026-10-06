@@ -31,7 +31,10 @@ const RACE_CONFIG = {
     // Camera
     CAMERA_HEIGHT: 15,
     CAMERA_DISTANCE: 20,
-    CAMERA_LERP: 0.05
+    CAMERA_LERP: 0.05,
+    
+    // Network smoothing: how fast models chase the server position (higher = snappier)
+    POSITION_SMOOTHING: 15
 };
 
 // Character models (same as other modes)
@@ -60,6 +63,18 @@ const ANIMATION_FILES = {
     crawling: 'assets/Crawling.fbx'
 };
 
+// Escape text before inserting it with innerHTML (player names come from the network)
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+}
+
+// X coordinate of a lane's center
+function getLaneX(lane) {
+    return (lane - RACE_CONFIG.MAX_PLAYERS / 2 + 0.5) * RACE_CONFIG.LANE_WIDTH;
+}
+
 /**
  * Race Player Entity
  */
@@ -84,8 +99,9 @@ class RacePlayerEntity {
         this.finished = false;    // Crossed finish line
         this.finishTime = 0;      // Time when finished
         
-        // 3D position
+        // 3D position (latest server position; the model is smoothed toward it)
         this.worldPosition = new THREE.Vector3();
+        this.targetPosition = new THREE.Vector3();
         
         // Name label
         this.nameLabel = null;
@@ -162,6 +178,15 @@ class RacePlayerEntity {
             this.mixer.update(delta);
         }
         
+        // Smoothly move the model toward the last server position (updates arrive at 30 Hz)
+        if (this.model) {
+            const t = 1 - Math.exp(-RACE_CONFIG.POSITION_SMOOTHING * delta);
+            this.model.position.lerp(this.targetPosition, t);
+            if (this.model.position.distanceToSquared(this.targetPosition) < 1e-6) {
+                this.model.position.copy(this.targetPosition);
+            }
+        }
+        
         // Determine target animation based on speed and mode
         let targetAnimation;
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
@@ -228,6 +253,12 @@ class RaceGame {
         // Camera mode: 'dynamic', 'top', 'side'
         this.cameraMode = 'dynamic';
         
+        // Players whose finish was already celebrated this race (finish SFX plays once each)
+        this.finishedPlayers = new Set();
+        
+        // Rematch request in flight
+        this.rematchPending = false;
+        
         this.init();
     }
     
@@ -251,6 +282,7 @@ class RaceGame {
         this.setupSocket();
         this.setupScoreboard();
         this.createCameraSelector();
+        this.setupRematchButtons();
         
         this.hideLoading();
         this.animate();
@@ -575,12 +607,35 @@ class RaceGame {
         });
         
         this.socket.on('connect', () => {
+            if (this.socket.recovered) {
+                // Connection state recovered: same socket id and room, missed events replayed.
+                // Creating a room here would orphan every phone, so keep everything as is.
+                console.log(`[Race] Reconnected, session recovered (room ${this.roomCode})`);
+                if (this.statusBeforeDisconnect != null) {
+                    this.updateAnimationDisplay(this.statusBeforeDisconnect);
+                    this.statusBeforeDisconnect = null;
+                }
+                return;
+            }
+            
             console.log('[Race] Connected to server');
+            if (this.roomCode) {
+                // Session could not be recovered: the old room is gone, start clean in a new one
+                console.warn(`[Race] Previous room ${this.roomCode} lost, creating a new room`);
+                this.clearAllPlayers();
+                document.getElementById('race-winner-overlay')?.remove();
+                this.gameState = 'lobby';
+            }
+            this.statusBeforeDisconnect = null;
             this.createRoom();
         });
         
         this.socket.on('disconnect', () => {
             console.log('[Race] Disconnected from server');
+            const statusEl = document.getElementById('animation-name');
+            if (statusEl && this.statusBeforeDisconnect == null) {
+                this.statusBeforeDisconnect = statusEl.textContent;
+            }
             this.updateAnimationDisplay('Desconectado del servidor');
         });
         
@@ -601,13 +656,8 @@ class RaceGame {
             console.log('[Race] Game started!', data);
             
             // Clear existing players and add all from server
-            this.players.forEach((player, id) => {
-                if (player.model && player.model.parent) {
-                    player.model.parent.remove(player.model);
-                }
-                player.dispose();
-            });
-            this.players.clear();
+            this.clearAllPlayers();
+            this.finishedPlayers.clear();
             
             // Add all players with their correct characters
             if (data.players) {
@@ -621,6 +671,15 @@ class RaceGame {
             
             // Hide room code overlay
             document.getElementById('room-code-overlay')?.classList.add('hidden');
+            
+            // Fresh scores (first game or rematch): the tournament HUD keeps old entries otherwise
+            if (!data.playerScores || Object.keys(data.playerScores).length === 0) {
+                const scoresEl = document.getElementById('tournament-scores');
+                if (scoresEl) scoresEl.innerHTML = '';
+            }
+            
+            this.updateScoreboard();
+            this.updateProgressMarkers();
         });
         
         // Race-specific events
@@ -647,25 +706,21 @@ class RaceGame {
         // Tournament events - listen for round transitions
         this.socket.on('round-starting', (data) => {
             console.log('[Race] Round starting:', data);
-            this.resetForNextRound(data);
+            this.resetForNextRound(data || {});
         });
         
         this.socket.on('round-ended', (data) => {
             console.log('[Race] Round ended:', data);
             // Hide winner overlay since tournament overlay will show
-            const winnerOverlay = document.getElementById('winner-overlay');
-            if (winnerOverlay) {
-                winnerOverlay.classList.add('hidden');
-            }
+            document.getElementById('race-winner-overlay')?.remove();
         });
         
         this.socket.on('tournament-ended', (data) => {
             console.log('[Race] Tournament ended:', data);
             // Hide winner overlay since tournament end overlay will show
-            const winnerOverlay = document.getElementById('winner-overlay');
-            if (winnerOverlay) {
-                winnerOverlay.classList.add('hidden');
-            }
+            document.getElementById('race-winner-overlay')?.remove();
+            this.gameState = 'finished';
+            this.resetRematchButtons();
         });
         
         // Initialize tournament manager
@@ -718,12 +773,12 @@ class RaceGame {
             overlay.innerHTML = `
                 <div class="room-code-content">
                     <h2>🏁 CARRERA DE PELUCHES</h2>
-                    <div class="room-code">${code}</div>
+                    <div class="room-code">${escapeHtml(code)}</div>
                     <div class="qr-container">
-                        <img src="${qrCodeUrl}" alt="QR Code" class="qr-code" />
+                        <img src="${escapeHtml(qrCodeUrl)}" alt="QR Code" class="qr-code" />
                     </div>
                     <p>Escanea o ingresa este código en tu celular</p>
-                    <a href="${mobileUrl}" target="_blank" class="url">${mobileUrl}</a>
+                    <a href="${escapeHtml(mobileUrl)}" target="_blank" class="url">${escapeHtml(mobileUrl)}</a>
                     
                     <div class="rounds-selector">
                         <span class="rounds-label">RONDAS:</span>
@@ -779,6 +834,19 @@ class RaceGame {
             
             // Add rounds selector listeners
             this.setupRoundsSelector();
+        } else {
+            // Overlay already exists (new room after a lost connection): refresh it
+            const codeEl = overlay.querySelector('.room-code');
+            const qrEl = overlay.querySelector('.qr-code');
+            const urlEl = overlay.querySelector('.url');
+            if (codeEl) codeEl.textContent = code;
+            if (qrEl) qrEl.src = qrCodeUrl;
+            if (urlEl) {
+                urlEl.href = mobileUrl;
+                urlEl.textContent = mobileUrl;
+            }
+            overlay.classList.remove('hidden');
+            this.updateRoomOverlay(this.players.size);
         }
     }
     
@@ -856,11 +924,11 @@ class RaceGame {
         
         console.log(`[Race] Creating player with character: ${characterKey}`);
         
-        // Create player entity
+        // Create player entity (color comes from the player slot so equal characters stay distinguishable)
         const player = new RacePlayerEntity(
             playerData.id,
             playerData.name || characterInfo.name,
-            characterInfo.color,
+            playerData.color || characterInfo.color,
             playerData.number || this.players.size + 1,
             model,
             this.animations
@@ -868,11 +936,12 @@ class RaceGame {
         
         // Set initial position (lane based)
         player.lane = this.players.size;
-        const laneX = (player.lane - RACE_CONFIG.MAX_PLAYERS / 2 + 0.5) * RACE_CONFIG.LANE_WIDTH;
+        const laneX = getLaneX(player.lane);
         model.position.set(laneX, 0, 0);
         model.rotation.y = 0; // Face forward (toward finish)
         
         player.worldPosition.set(laneX, 0, 0);
+        player.targetPosition.set(laneX, 0, 0);
         
         // Enable shadows and fix transparency
         model.traverse((child) => {
@@ -920,9 +989,22 @@ class RaceGame {
             }
             player.dispose();
             this.players.delete(playerId);
+            this.finishedPlayers.delete(playerId);
             this.updateScoreboard();
             this.updateProgressMarkers();
         }
+    }
+
+    clearAllPlayers() {
+        this.players.forEach((player) => {
+            if (player.model && player.model.parent) {
+                player.model.parent.remove(player.model);
+            }
+            player.dispose();
+        });
+        this.players.clear();
+        this.updateScoreboard();
+        this.updateProgressMarkers();
     }
     
     setupScoreboard() {
@@ -1041,10 +1123,10 @@ class RaceGame {
             const progress = Math.floor((player.position / RACE_CONFIG.TRACK_LENGTH) * 100);
             
             return `
-                <div class="race-position-item" data-player-id="${player.id}">
+                <div class="race-position-item" data-player-id="${escapeHtml(player.id)}">
                     <div class="position-number ${positionClass}">${index + 1}°</div>
-                    <div class="position-badge" style="background: ${player.color}">P${player.number}</div>
-                    <div class="position-name">${player.name}</div>
+                    <div class="position-badge" style="background: ${escapeHtml(player.color)}">P${escapeHtml(player.number)}</div>
+                    <div class="position-name">${escapeHtml(player.name)}</div>
                     <div class="position-progress">${progress}%</div>
                 </div>
             `;
@@ -1119,10 +1201,9 @@ class RaceGame {
                 player.speed = playerState.speed;
                 player.finished = playerState.finished;
                 
-                // Update 3D position
-                const laneX = (player.lane - RACE_CONFIG.MAX_PLAYERS / 2 + 0.5) * RACE_CONFIG.LANE_WIDTH;
-                player.model.position.z = player.position;
-                player.model.position.x = laneX;
+                // Update target 3D position (the model is smoothed toward it every frame)
+                const laneX = getLaneX(player.lane);
+                player.targetPosition.set(laneX, 0, player.position);
                 player.worldPosition.set(laneX, 0, player.position);
             }
         });
@@ -1133,8 +1214,12 @@ class RaceGame {
     }
     
     handleRaceFinish(data) {
+        // Celebrate each finisher once per race, even if the event is repeated
+        if (!data || this.finishedPlayers.has(data.playerId)) return;
+
         const player = this.players.get(data.playerId);
         if (player) {
+            this.finishedPlayers.add(data.playerId);
             player.finished = true;
             player.finishTime = data.time;
             console.log(`[Race] ${player.name} finished in ${data.time}ms!`);
@@ -1154,82 +1239,159 @@ class RaceGame {
             this.bgmManager.playVictory();
         }
         
+        // Only one winner overlay at a time
+        document.getElementById('race-winner-overlay')?.remove();
+
+        const winnerTime = Number(data.winnerTime);
         const overlay = document.createElement('div');
         overlay.id = 'race-winner-overlay';
         overlay.innerHTML = `
             <div class="winner-content">
                 <div class="winner-trophy">🏆</div>
                 <div class="winner-title">¡GANADOR!</div>
-                <div class="winner-name">${data.winnerName || 'Jugador'}</div>
-                <div class="winner-time">Tiempo: ${(data.winnerTime / 1000).toFixed(2)}s</div>
+                <div class="winner-name">${escapeHtml(data.winnerName || 'Jugador')}</div>
+                <div class="winner-time">Tiempo: ${Number.isFinite(winnerTime) ? (winnerTime / 1000).toFixed(2) + 's' : '--'}</div>
                 <div class="final-positions">
-                    ${data.positions.map((p, i) => `
+                    ${(data.positions || []).map((p, i) => `
                         <div style="color: ${i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : '#888'}">
-                            ${i + 1}° ${p.name || 'Jugador'} - ${p.time ? (p.time / 1000).toFixed(2) + 's' : 'DNF'}
+                            ${i + 1}° ${escapeHtml(p.name || 'Jugador')} - ${p.time ? (p.time / 1000).toFixed(2) + 's' : 'DNF'}
                         </div>
                     `).join('')}
+                </div>
+                <div class="winner-actions">
+                    <button type="button" class="btn-rematch">REVANCHA</button>
+                    <button type="button" class="btn-winner-menu">VOLVER AL MENÚ</button>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
+
+        const rematchBtn = overlay.querySelector('.btn-rematch');
+        rematchBtn.addEventListener('click', () => this.requestRematch(rematchBtn));
+        overlay.querySelector('.btn-winner-menu').addEventListener('click', () => {
+            window.location.href = 'index.html';
+        });
+        this.rematchPending = false;
         
         document.getElementById('animation-name').textContent = `¡${data.winnerName || 'Jugador'} GANA!`;
     }
     
     /**
-     * Reset game state for the next round in a tournament
+     * Reset game state for the next round in a tournament, or for a rematch (data.rematch).
+     * 'game-started' follows ~1 s later and rebuilds the player list from the server.
      */
     resetForNextRound(data) {
-        console.log('[Race] Resetting for next round:', data.round);
-        
+        console.log('[Race] Resetting for next round:', data.round, data.rematch ? '(rematch)' : '');
+
         // Hide overlays
-        const winnerOverlay = document.getElementById('race-winner-overlay');
-        const roundEndOverlay = document.getElementById('round-end-overlay');
-        const roomOverlay = document.getElementById('room-code-overlay');
-        
-        if (winnerOverlay) winnerOverlay.remove();
-        if (roundEndOverlay) roundEndOverlay.classList.add('hidden');
-        if (roomOverlay) roomOverlay.classList.add('hidden');
-        
+        document.getElementById('race-winner-overlay')?.remove();
+        document.getElementById('round-end-overlay')?.classList.add('hidden');
+        document.getElementById('room-code-overlay')?.classList.add('hidden');
+        document.getElementById('tournament-end-overlay')?.classList.add('hidden');
+        const confetti = document.getElementById('tournament-confetti');
+        if (confetti) confetti.innerHTML = '';
+
+        // Rematch buttons back to their idle state for the next end screen
+        this.resetRematchButtons();
+
         // Reset game state
         this.gameState = 'countdown';
         this.raceStartTime = null;
-        
+        this.finishedPlayers.clear();
+
         // Reset track elements
         this.currentTrackPosition = 0;
-        
+
         // Reset all players
         let laneIndex = 0;
         this.players.forEach((player, playerId) => {
             // Reset player state
             player.finished = false;
-            player.finishTime = null;
+            player.finishTime = 0;
+            player.position = 0;
             player.progress = 0;
             player.speed = 0;
             player.lane = laneIndex;
-            
-            // Reset position to start
-            const laneOffset = (laneIndex - (this.players.size - 1) / 2) * 3;
-            player.worldPosition.set(laneOffset, 0, 0);
-            player.model.position.copy(player.worldPosition);
+
+            // Reset position to start (snap, no smoothing back from the finish line)
+            const laneX = getLaneX(laneIndex);
+            player.worldPosition.set(laneX, 0, 0);
+            player.targetPosition.set(laneX, 0, 0);
+            player.model.position.copy(player.targetPosition);
             player.model.visible = true;
-            
+
             if (player.nameLabel) {
                 player.nameLabel.element.style.display = 'block';
             }
-            
+
             player.playAnimation('idle');
             laneIndex++;
         });
-        
+
+        this.updateScoreboard();
+        this.updateProgressMarkers();
+
         // Reset camera
-        this.camera.position.set(0, 20, -30);
-        this.camera.lookAt(0, 0, 30);
-        
+        this.camera.position.set(0, RACE_CONFIG.CAMERA_HEIGHT, -RACE_CONFIG.CAMERA_DISTANCE);
+        this.camera.lookAt(0, 0, 0);
+
         // Update HUD
-        document.getElementById('animation-name').textContent = `¡RONDA ${data.round}!`;
-        
+        this.updateAnimationDisplay(data.rematch ? '¡REVANCHA!' : `¡RONDA ${data.round}!`);
+
         console.log('[Race] Reset complete');
+    }
+
+    /**
+     * Wire the REVANCHA button of the tournament end screen (static markup in race.html)
+     */
+    setupRematchButtons() {
+        const btn = document.getElementById('race-rematch-btn');
+        if (btn && !btn.dataset.bound) {
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', () => this.requestRematch(btn));
+        }
+    }
+
+    /**
+     * Ask the server for a rematch. The overlays are cleared when 'round-starting' arrives.
+     */
+    requestRematch(btn) {
+        if (!this.socket || this.rematchPending) return;
+
+        this.rematchPending = true;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'PREPARANDO...';
+        }
+
+        const onResult = (err, res) => {
+            if (!err && res && res.success) {
+                console.log('[Race] Rematch accepted');
+                return; // Button stays disabled until the new race resets the UI
+            }
+            const reason = err ? 'sin respuesta del servidor' : (res?.error || 'desconocido');
+            console.warn('[Race] Rematch failed:', reason);
+            this.rematchPending = false;
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'REVANCHA';
+            }
+            this.updateAnimationDisplay('No se pudo iniciar la revancha: ' + reason);
+        };
+
+        if (typeof this.socket.timeout === 'function') {
+            this.socket.timeout(8000).emit('request-rematch', onResult);
+        } else {
+            this.socket.emit('request-rematch', (res) => onResult(null, res));
+        }
+    }
+
+    resetRematchButtons() {
+        this.rematchPending = false;
+        document.querySelectorAll('#race-rematch-btn, #race-winner-overlay .btn-rematch').forEach((btn) => {
+            btn.disabled = false;
+            btn.textContent = 'REVANCHA';
+        });
     }
     
     updateCamera() {

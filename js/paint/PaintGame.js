@@ -51,7 +51,15 @@ class PaintGame {
         this.socket = null;
         this.roomCode = null;
         this.hud = new PaintHUD();
-        
+
+        // Players that left mid-round (the server keeps them in paint-state until the next round)
+        this.departedPlayers = new Set();
+        // Grid rendering caches (avoid per-tick allocations)
+        this.gridImageData = null;
+        this.colorRgbCache = new Map();   // '#rrggbb' -> [r, g, b]
+        this.numberRgbMap = new Map();    // player number -> [r, g, b]
+        this.floorBaseRgb = [26, 26, 46];
+
         this.baseModels = {};
         this.baseAnimations = {};
         
@@ -92,6 +100,7 @@ class PaintGame {
         this.createFloor();
         
         await this.loadAssets();
+        this.setupRematchButton();
         this.connectToServer();
         
         window.addEventListener('resize', () => this.onWindowResize());
@@ -121,9 +130,10 @@ class PaintGame {
         this.gridCtx = this.gridCanvas.getContext('2d');
         
         // Initial state
-        this.gridCtx.fillStyle = isBabyShower ? '#ffffff' : '#1a1a2e';
-        this.gridCtx.fillRect(0, 0, this.gridCanvas.width, this.gridCanvas.height);
-        
+        this.floorBaseRgb = isBabyShower ? [255, 255, 255] : [26, 26, 46];
+        this.gridImageData = this.gridCtx.createImageData(PAINT_CONFIG.GRID_SIZE, PAINT_CONFIG.GRID_SIZE);
+        this.clearGridCanvas();
+
         this.gridTexture = new THREE.CanvasTexture(this.gridCanvas);
         this.gridTexture.magFilter = THREE.NearestFilter;
         this.gridTexture.minFilter = THREE.NearestFilter;
@@ -191,8 +201,14 @@ class PaintGame {
             });
             
             this.socket.on('connect', () => {
+                // Recovered reconnect: same socket id and room, missed events are replayed.
+                // Creating a room here would orphan every phone.
+                if (this.socket.recovered) {
+                    console.log('[Paint] Connection recovered, keeping room', this.roomCode);
+                    return;
+                }
                 console.log('Connected to server');
-                
+
                 const urlParams = new URLSearchParams(window.location.search);
                 this.roomCode = urlParams.get('room');
                 const isHost = urlParams.get('host') === 'true' || !this.roomCode;
@@ -223,15 +239,27 @@ class PaintGame {
 
             this.socket.on('paint-game-over', (state) => {
                 this.hud.showResults(state.results, state.winner);
+                this.hud.setEndButtonsVisible(true);
             });
 
-            this.socket.on('game-started', () => {
+            this.socket.on('round-starting', (data) => {
+                console.log('[Paint] Round starting:', data);
+                if (data && data.rematch) {
+                    this.resetForNewMatch();
+                }
+                if (data) this.hud.updateRound(data.round, data.totalRounds);
+            });
+
+            this.socket.on('game-started', (data) => {
                 console.log('[Paint] Game started signal received');
                 const overlay = document.getElementById('room-code-overlay');
                 if (overlay) {
                     overlay.classList.add('hidden');
                     overlay.style.display = 'none';
                 }
+                // New match or new tournament round: fresh floor, HUD and player set
+                this.resetForNewMatch(data && data.players);
+                if (data) this.hud.updateRound(data.currentRound || 1, data.tournamentRounds || 1);
             });
 
             this.socket.on('player-joined', (data) => {
@@ -250,6 +278,10 @@ class PaintGame {
 
             this.socket.on('player-left', (data) => {
                 console.log('Player left:', data);
+                if (data && data.playerId) {
+                    this.departedPlayers.add(data.playerId);
+                    this.removePlayer(data.playerId);
+                }
                 const playerCountElem = document.getElementById('player-count');
                 const startBtn = document.getElementById('start-game-btn');
                 if (data.room && playerCountElem) {
@@ -262,16 +294,101 @@ class PaintGame {
             });
 
             this.socket.on('round-ended', (data) => {
-                this.hud.showResults(data.paintResults, { name: data.roundWinner });
+                if (data.gameMode && data.gameMode !== 'paint') return;
+                this.hud.showResults(data.paintResults, { id: data.roundWinnerId, name: data.roundWinner });
+                this.hud.setEndButtonsVisible(false);
                 this.hud.showNextRoundCountdown(5);
             });
 
             this.socket.on('tournament-ended', (data) => {
-                this.hud.showResults(data.paintResults, data.tournamentWinner);
-                document.getElementById('btn-return-menu').classList.remove('hidden');
+                if (data.gameMode && data.gameMode !== 'paint') return;
+                // tournamentWinner is a player name (string); showResults resolves the color from the results
+                const winner = data.tournamentWinner ? { name: data.tournamentWinner } : null;
+                this.hud.showResults(data.paintResults, winner);
+                this.hud.hideNextRoundCountdown();
+                this.hud.setEndButtonsVisible(true);
             });
         };
         document.head.appendChild(script);
+    }
+
+    /**
+     * Wire the REVANCHA button once (it lives in paint.html, so it is never duplicated)
+     */
+    setupRematchButton() {
+        const btn = document.getElementById('btn-rematch');
+        if (!btn || btn.dataset.wired) return;
+        btn.dataset.wired = 'true';
+        btn.addEventListener('click', () => {
+            if (!this.socket || btn.disabled) return;
+            this.hud.setRematchPending(true);
+            this.socket.emit('request-rematch', (res) => {
+                if (res && res.success) {
+                    console.log('[Paint] Rematch accepted');
+                    return; // 'round-starting' (rematch) resets the screen
+                }
+                console.warn('[Paint] Rematch failed:', res);
+                this.hud.setRematchPending(true, (res && res.error) ? 'NO SE PUDO' : 'ERROR');
+                setTimeout(() => this.hud.setRematchPending(false), 1500);
+            });
+        });
+    }
+
+    /**
+     * Back to a fresh match: hide results, reset HUD and floor, sync players.
+     * @param {Array} [playersData] - players from 'game-started'; when given, models of players
+     *                                no longer in the match are removed.
+     */
+    resetForNewMatch(playersData) {
+        this.hud.reset();
+        this.clearGridCanvas();
+
+        if (Array.isArray(playersData)) {
+            const ids = new Set(playersData.map(p => p.id));
+            Array.from(this.players.keys()).forEach(id => {
+                if (!ids.has(id)) this.removePlayer(id);
+            });
+            // The new server state only contains current players
+            this.departedPlayers.clear();
+        }
+
+        // Stop walk cycles; positions come from the next paint-state
+        this.players.forEach(p => p.animController.updateFromMovementState({
+            isMoving: false, isRunning: false, isGrounded: true
+        }));
+    }
+
+    removePlayer(playerId) {
+        const player = this.players.get(playerId);
+        if (!player) return;
+        // CSS2D label elements are not removed from the DOM when the parent model is removed
+        player.model.traverse(obj => {
+            if (obj.isCSS2DObject && obj.element) obj.element.remove();
+        });
+        this.scene.remove(player.model);
+        player.animController.dispose?.();
+        this.players.delete(playerId);
+    }
+
+    clearGridCanvas() {
+        if (!this.gridCtx || !this.gridImageData) return;
+        const px = this.gridImageData.data;
+        const [r, g, b] = this.floorBaseRgb;
+        for (let i = 0; i < px.length; i += 4) {
+            px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = 255;
+        }
+        this.gridCtx.putImageData(this.gridImageData, 0, 0);
+        if (this.gridTexture) this.gridTexture.needsUpdate = true;
+    }
+
+    getRgb(colorHex) {
+        let rgb = this.colorRgbCache.get(colorHex);
+        if (!rgb) {
+            const c = new THREE.Color(colorHex);
+            rgb = [Math.floor(c.r * 255), Math.floor(c.g * 255), Math.floor(c.b * 255)];
+            this.colorRgbCache.set(colorHex, rgb);
+        }
+        return rgb;
     }
 
     showRoomCode(code) {
@@ -348,6 +465,9 @@ class PaintGame {
     }
 
     updateState(state) {
+        // The final tick carries only {winner, results} (no players/grid); results come via game-over events
+        if (!state || !Array.isArray(state.players)) return;
+
         if (state.roundState === 'active') {
             this.hud.updateTimer(state.timeLeft);
             this.updateGrid(state.grid, state.players);
@@ -355,6 +475,7 @@ class PaintGame {
         }
 
         state.players.forEach(playerData => {
+            if (this.departedPlayers.has(playerData.id)) return;
             let player = this.players.get(playerData.id);
             if (!player) {
                 player = this.createPlayer(playerData);
@@ -406,35 +527,33 @@ class PaintGame {
     }
 
     updateGrid(gridData, players) {
-        // Map player numbers to colors
-        const colorMap = new Map();
-        players.forEach(p => colorMap.set(p.number, p.color));
+        if (!gridData || !this.gridImageData) return;
+
+        // Map player numbers to cached RGB triplets (one THREE.Color per distinct color, ever)
+        const numberRgb = this.numberRgbMap;
+        numberRgb.clear();
+        for (let i = 0; i < players.length; i++) {
+            numberRgb.set(players[i].number, this.getRgb(players[i].color || '#ffffff'));
+        }
+        const fallbackRgb = this.getRgb('#ffffff');
+        const baseRgb = this.floorBaseRgb;
 
         // Handle both regular arrays and TypedArrays/Buffers
         const data = (gridData instanceof ArrayBuffer) ? new Int8Array(gridData) : gridData;
 
-        const imageData = this.gridCtx.createImageData(PAINT_CONFIG.GRID_SIZE, PAINT_CONFIG.GRID_SIZE);
-        for (let i = 0; i < data.length; i++) {
+        const px = this.gridImageData.data;
+        const len = Math.min(data.length, px.length / 4);
+        for (let i = 0; i < len; i++) {
             const playerNum = data[i];
-            const pixelIndex = i * 4;
-            
-            if (playerNum === -1) {
-                // Default dark floor color
-                imageData.data[pixelIndex] = 26;
-                imageData.data[pixelIndex+1] = 26;
-                imageData.data[pixelIndex+2] = 46;
-                imageData.data[pixelIndex+3] = 255;
-            } else {
-                const colorHex = colorMap.get(playerNum) || '#ffffff';
-                const color = new THREE.Color(colorHex);
-                imageData.data[pixelIndex] = Math.floor(color.r * 255);
-                imageData.data[pixelIndex+1] = Math.floor(color.g * 255);
-                imageData.data[pixelIndex+2] = Math.floor(color.b * 255);
-                imageData.data[pixelIndex+3] = 255;
-            }
+            const rgb = playerNum === -1 ? baseRgb : (numberRgb.get(playerNum) || fallbackRgb);
+            const p = i * 4;
+            px[p] = rgb[0];
+            px[p + 1] = rgb[1];
+            px[p + 2] = rgb[2];
+            px[p + 3] = 255;
         }
-        
-        this.gridCtx.putImageData(imageData, 0, 0);
+
+        this.gridCtx.putImageData(this.gridImageData, 0, 0);
         this.gridTexture.needsUpdate = true;
     }
 

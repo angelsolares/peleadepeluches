@@ -145,6 +145,38 @@ const inputState = {
     block: false
 };
 
+// Rematch request state (one request at a time)
+let rematchPending = false;
+let rematchErrorTimer = null;
+
+// Mode classes that updateControllerUIForMode toggles on #controller-screen
+const MODE_CLASSES = ['race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode',
+    'trivia-mode', 'puzzle-mode', 'maze-mode', 'joystick-only'];
+
+// =================================
+// Small helpers
+// =================================
+
+/**
+ * Escape text before inserting it with innerHTML (player names come from other players)
+ */
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"'`]/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
+    }[ch]));
+}
+
+/**
+ * Vibrate if the device supports it (silently ignored otherwise)
+ */
+function vibrate(pattern) {
+    try {
+        if (navigator.vibrate) navigator.vibrate(pattern);
+    } catch (e) {
+        // Some browsers throw if vibration is blocked; never break input handling for it
+    }
+}
+
 // =================================
 // Socket.IO Connection
 // =================================
@@ -158,27 +190,79 @@ function connectToServer() {
     socket = io(SERVER_URL, {
         transports: ['websocket'],
         reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000
+        // Keep retrying: the server keeps our slot for 30 s (connectionStateRecovery)
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 4000
     });
-    
+
     // Connection events
     socket.on('connect', () => {
-        console.log('[Socket] Connected to server');
+        console.log(`[Socket] Connected to server${socket.recovered ? ' (session recovered)' : ''}`);
         isConnected = true;
         updateConnectionStatus('connected', 'Conectado');
+        hideReconnectNotice();
+
+        if (socket.recovered) {
+            // Same socket id, room and player slot; missed events are replayed by the server.
+            // The server zeroed our input while we were away: resend what is held right now.
+            sendInput();
+            return;
+        }
+
+        if (roomCode) {
+            // We were in a room but the session could not be recovered (grace period expired
+            // or the server restarted): our slot is gone, so go back to the join screen.
+            const lostRoom = roomCode;
+            console.warn('[Socket] Session lost, back to join screen');
+            resetState();
+            showScreen('join');
+            elements.roomCodeInput.value = lostRoom;
+            showError('Se perdió la conexión con la sala. Vuelve a unirte.');
+        }
     });
-    
-    socket.on('disconnect', () => {
-        console.log('[Socket] Disconnected from server');
+
+    socket.on('disconnect', (reason) => {
+        console.log('[Socket] Disconnected from server:', reason);
         isConnected = false;
-        updateConnectionStatus('error', 'Desconectado');
+
+        if (reason === 'io server disconnect') {
+            // Kicked by the server: socket.io will not retry on its own and the slot is gone
+            hideReconnectNotice();
+            if (roomCode) {
+                resetState();
+                showScreen('join');
+                showError('Desconectado de la sala');
+            }
+            updateConnectionStatus('connecting', 'Conectando...');
+            socket.connect();
+            return;
+        }
+
+        if (reason === 'io client disconnect') {
+            // Intentional disconnect from this page
+            updateConnectionStatus('error', 'Desconectado');
+            return;
+        }
+
+        // Network drop / screen lock: socket.io reconnects by itself and the server keeps
+        // our slot for a while, so stay on the current screen and just show a notice.
+        updateConnectionStatus('connecting', 'Reconectando...');
+        if (roomCode) showReconnectNotice();
     });
-    
+
     socket.on('connect_error', (error) => {
         console.error('[Socket] Connection error:', error);
-        updateConnectionStatus('error', 'Error de conexión');
+        if (roomCode) {
+            showReconnectNotice();
+        } else {
+            updateConnectionStatus('error', 'Error de conexión');
+        }
     });
+
+    // Combat feedback: vibrate when THIS player gets hit
+    socket.on('attack-hit', handleAttackHitHaptics);
+    socket.on('arena-attack-hit', handleAttackHitHaptics);
     
     // Game events
     socket.on('player-joined', handlePlayerJoined);
@@ -704,6 +788,33 @@ function updateConnectionStatus(status, text) {
     statusEl.querySelector('.status-text').textContent = text;
 }
 
+function showReconnectNotice() {
+    const notice = document.getElementById('reconnect-notice');
+    if (notice) notice.classList.remove('hidden');
+}
+
+function hideReconnectNotice() {
+    const notice = document.getElementById('reconnect-notice');
+    if (notice) notice.classList.add('hidden');
+}
+
+// =================================
+// Hit Haptics (Smash 'attack-hit' / Arena 'arena-attack-hit' and 'arena-throw')
+// =================================
+
+const HIT_VIBRATION = {
+    hit: [35, 25, 35],   // short double buzz
+    blocked: 15,         // light tick
+    thrown: [90, 40, 140] // long
+};
+
+function handleAttackHitHaptics(data) {
+    if (!data || !Array.isArray(data.hits) || !socket) return;
+    const myHit = data.hits.find(h => h && h.targetId === socket.id);
+    if (!myHit) return;
+    vibrate(myHit.blocked ? HIT_VIBRATION.blocked : HIT_VIBRATION.hit);
+}
+
 // =================================
 // Screen Management
 // =================================
@@ -894,11 +1005,12 @@ function updateLobbyUI(room) {
     
     // Update players list with character info
     elements.playersList.innerHTML = room.players.map(p => {
-        const charEmoji = p.character ? CHARACTERS[p.character]?.emoji : '❓';
+        const charEmoji = (p.character && CHARACTERS[p.character]?.emoji) || '❓';
+        const color = escapeHtml(p.color);
         return `
-            <li class="${p.ready ? 'ready' : ''}" style="border-left-color: ${p.color}">
-                <span class="player-number" style="color: ${p.color}">P${p.number}</span>
-                <span class="player-name">${charEmoji} ${p.name}</span>
+            <li class="${p.ready ? 'ready' : ''}" style="border-left-color: ${color}">
+                <span class="player-number" style="color: ${color}">P${escapeHtml(p.number)}</span>
+                <span class="player-name">${charEmoji} ${escapeHtml(p.name)}</span>
                 <span class="ready-status">${p.ready ? '✓ Listo' : ''}</span>
             </li>
         `;
@@ -1066,31 +1178,102 @@ function handleGameStarted(data) {
         }
     }
     
+    // Tournament info (also covers rematches, which restart at round 1)
+    if (data.tournamentRounds) tournamentState.totalRounds = data.tournamentRounds;
+    if (data.currentRound) tournamentState.currentRound = data.currentRound;
+    tournamentState.playerScores = data.playerScores || {};
+    updateTournamentHUD();
+
+    // Fresh per-match state: this event also starts tournament rounds and rematches
+    resetMatchState();
+
     showScreen('controller');
-    
+
     // Update controller UI with player info
     if (playerData) {
         elements.controllerBadge.querySelector('.badge-name').textContent = `P${playerData.number}`;
         elements.controllerBadge.style.background = `linear-gradient(135deg, ${playerData.color}, var(--accent))`;
     }
-    
+
     // Update UI based on game mode
     updateControllerUIForMode();
-    
+
     if (gameMode === 'smash') {
         updateStocks(3);
     }
-    
+
     triggerHaptic();
 }
 
+/**
+ * Reset everything that belongs to a single match/round so a rematch or the next
+ * tournament round starts clean for every mode. Mode-specific UI is rebuilt
+ * afterwards by updateControllerUIForMode().
+ */
+function resetMatchState() {
+    // End-of-match screens
+    elements.gameOverOverlay.classList.add('hidden');
+    elements.gameOverTitle.style.color = '';
+    elements.gameOverMessage.style.whiteSpace = '';
+    const tournamentOverlay = document.getElementById('tournament-end-overlay');
+    if (tournamentOverlay) tournamentOverlay.classList.add('hidden');
+    hideRoundEndOverlay();
+    resetRematchButtons();
+    document.querySelectorAll('.race-finish-notification, .flappy-death-notification')
+        .forEach(el => el.remove());
+
+    // Inputs: joystick, held buttons, block
+    resetJoystick();
+    Object.keys(inputState).forEach(key => inputState[key] = false);
+    document.querySelectorAll('#controller-screen .pressed').forEach(el => el.classList.remove('pressed'));
+
+    // Arena grab state
+    isGrabbing = false;
+    isGrabbed = false;
+    escapeProgress = 0;
+    hideEscapeUI();
+    updateGrabButtonState();
+
+    // Race
+    lastRaceTap = null;
+    updateRaceSpeed(0);
+
+    // Flappy
+    flappyAlive = true;
+    const distEl = document.getElementById('flappy-distance');
+    if (distEl) distEl.textContent = '0m';
+
+    // Tug of War
+    tugStamina = 100;
+    const tugFill = document.getElementById('tug-stamina-fill');
+    if (tugFill) {
+        tugFill.style.width = '100%';
+        tugFill.style.background = '';
+    }
+
+    // Balloon (button/label are rebuilt in setupBalloonControls)
+    balloonProgress = 0;
+
+    // Trivia
+    document.querySelectorAll('.trivia-btn').forEach(btn => btn.classList.remove('selected', 'pressed'));
+
+    // Header: damage / health / penalty / score ("X" when eliminated)
+    const initialValue = {
+        arena: '100%',
+        tag: '0.0s',
+        paint: '0.0%'
+    }[gameMode] || '0%';
+    elements.playerDamage.textContent = initialValue;
+    elements.playerDamage.style.color = '';
+    updateStocks(3);
+}
+
 function updateControllerUIForMode() {
-    const dpadUp = document.querySelector('.dpad-up');
-    const dpadDown = document.querySelector('.dpad-down');
     const healthLabel = document.querySelector('.health-label');
     const stocksDisplay = elements.stocksDisplay;
     const grabBtn = document.querySelector('.btn-grab');
-    const runLabel = dpadDown?.querySelector('.label');
+    const actionButtons = document.querySelector('.action-buttons');
+    const joystickHint = document.getElementById('joystick-hint');
     const controllerBody = document.querySelector('.controller-body');
     const raceControls = document.getElementById('race-controls');
     const flappyControls = document.getElementById('flappy-controls');
@@ -1100,23 +1283,24 @@ function updateControllerUIForMode() {
     const puzzleControls = document.getElementById('puzzle-controls');
     const controllerScreen = document.getElementById('controller-screen');
     
-    // Hide all special controls first
+    // Start from a neutral layout so switching modes never leaves stale pieces behind
     if (raceControls) raceControls.style.display = 'none';
     if (flappyControls) flappyControls.style.display = 'none';
     if (tugControls) tugControls.style.display = 'none';
     if (balloonControls) balloonControls.style.display = 'none';
     if (triviaControls) triviaControls.style.display = 'none';
     if (puzzleControls) puzzleControls.style.display = 'none';
+    if (controllerScreen) controllerScreen.classList.remove(...MODE_CLASSES);
+    if (actionButtons) actionButtons.style.display = '';
+    if (grabBtn) grabBtn.style.display = 'none';
+    if (stocksDisplay) stocksDisplay.style.display = 'none';
+    if (joystickHint) joystickHint.textContent = '';
     
     if (gameMode === 'trivia') {
         // Trivia mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (triviaControls) triviaControls.style.display = 'flex';
-        if (controllerScreen) {
-            controllerScreen.classList.add('trivia-mode');
-            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode', 'puzzle-mode');
-        }
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (controllerScreen) controllerScreen.classList.add('trivia-mode');
         if (healthLabel) healthLabel.textContent = '';
         
         setupTriviaControls();
@@ -1125,53 +1309,24 @@ function updateControllerUIForMode() {
         // Word Puzzle mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (puzzleControls) puzzleControls.style.display = 'flex';
-        if (controllerScreen) {
-            controllerScreen.classList.add('puzzle-mode');
-            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode', 'trivia-mode');
-        }
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (controllerScreen) controllerScreen.classList.add('puzzle-mode');
         if (healthLabel) healthLabel.textContent = '';
         
         setupPuzzleControls();
         console.log('[Controller] Puzzle mode UI configured');
     } else if (gameMode === 'maze') {
-        // Maze mode uses D-pad (same as Tag or Paint)
+        // Maze mode: joystick only (8 directions)
         if (controllerBody) controllerBody.style.display = 'flex';
-        if (controllerScreen) {
-            controllerScreen.classList.add('maze-mode');
-            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode', 'trivia-mode', 'puzzle-mode');
-        }
-        
-        if (dpadUp) {
-            dpadUp.dataset.input = 'up';
-            dpadUp.dataset.originalInput = 'up';
-        }
-        if (dpadDown) {
-            dpadDown.dataset.input = 'down';
-            dpadDown.dataset.originalInput = 'down';
-            if (runLabel) {
-                runLabel.textContent = 'ABAJO';
-                runLabel.style.display = 'block';
-            }
-        }
-        
-        // Hide action buttons in Maze mode
-        const actionButtons = document.querySelector('.action-buttons');
+        if (controllerScreen) controllerScreen.classList.add('maze-mode', 'joystick-only');
         if (actionButtons) actionButtons.style.display = 'none';
-        
         if (healthLabel) healthLabel.textContent = 'EXPLORA';
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
         
         console.log('[Controller] Maze mode UI configured');
     } else if (gameMode === 'balloon') {
         // Balloon mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (balloonControls) balloonControls.style.display = 'flex';
-        if (controllerScreen) {
-            controllerScreen.classList.add('balloon-mode');
-            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode', 'paint-mode');
-        }
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (controllerScreen) controllerScreen.classList.add('balloon-mode');
         if (healthLabel) healthLabel.textContent = '';
         
         setupBalloonControls();
@@ -1180,11 +1335,7 @@ function updateControllerUIForMode() {
         // Tug of War mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (tugControls) tugControls.style.display = 'flex';
-        if (controllerScreen) {
-            controllerScreen.classList.add('tug-mode');
-            controllerScreen.classList.remove('race-mode', 'flappy-mode');
-        }
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (controllerScreen) controllerScreen.classList.add('tug-mode');
         if (healthLabel) healthLabel.textContent = '';
         
         setupTugControls();
@@ -1196,8 +1347,6 @@ function updateControllerUIForMode() {
         if (controllerBody) controllerBody.style.display = 'none';
         if (flappyControls) flappyControls.style.display = 'flex';
         if (controllerScreen) controllerScreen.classList.add('flappy-mode');
-        if (controllerScreen) controllerScreen.classList.remove('race-mode');
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
         if (healthLabel) healthLabel.textContent = '';
         
         // Setup flappy tap button
@@ -1215,8 +1364,6 @@ function updateControllerUIForMode() {
         if (controllerBody) controllerBody.style.display = 'none';
         if (raceControls) raceControls.style.display = 'flex';
         if (controllerScreen) controllerScreen.classList.add('race-mode');
-        if (controllerScreen) controllerScreen.classList.remove('flappy-mode');
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
         if (healthLabel) healthLabel.textContent = '';
         
         // Setup race foot buttons
@@ -1224,113 +1371,55 @@ function updateControllerUIForMode() {
         
         console.log('[Controller] Race mode UI configured');
     } else if (gameMode === 'tag') {
-        // Tag mode: D-pad for 4-way movement, no action buttons
+        // Tag mode: joystick only (8 directions), no action buttons
         if (controllerBody) controllerBody.style.display = 'flex';
-        if (raceControls) raceControls.style.display = 'none';
-        if (flappyControls) flappyControls.style.display = 'none';
-        
-        if (dpadUp) {
-            dpadUp.dataset.input = 'up';
-            dpadUp.dataset.originalInput = 'up';
-        }
-        if (dpadDown) {
-            dpadDown.dataset.input = 'down';
-            dpadDown.dataset.originalInput = 'down';
-            if (runLabel) runLabel.style.display = 'none';
-        }
-        
-        // Hide action buttons in Tag mode
-        const actionButtons = document.querySelector('.action-buttons');
+        if (controllerScreen) controllerScreen.classList.add('joystick-only');
         if (actionButtons) actionButtons.style.display = 'none';
-        
         if (healthLabel) healthLabel.textContent = 'TIEMPO';
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
         
         console.log('[Controller] Tag mode UI configured');
     } else if (gameMode === 'paint') {
-        // Paint mode: D-pad for 4-way movement + Run
+        // Paint mode: joystick only (8 directions)
         if (controllerBody) controllerBody.style.display = 'flex';
-        if (raceControls) raceControls.style.display = 'none';
-        if (flappyControls) flappyControls.style.display = 'none';
-        if (controllerScreen) {
-            controllerScreen.classList.add('paint-mode');
-            controllerScreen.classList.remove('race-mode', 'flappy-mode', 'tug-mode');
-        }
-        
-        if (dpadUp) {
-            dpadUp.dataset.input = 'up';
-            dpadUp.dataset.originalInput = 'up';
-        }
-        if (dpadDown) {
-            dpadDown.dataset.input = 'down';
-            dpadDown.dataset.originalInput = 'down';
-            if (runLabel) runLabel.style.display = 'block';
-        }
-        
-        // Show action buttons but maybe only for running? 
-        // Actually, let's just use the D-pad and keep it simple.
-        const actionButtons = document.querySelector('.action-buttons');
+        if (controllerScreen) controllerScreen.classList.add('paint-mode', 'joystick-only');
         if (actionButtons) actionButtons.style.display = 'none';
-        
         if (healthLabel) healthLabel.textContent = 'PINTA!';
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
         
         console.log('[Controller] Paint mode UI configured');
     } else if (gameMode === 'arena') {
-        // Arena mode: D-pad controls all 4 directions for movement
+        // Arena mode: joystick moves in 8 directions, push it all the way to run
         if (controllerBody) controllerBody.style.display = 'flex';
-        if (raceControls) raceControls.style.display = 'none';
-        if (controllerScreen) controllerScreen.classList.remove('race-mode');
-        
-        if (dpadUp) {
-            dpadUp.dataset.input = 'up';
-            dpadUp.dataset.originalInput = 'up';
-        }
-        if (dpadDown) {
-            dpadDown.dataset.input = 'down';
-            dpadDown.dataset.originalInput = 'down';
-            if (runLabel) runLabel.style.display = 'none';
-        }
-        
-        // Show grab button in Arena mode
         if (grabBtn) grabBtn.style.display = 'flex';
-        
-        // Change health display for Arena mode
         if (healthLabel) healthLabel.textContent = 'VIDA';
-        if (stocksDisplay) stocksDisplay.style.display = 'none';
+        if (joystickHint) joystickHint.textContent = 'A FONDO = CORRER';
         
         console.log('[Controller] Arena mode UI configured');
     } else {
-        // Smash mode: Up = jump, Down = run
+        // Smash mode: joystick left/right moves, up jumps, all the way sideways runs
         if (controllerBody) controllerBody.style.display = 'flex';
-        if (raceControls) raceControls.style.display = 'none';
-        if (controllerScreen) controllerScreen.classList.remove('race-mode');
-        
-        if (dpadUp) {
-            dpadUp.dataset.input = 'jump';
-            dpadUp.dataset.originalInput = 'jump';
-        }
-        if (dpadDown) {
-            dpadDown.dataset.input = 'run';
-            dpadDown.dataset.originalInput = 'run';
-            if (runLabel) runLabel.style.display = 'block';
-        }
-        
-        // Hide grab button in Smash mode
-        if (grabBtn) grabBtn.style.display = 'none';
-        
         if (healthLabel) healthLabel.textContent = 'DAÑO';
         if (stocksDisplay) stocksDisplay.style.display = 'flex';
-        
+        if (joystickHint) joystickHint.textContent = '↑ SALTA · A FONDO CORRE';
+
         console.log('[Controller] Smash mode UI configured');
     }
 }
 
 // Setup race mode controls (left/right foot buttons)
 function setupRaceControls() {
+    // Replace the buttons so listeners are not stacked on every round/rematch
+    // (stacked listeners sent each tap several times)
+    ['left-foot', 'right-foot'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            const fresh = btn.cloneNode(true);
+            fresh.classList.remove('pressed', 'pulse');
+            btn.replaceWith(fresh);
+        }
+    });
     const leftFoot = document.getElementById('left-foot');
     const rightFoot = document.getElementById('right-foot');
-    
+
     if (leftFoot) {
         leftFoot.addEventListener('touchstart', (e) => {
             e.preventDefault();
@@ -1461,8 +1550,8 @@ function setupTriviaControls() {
             const answer = newBtn.dataset.answer;
             if (socket) {
                 socket.emit('trivia-answer', answer);
-                // Visual feedback
-                triviaButtons.forEach(b => b.classList.remove('selected'));
+                // Visual feedback (query the live buttons: the originals were replaced)
+                document.querySelectorAll('.trivia-btn').forEach(b => b.classList.remove('selected'));
                 newBtn.classList.add('selected');
             }
         }, { passive: false });
@@ -1505,13 +1594,17 @@ function setupPuzzleControls() {
         sendGuess();
     });
 
-    // Also support Enter key
-    input.addEventListener('keyup', (e) => {
+    // Also support Enter key (replace the previous round's handler instead of stacking)
+    if (puzzleEnterHandler) input.removeEventListener('keyup', puzzleEnterHandler);
+    puzzleEnterHandler = (e) => {
         if (e.key === 'Enter') {
             sendGuess();
         }
-    });
+    };
+    input.addEventListener('keyup', puzzleEnterHandler);
 }
+
+let puzzleEnterHandler = null;
 
 function setupBalloonControls() {
     const inflateBtn = document.getElementById('balloon-inflate-btn');
@@ -1579,12 +1672,19 @@ function setupBalloonControls() {
 }
 
 // Client-side rhythm animation for the Tug of War bar
+let tugRhythmRunning = false;
+
 function startTugRhythmAnimation() {
     const cursor = document.getElementById('rhythm-bar-cursor');
     if (!cursor) return;
-    
+    if (tugRhythmRunning) return; // One loop is enough (game-started fires every round)
+    tugRhythmRunning = true;
+
     const animate = () => {
-        if (gameMode !== 'tug') return;
+        if (gameMode !== 'tug') {
+            tugRhythmRunning = false;
+            return;
+        }
         
         const now = Date.now();
         // Calculate progress within the current pulse interval (0 to 1)
@@ -1756,11 +1856,11 @@ function handleArenaThrowEvent(data) {
         updateGrabButtonState();
         triggerHaptic();
     }
-    // If we were thrown, hide escape UI and vibrate strongly
+    // If we were thrown, hide escape UI and vibrate (long pattern)
     if (data.targetId === socket.id) {
         isGrabbed = false;
         hideEscapeUI();
-        triggerHaptic(true);
+        vibrate(HIT_VIBRATION.thrown);
     }
 }
 
@@ -1855,45 +1955,244 @@ function handleRoomClosed(data) {
 // Controller Input
 // =================================
 
-function setupControllerInput() {
-    // D-Pad buttons - read inputType dynamically from dataset for game mode switching
-    const dpadButtons = document.querySelectorAll('.dpad-btn');
-    
-    dpadButtons.forEach(btn => {
-        // Touch events - read inputType at event time for dynamic mode switching
-        btn.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            const inputType = btn.dataset.input; // Read at event time
-            handleInputStart(inputType, btn);
-        }, { passive: false });
-        
-        btn.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            const inputType = btn.dataset.input; // Read at event time
-            handleInputEnd(inputType, btn);
-        }, { passive: false });
-        
-        btn.addEventListener('touchcancel', (e) => {
-            e.preventDefault();
-            const inputType = btn.dataset.input; // Read at event time
-            handleInputEnd(inputType, btn);
-        }, { passive: false });
-        
-        // Mouse events (for testing on desktop) - also read dynamically
-        btn.addEventListener('mousedown', () => {
-            const inputType = btn.dataset.input;
-            handleInputStart(inputType, btn);
-        });
-        btn.addEventListener('mouseup', () => {
-            const inputType = btn.dataset.input;
-            handleInputEnd(inputType, btn);
-        });
-        btn.addEventListener('mouseleave', () => {
-            const inputType = btn.dataset.input;
-            handleInputEnd(inputType, btn);
-        });
+// =================================
+// Analog Joystick (replaces the 4-button D-Pad)
+// =================================
+
+const JOYSTICK = {
+    DEAD_ZONE: 0.25,      // Fraction of the radius ignored around the center
+    JUMP_THRESHOLD: 0.5,  // Smash: push up past half the radius to jump
+    RUN_THRESHOLD: 0.85,  // Smash (horizontal) / Arena (any direction): run near the edge
+    TRAVEL: 0.72          // Knob travel radius as a fraction of the base radius
+};
+
+// inputState fields driven by the joystick (block and attacks belong to the buttons)
+const JOYSTICK_FIELDS = ['left', 'right', 'up', 'down', 'jump', 'run'];
+
+const joystick = {
+    zone: null,
+    base: null,
+    knob: null,
+    arrows: {},
+    pointerId: null, // Pointer id (Pointer Events) or touch identifier (touch fallback)
+    centerX: 0,
+    centerY: 0,
+    radius: 1,
+    engaged: false   // Outside the dead zone
+};
+
+/**
+ * How the stick maps to inputs in the current mode
+ *  - smash: left/right, up = jump, far sideways = run
+ *  - arena: 8-way + run near the edge
+ *  - eight: 8-way only (tag, paint, maze)
+ */
+function getJoystickProfile() {
+    if (gameMode === 'arena') return 'arena';
+    if (gameMode === 'tag' || gameMode === 'paint' || gameMode === 'maze') return 'eight';
+    return 'smash';
+}
+
+function findTouch(touchList, id) {
+    for (let i = 0; i < touchList.length; i++) {
+        if (touchList[i].identifier === id) return touchList[i];
+    }
+    return null;
+}
+
+function setupJoystick() {
+    joystick.zone = document.getElementById('joystick-zone');
+    joystick.base = document.getElementById('joystick-base');
+    joystick.knob = document.getElementById('joystick-knob');
+    if (!joystick.zone || !joystick.base || !joystick.knob) return;
+
+    ['up', 'down', 'left', 'right'].forEach(dir => {
+        joystick.arrows[dir] = joystick.zone.querySelector(`.joy-${dir}`);
     });
-    
+
+    const zone = joystick.zone;
+
+    if (window.PointerEvent) {
+        // Pointer Events: each finger has its own pointerId, so the stick and the
+        // action buttons work at the same time (multi-touch)
+        zone.addEventListener('pointerdown', (e) => {
+            if (joystick.pointerId !== null) return; // Already driven by another finger
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            e.preventDefault();
+            joystick.pointerId = e.pointerId;
+            try { zone.setPointerCapture(e.pointerId); } catch (err) { /* keep going without capture */ }
+            joystickStart(e.clientX, e.clientY);
+        });
+
+        zone.addEventListener('pointermove', (e) => {
+            if (e.pointerId !== joystick.pointerId) return;
+            e.preventDefault();
+            joystickMove(e.clientX, e.clientY);
+        });
+
+        const endPointer = (e) => {
+            if (e.pointerId !== joystick.pointerId) return;
+            joystickEnd();
+        };
+        zone.addEventListener('pointerup', endPointer);
+        zone.addEventListener('pointercancel', endPointer);
+        zone.addEventListener('lostpointercapture', endPointer);
+        // With capture the thumb may slide outside the zone and keep steering;
+        // without capture, leaving the zone lets go of the stick.
+        zone.addEventListener('pointerleave', (e) => {
+            if (e.pointerId !== joystick.pointerId) return;
+            if (zone.hasPointerCapture && zone.hasPointerCapture(e.pointerId)) return;
+            joystickEnd();
+        });
+    } else {
+        // Touch fallback for browsers without Pointer Events: follow our own touch identifier
+        zone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (joystick.pointerId !== null) return;
+            const touch = e.changedTouches[0];
+            joystick.pointerId = touch.identifier;
+            joystickStart(touch.clientX, touch.clientY);
+        }, { passive: false });
+
+        zone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = findTouch(e.changedTouches, joystick.pointerId);
+            if (touch) joystickMove(touch.clientX, touch.clientY);
+        }, { passive: false });
+
+        const endTouch = (e) => {
+            e.preventDefault();
+            if (findTouch(e.changedTouches, joystick.pointerId)) joystickEnd();
+        };
+        zone.addEventListener('touchend', endTouch, { passive: false });
+        zone.addEventListener('touchcancel', endTouch, { passive: false });
+    }
+
+    // Let go if the page loses focus mid-press (screen lock, app switch, notification)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) joystickEnd();
+    });
+    window.addEventListener('blur', () => joystickEnd());
+}
+
+function joystickStart(x, y) {
+    const rect = joystick.base.getBoundingClientRect();
+    joystick.centerX = rect.left + rect.width / 2;
+    joystick.centerY = rect.top + rect.height / 2;
+    joystick.radius = Math.max(20, (rect.width / 2) * JOYSTICK.TRAVEL);
+    joystick.zone.classList.add('active');
+    joystickMove(x, y);
+}
+
+function joystickMove(x, y) {
+    let dx = x - joystick.centerX;
+    let dy = y - joystick.centerY;
+    const max = joystick.radius;
+    const dist = Math.hypot(dx, dy);
+
+    // Clamp the knob to the travel radius
+    if (dist > max) {
+        dx = (dx / dist) * max;
+        dy = (dy / dist) * max;
+    }
+
+    joystick.knob.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+    applyJoystickVector(dx / max, dy / max);
+}
+
+/**
+ * Release the stick: knob springs back and every direction is cleared.
+ * @param {boolean} send - send the cleared input to the server if it changed
+ */
+function joystickEnd(send = true) {
+    const pointerId = joystick.pointerId;
+    joystick.pointerId = null; // Clear first: releasing capture fires 'lostpointercapture'
+
+    if (joystick.zone && pointerId !== null && joystick.zone.hasPointerCapture &&
+        joystick.zone.hasPointerCapture(pointerId)) {
+        try { joystick.zone.releasePointerCapture(pointerId); } catch (err) { /* ignore */ }
+    }
+
+    if (joystick.zone) joystick.zone.classList.remove('active', 'running');
+    if (joystick.knob) joystick.knob.style.transform = 'translate3d(0, 0, 0)';
+
+    setJoystickInputs({ left: false, right: false, up: false, down: false, jump: false, run: false }, false, send);
+}
+
+/**
+ * Reset the stick for a new match without emitting anything
+ */
+function resetJoystick() {
+    joystickEnd(false);
+}
+
+/**
+ * Turn a normalized stick vector (x right, y down, length <= 1) into inputState booleans
+ */
+function applyJoystickVector(nx, ny) {
+    const magnitude = Math.min(1, Math.hypot(nx, ny));
+    const next = { left: false, right: false, up: false, down: false, jump: false, run: false };
+    const engaged = magnitude >= JOYSTICK.DEAD_ZONE;
+
+    if (engaged) {
+        // 8 sectors of 45 degrees: 0 = right, 2 = up, 4 = left, 6 = down (diagonals set two)
+        const angle = Math.atan2(-ny, nx);
+        const sector = ((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8;
+        const dirRight = sector === 7 || sector === 0 || sector === 1;
+        const dirUp = sector >= 1 && sector <= 3;
+        const dirLeft = sector >= 3 && sector <= 5;
+        const dirDown = sector >= 5 && sector <= 7;
+        const profile = getJoystickProfile();
+
+        if (profile === 'smash') {
+            // Smash server reads left/right, jump and run (up/down stay false like the old D-pad)
+            next.left = dirLeft;
+            next.right = dirRight;
+            next.jump = dirUp && -ny >= JOYSTICK.JUMP_THRESHOLD;
+            next.run = (dirLeft || dirRight) && Math.abs(nx) >= JOYSTICK.RUN_THRESHOLD;
+        } else {
+            next.left = dirLeft;
+            next.right = dirRight;
+            next.up = dirUp;
+            next.down = dirDown;
+            if (profile === 'arena') {
+                next.run = magnitude >= JOYSTICK.RUN_THRESHOLD;
+            }
+        }
+    }
+
+    setJoystickInputs(next, engaged, true);
+}
+
+function setJoystickInputs(next, engaged, send) {
+    let changed = false;
+    JOYSTICK_FIELDS.forEach(key => {
+        if (inputState[key] !== next[key]) {
+            if (key === 'jump' && next.jump) vibrate(12);
+            inputState[key] = next[key];
+            changed = true;
+        }
+    });
+
+    // Visual feedback on the base
+    if (joystick.arrows.up) joystick.arrows.up.classList.toggle('on', next.up || next.jump);
+    if (joystick.arrows.down) joystick.arrows.down.classList.toggle('on', next.down);
+    if (joystick.arrows.left) joystick.arrows.left.classList.toggle('on', next.left);
+    if (joystick.arrows.right) joystick.arrows.right.classList.toggle('on', next.right);
+    if (joystick.zone) joystick.zone.classList.toggle('running', next.run);
+
+    // Light tick when the stick leaves the dead zone
+    if (engaged && !joystick.engaged) vibrate(8);
+    joystick.engaged = engaged;
+
+    // Same 'player-input' payload as before, only when something changed
+    if (changed && send) sendInput();
+}
+
+function setupControllerInput() {
+    // Movement: analog joystick (smash, arena, tag, paint, maze)
+    setupJoystick();
+
     // Action buttons (punch, kick, taunt)
     const actionButtons = document.querySelectorAll('.action-btn[data-action]');
     
@@ -1943,29 +2242,12 @@ function setupControllerInput() {
     });
 }
 
-function handleInputStart(inputType, btn) {
-    console.log('[Input] Start:', inputType, 'gameMode:', gameMode);
-    if (!inputType || inputState[inputType]) return;
-    
-    inputState[inputType] = true;
-    btn.classList.add('pressed');
-    
-    sendInput();
-    triggerHaptic();
-}
-
-function handleInputEnd(inputType, btn) {
-    if (!inputType || !inputState[inputType]) return;
-    
-    inputState[inputType] = false;
-    btn.classList.remove('pressed');
-    
-    sendInput();
-}
-
 function handleAction(action, btn) {
     btn.classList.add('pressed');
-    
+
+    // While reconnecting, socket.io would buffer these and replay stale attacks later
+    if (!socket || !socket.connected) return;
+
     // Handle actions based on game mode
     if (gameMode === 'arena') {
         // Arena mode events
@@ -2023,14 +2305,15 @@ function handleAction(action, btn) {
     }
     
     // Send input update with action flag
-    const inputWithAction = { ...inputState };
-    inputWithAction[action] = true;
-    socket.emit('player-input', inputWithAction);
-    
-    // Reset action flag after brief moment
+    socket.emit('player-input', { ...inputState, [action]: true });
+
+    // Reset action flag after brief moment. Build it from the CURRENT inputState:
+    // re-sending the 100 ms old snapshot kept the player moving if a direction was
+    // released in the meantime.
     setTimeout(() => {
-        inputWithAction[action] = false;
-        socket.emit('player-input', inputWithAction);
+        if (socket && socket.connected) {
+            socket.emit('player-input', { ...inputState, [action]: false });
+        }
     }, 100);
     
     triggerHaptic();
@@ -2093,9 +2376,7 @@ function updateStocks(count) {
 }
 
 function triggerHaptic(strong = false) {
-    if ('vibrate' in navigator) {
-        navigator.vibrate(strong ? [50, 30, 50] : 10);
-    }
+    vibrate(strong ? [50, 30, 50] : 10);
 }
 
 /**
@@ -2319,15 +2600,21 @@ function resetState() {
     raceSpeed = 0;
     flappyAlive = true;
     balloonProgress = 0;
+    resetJoystick();
     Object.keys(inputState).forEach(key => inputState[key] = false);
-    
+
     // Hide escape UI if visible
     hideEscapeUI();
     updateGrabButtonState();
-    
+    hideReconnectNotice();
+    resetRematchButtons();
+
     elements.roomCodeInput.value = '';
     elements.joinError.textContent = '';
     elements.gameOverOverlay.classList.add('hidden');
+    hideRoundEndOverlay();
+    const tournamentOverlay = document.getElementById('tournament-end-overlay');
+    if (tournamentOverlay) tournamentOverlay.classList.add('hidden');
     elements.readyBtn.classList.remove('active');
     elements.readyBtn.disabled = true;
     elements.readyBtn.querySelector('.btn-text').textContent = '¡LISTO!';
@@ -2374,14 +2661,103 @@ function setupEventListeners() {
         }
     });
     
-    // Game over screen
+    // Game over screen (every mode) and tournament end screen
     elements.rematchBtn.addEventListener('click', () => {
-        socket.emit('request-rematch');
+        requestRematch(document.getElementById('rematch-error'));
     });
-    
+
+    const tournamentRematchBtn = document.getElementById('tournament-rematch-btn');
+    if (tournamentRematchBtn) {
+        tournamentRematchBtn.addEventListener('click', () => {
+            requestRematch(document.getElementById('tournament-rematch-error'));
+        });
+    }
+
     elements.exitBtn.addEventListener('click', () => {
         leaveRoom();
     });
+}
+
+// =================================
+// Rematch
+// =================================
+
+const REMATCH_ERRORS = {
+    'Match in progress': 'La partida aún no termina',
+    'Game has not started': 'El juego no ha empezado',
+    'Not in a room': 'No estás en una sala',
+    'Room not found': 'La sala ya no existe',
+    'No players in room': 'No hay jugadores en la sala'
+};
+
+function getRematchButtons() {
+    return [elements.rematchBtn, document.getElementById('tournament-rematch-btn')].filter(Boolean);
+}
+
+/**
+ * Ask the server to restart the current mode. On success the server sends
+ * 'round-starting' { rematch: true } and then 'game-started', which reset this screen.
+ */
+function requestRematch(errorEl) {
+    if (rematchPending) return;
+
+    if (!socket || !socket.connected) {
+        showRematchError(errorEl, 'Sin conexión, reintentando...');
+        return;
+    }
+
+    rematchPending = true;
+    getRematchButtons().forEach(btn => {
+        btn.disabled = true;
+        btn.classList.add('pending');
+        btn.textContent = 'PIDIENDO...';
+    });
+    showRematchError(errorEl, '');
+
+    let settled = false;
+    const fallback = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resetRematchButtons();
+        showRematchError(errorEl, 'Sin respuesta del servidor');
+    }, 5000);
+
+    socket.emit('request-rematch', (res) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(fallback);
+
+        if (res && res.success) {
+            // Keep the buttons disabled: 'round-starting' / 'game-started' take over from here
+            // ('round-starting' can arrive before this ack and has already reset them)
+            if (rematchPending) {
+                getRematchButtons().forEach(btn => { btn.textContent = '¡VAMOS!'; });
+            }
+            triggerHaptic();
+        } else {
+            resetRematchButtons();
+            const error = res && res.error;
+            showRematchError(errorEl, REMATCH_ERRORS[error] || error || 'No se pudo pedir la revancha');
+        }
+    });
+}
+
+function resetRematchButtons() {
+    rematchPending = false;
+    getRematchButtons().forEach(btn => {
+        btn.disabled = false;
+        btn.classList.remove('pending');
+        btn.textContent = 'REVANCHA';
+    });
+}
+
+function showRematchError(errorEl, message) {
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    clearTimeout(rematchErrorTimer);
+    if (message) {
+        rematchErrorTimer = setTimeout(() => { errorEl.textContent = ''; }, 3000);
+    }
 }
 
 // =================================
@@ -2420,7 +2796,16 @@ function handleTournamentEnded(data) {
 function handleRoundStarting(data) {
     console.log('[Tournament] Round starting:', data);
     tournamentState.currentRound = data.round;
-    
+    if (data.totalRounds) tournamentState.totalRounds = data.totalRounds;
+
+    if (data.rematch) {
+        // Rematch (requested by any phone or the host): leave the end-of-match screens now;
+        // 'game-started' (~1 s later) rebuilds this mode's live controls with fresh state.
+        tournamentState.playerScores = {};
+        resetMatchState();
+        showTagNotification('¡REVANCHA!', 'var(--primary)');
+    }
+
     hideRoundEndOverlay();
     updateTournamentHUD();
 }
@@ -2444,8 +2829,8 @@ function showRoundEndOverlay(data) {
             .sort((a, b) => b[1] - a[1])
             .map(([name, wins]) => `
                 <div class="score-item ${wins === maxWins ? 'leader' : ''}">
-                    <span class="player-name">${name}</span>
-                    <span class="player-wins">${wins}</span>
+                    <span class="player-name">${escapeHtml(name)}</span>
+                    <span class="player-wins">${escapeHtml(wins)}</span>
                 </div>
             `).join('');
     }
@@ -2485,8 +2870,8 @@ function showTournamentEndOverlay(data) {
             .sort((a, b) => b[1] - a[1])
             .map(([name, wins], index) => `
                 <div class="score-item ${name === data.tournamentWinner ? 'leader' : ''}">
-                    <span class="player-name">${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''} ${name}</span>
-                    <span class="player-wins">${wins}</span>
+                    <span class="player-name">${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''} ${escapeHtml(name)}</span>
+                    <span class="player-wins">${escapeHtml(wins)}</span>
                 </div>
             `).join('');
     }

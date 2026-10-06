@@ -79,6 +79,27 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+}
+
+/* Compact slots when more than 4 players (up to 8) */
+#players-panel.many-players #players-status {
+    gap: 4px;
+}
+
+#players-panel.many-players .player-slot {
+    padding: 4px 10px;
+}
+
+#players-panel.many-players .player-slot .player-badge {
+    width: 22px;
+    height: 22px;
+    font-size: 0.7rem;
+}
+
+#players-panel.many-players .player-slot .player-name {
+    font-size: 0.8rem;
 }
 
 .player-slot {
@@ -556,6 +577,40 @@
 #play-again-btn:hover {
     transform: scale(1.05);
     box-shadow: 0 0 30px rgba(0, 255, 204, 0.5);
+}
+
+#play-again-btn:disabled,
+#tournament-rematch-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Rematch button on the tournament-end overlay */
+#tournament-rematch-btn {
+    display: block;
+    margin: 30px auto 0;
+    padding: 15px 40px;
+    font-family: 'Orbitron', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #00ffcc, #00ff88);
+    color: #0a0a15;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    transition: all 0.3s ease;
+}
+
+#tournament-rematch-btn:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px rgba(0, 255, 204, 0.5);
+}
+
+#tournament-rematch-btn + .btn-return-menu {
+    margin-top: 15px;
 }
 
 /* Death Animation */

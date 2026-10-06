@@ -49,35 +49,68 @@ const ANIMATION_FILES = {
     crawling: 'Crawling.fbx'
 };
 
+// Escape text before inserting it with innerHTML (defense in depth; names are sanitized server-side)
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+const BASE_EMISSIVE_INTENSITY = 0.2;
+const TAG_FLASH_DURATION = 0.6; // seconds
+const TAG_BURST_DURATION = 0.7; // seconds
+
 class TagPlayerEntity {
     constructor(id, number, color, baseModel, baseAnimations) {
         this.id = id;
         this.number = number;
         this.color = color;
         this.name = `Player ${number}`;
-        
+
+        // Root group in world units: carries position/rotation and the effects,
+        // while the FBX model inside it is scaled to 0.01
+        this.root = new THREE.Group();
+
         this.model = SkeletonUtils.clone(baseModel);
         this.model.scale.set(0.01, 0.01, 0.01);
-        
+        this.root.add(this.model);
+
+        this.tintMaterials = [];
         this.applyColorTint(color);
-        
+
+        // Labels stay on the model (positions are in model units: 250 * 0.01 = 2.5 m)
         this.nameLabel = this.createNameLabel(color);
         this.model.add(this.nameLabel);
-        
+
         this.itLabel = this.createItLabel();
         this.itLabel.visible = false;
         this.model.add(this.itLabel);
 
-        // Aura for "It" player
+        // Aura for "It" player (world units, on the root group)
         this.aura = this.createAura();
         this.aura.visible = false;
-        this.model.add(this.aura);
+        this.root.add(this.aura);
 
-        // Shield for immune player
+        // Light for the aura: always in the scene (intensity toggled) so the
+        // light count stays constant and shaders don't recompile on every tag
+        this.auraLight = new THREE.PointLight(0xff3366, 0, 5);
+        this.auraLight.position.y = 1;
+        this.root.add(this.auraLight);
+
+        // Shield for immune player (world units, on the root group)
         this.shield = this.createShield();
         this.shield.visible = false;
-        this.model.add(this.shield);
-        
+        this.root.add(this.shield);
+
+        // Tag feedback effects
+        this.bursts = [];
+        this.flashTime = 0;
+        this.graceVisual = false;
+        this.forcedAnim = null;
+
         this.animController = new AnimationController(this.model, baseAnimations);
         this.controller = new TagPlayerController(id, number, color);
     }
@@ -110,13 +143,7 @@ class TagPlayerEntity {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.y = 0.5; // At ground level in world but relative to model
-        
-        // Add a point light to the aura
-        const light = new THREE.PointLight(0xff3366, 2, 5);
-        light.position.y = 1;
-        mesh.add(light);
-        
+        mesh.position.y = 0.1; // Just above the floor (world units)
         return mesh;
     }
 
@@ -129,22 +156,119 @@ class TagPlayerEntity {
             wireframe: true
         });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.y = 100; // Centered on character
+        mesh.position.y = 1; // Centered on character (world units)
         return mesh;
     }
-    
+
     applyColorTint(color) {
         const tintColor = new THREE.Color(color);
         this.model.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
-                child.material = child.material.clone();
-                if (child.material.emissive) {
-                    child.material.emissive = tintColor;
-                    child.material.emissiveIntensity = 0.2;
-                }
+                // Materials can be arrays on some FBX meshes
+                const cloneMat = (m) => {
+                    const mat = m.clone();
+                    if (mat.emissive) {
+                        mat.emissive = tintColor.clone();
+                        mat.emissiveIntensity = BASE_EMISSIVE_INTENSITY;
+                    }
+                    this.tintMaterials.push(mat);
+                    return mat;
+                };
+                child.material = Array.isArray(child.material)
+                    ? child.material.map(cloneMat)
+                    : cloneMat(child.material);
             }
         });
+    }
+
+    /**
+     * Visible feedback when this player gets tagged: expanding rings + emissive flash
+     */
+    playTagBurst() {
+        const makeRing = (inner, outer, color, y, rotateFlat) => {
+            const geometry = new THREE.RingGeometry(inner, outer, 48);
+            const material = new THREE.MeshBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 1,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            if (rotateFlat) mesh.rotation.x = -Math.PI / 2;
+            mesh.position.y = y;
+            return mesh;
+        };
+
+        const ground = makeRing(0.4, 0.7, 0xff3366, 0.08, true);
+        const halo = makeRing(0.5, 0.65, 0xffcc00, 1.2, true);
+        this.root.add(ground);
+        this.root.add(halo);
+        this.bursts.push({ mesh: ground, t: 0, growth: 4 });
+        this.bursts.push({ mesh: halo, t: 0, growth: 2.5 });
+
+        this.flashTime = TAG_FLASH_DURATION;
+    }
+
+    updateEffects(delta) {
+        // Expanding/fading rings
+        for (let i = this.bursts.length - 1; i >= 0; i--) {
+            const burst = this.bursts[i];
+            burst.t += delta;
+            const k = Math.min(1, burst.t / TAG_BURST_DURATION);
+            const s = 1 + k * burst.growth;
+            burst.mesh.scale.set(s, s, s);
+            burst.mesh.material.opacity = 1 - k;
+            if (k >= 1) {
+                this.root.remove(burst.mesh);
+                burst.mesh.geometry.dispose();
+                burst.mesh.material.dispose();
+                this.bursts.splice(i, 1);
+            }
+        }
+
+        // Emissive flash on the character
+        if (this.flashTime > 0) {
+            this.flashTime = Math.max(0, this.flashTime - delta);
+            const k = this.flashTime / TAG_FLASH_DURATION;
+            const intensity = BASE_EMISSIVE_INTENSITY + k * 2.0;
+            this.tintMaterials.forEach(mat => {
+                if (mat.emissive) mat.emissiveIntensity = intensity;
+            });
+        }
+    }
+
+    /**
+     * Freeze at the end of the match (optionally with a celebration animation)
+     */
+    setFinalPose(animName) {
+        this.controller.velocity.set(0, 0, 0);
+        this.controller.input = { left: false, right: false, up: false, down: false };
+        this.forcedAnim = animName || 'idle';
+    }
+
+    dispose() {
+        this.animController?.dispose();
+
+        // CSS2D label elements are not removed from the DOM automatically
+        // when their parent group is removed from the scene
+        [this.nameLabel, this.itLabel].forEach(label => {
+            label?.element?.parentNode?.removeChild(label.element);
+        });
+
+        this.bursts.forEach(b => {
+            b.mesh.geometry.dispose();
+            b.mesh.material.dispose();
+        });
+        this.bursts = [];
+
+        [this.aura, this.shield].forEach(mesh => {
+            mesh?.geometry?.dispose();
+            mesh?.material?.dispose();
+        });
+        this.tintMaterials.forEach(mat => mat.dispose());
+        this.tintMaterials = [];
     }
 
     setName(name) {
@@ -154,39 +278,52 @@ class TagPlayerEntity {
         }
     }
 
-    update(delta, state) {
-        if (state) {
-            this.controller.applyServerState(state);
-            this.itLabel.visible = state.isIt;
-            this.aura.visible = state.isIt;
-            this.shield.visible = state.hasGrace;
-            
-            if (this.aura.visible) {
-                this.aura.rotation.z += delta * 2;
-                const scale = 1 + Math.sin(Date.now() * 0.01) * 0.1;
-                this.aura.scale.set(scale, scale, 1);
-            }
+    /**
+     * Apply a server snapshot (called from the socket handler, no animation work here)
+     */
+    applyState(state) {
+        if (!state) return;
+        this.controller.applyServerState(state);
+        const isIt = !!state.isIt;
+        const hasGrace = !!state.hasGrace;
+        this.itLabel.visible = isIt;
+        this.aura.visible = isIt;
+        this.auraLight.intensity = isIt ? 2 : 0;
+        this.shield.visible = hasGrace;
 
-            if (this.shield.visible) {
-                this.shield.rotation.y += delta * 3;
-                this.shield.rotation.x += delta * 1.5;
-            }
-            
-            // Visual feedback for grace period (transparency)
-            this.model.traverse(child => {
-                if (child.isMesh && child !== this.aura && child !== this.shield) {
-                    child.material.transparent = state.hasGrace;
-                    child.material.opacity = state.hasGrace ? 0.6 : 1.0;
-                }
+        // Visual feedback for grace period (transparency) - only when it changes
+        if (hasGrace !== this.graceVisual) {
+            this.graceVisual = hasGrace;
+            this.tintMaterials.forEach(mat => {
+                mat.transparent = hasGrace;
+                mat.opacity = hasGrace ? 0.6 : 1.0;
             });
         }
-        
-        this.model.position.copy(this.controller.position);
-        this.model.rotation.y = this.controller.facingAngle; // Removed + Math.PI to fix walking backward
-        
-        const animState = this.controller.getMovementState();
-        this.animController.play(animState); // Correctly call play() to switch animations
-        this.animController.update(delta); // update() only takes delta
+    }
+
+    /**
+     * Per-frame update (called from the render loop with the shared frame delta)
+     */
+    tick(delta) {
+        if (this.aura.visible) {
+            this.aura.rotation.z += delta * 2;
+            const scale = 1 + Math.sin(Date.now() * 0.01) * 0.1;
+            this.aura.scale.set(scale, scale, 1);
+        }
+
+        if (this.shield.visible) {
+            this.shield.rotation.y += delta * 3;
+            this.shield.rotation.x += delta * 1.5;
+        }
+
+        this.root.position.copy(this.controller.position);
+        this.root.rotation.y = this.controller.facingAngle; // Removed + Math.PI to fix walking backward
+
+        const animState = this.forcedAnim || this.controller.getMovementState();
+        this.animController.play(animState); // play() is a no-op if already running
+        this.animController.update(delta);
+
+        this.updateEffects(delta);
     }
 }
 
@@ -205,8 +342,32 @@ class TagGame {
         
         this.baseModels = {};
         this.baseAnimations = {};
-        
+
+        // HUD caches (avoid rebuilding DOM every server tick)
+        this.playerListKey = null;
+        this.penaltyEls = new Map();
+        this.rematchPending = false;
+        this.sfx = null;
+
         this.init();
+    }
+
+    /**
+     * Optional SFX (guarded: the game works without it)
+     */
+    loadSFX() {
+        try {
+            if (window.SFXManager) {
+                this.sfx = new window.SFXManager();
+                return;
+            }
+        } catch (e) { /* ignore */ }
+        import('../audio/SFXManager.js')
+            .then(mod => {
+                const SFX = mod.SFXManager || mod.default;
+                if (SFX) this.sfx = new SFX();
+            })
+            .catch(e => console.warn('[Tag] SFXManager not available:', e));
     }
 
     async init() {
@@ -223,6 +384,8 @@ class TagGame {
         this.createFloor();
         
         await this.loadAssets();
+        this.loadSFX();
+        this.setupRematchButton();
         this.connectToServer();
         this.animate();
         
@@ -376,8 +539,23 @@ class TagGame {
         this.socket = io(SERVER_URL);
 
         this.socket.on('connect', () => {
+            // Recovered connection (Socket.IO connectionStateRecovery): same id, same room,
+            // missed events are replayed. Creating a room here would orphan all phones.
+            if (this.socket.recovered) {
+                console.log(`[Tag] Connection recovered, keeping room ${this.roomCode}`);
+                return;
+            }
+
             console.log('[Tag] Connected to server');
-            
+
+            // Reconnected but the session could not be recovered: the old room is gone
+            if (this.roomCode) {
+                console.warn('[Tag] Session lost, creating a new room');
+                this.clearPlayers();
+                this.resetMatchUI();
+                this.gameStarted = false;
+            }
+
             // Create a new room for tag mode
             const isBabyShower = document.documentElement.classList.contains('baby-theme');
             this.socket.emit('create-room', { 
@@ -401,7 +579,8 @@ class TagGame {
             console.log('[Tag] Player left:', data.playerId);
             const entity = this.players.get(data.playerId);
             if (entity) {
-                this.scene.remove(entity.model);
+                this.scene.remove(entity.root);
+                entity.dispose();
                 this.players.delete(data.playerId);
             }
             if (data.room) {
@@ -409,11 +588,25 @@ class TagGame {
             }
         });
 
+        // Rematch (and tournament rounds): announced ~1 s before 'game-started'
+        this.socket.on('round-starting', (data) => {
+            console.log('[Tag] Round starting', data);
+            this.resetMatchUI();
+            if (data?.rematch) {
+                const itAnnouncement = document.getElementById('it-announcement');
+                if (itAnnouncement) {
+                    itAnnouncement.textContent = '¡REVANCHA!';
+                    itAnnouncement.style.color = '';
+                }
+            }
+        });
+
         this.socket.on('game-started', (data) => {
             console.log('[Tag] Game started!', data);
             this.gameStarted = true;
             document.getElementById('room-code-overlay')?.classList.add('hidden');
-            this.setupPlayers(data.players);
+            this.resetMatchUI();
+            this.setupPlayers(data.players || []);
         });
 
         this.socket.on('tag-state', (state) => {
@@ -494,6 +687,16 @@ class TagGame {
             document.getElementById('start-game-btn').addEventListener('click', () => {
                 this.socket.emit('start-game');
             });
+        } else {
+            // Overlay already exists (new room after a lost session): refresh it
+            const codeEl = overlay.querySelector('.room-code');
+            if (codeEl) codeEl.textContent = code;
+            const qrEl = overlay.querySelector('.qr-code');
+            if (qrEl) qrEl.src = qrCodeUrl;
+            const urlEl = overlay.querySelector('.url-display');
+            if (urlEl) urlEl.textContent = mobileUrl;
+            overlay.classList.remove('hidden');
+            this.updateRoomOverlay(0);
         }
     }
 
@@ -512,107 +715,263 @@ class TagGame {
         }
     }
 
+    clearPlayers() {
+        this.players.forEach(entity => {
+            this.scene.remove(entity.root);
+            entity.dispose();
+        });
+        this.players.clear();
+        this.playerListKey = null;
+        this.penaltyEls.clear();
+    }
+
     setupPlayers(playersData) {
+        // Always start from a clean slate (rematch / next round / changed player list)
+        this.clearPlayers();
+
         playersData.forEach((p, index) => {
             const characterId = p.character || 'edgar';
-            const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
-            
+            const baseModel = this.baseModels[characterId] || this.baseModels['edgar'] || Object.values(this.baseModels)[0];
+            const color = p.color || TAG_CONFIG.PLAYER_COLORS[index % TAG_CONFIG.PLAYER_COLORS.length];
+
             const entity = new TagPlayerEntity(
-                p.id, 
-                p.number, 
-                p.color, 
-                baseModel, 
+                p.id,
+                p.number,
+                color,
+                baseModel,
                 this.baseAnimations
             );
             entity.setName(p.name);
             this.players.set(p.id, entity);
-            this.scene.add(entity.model);
+            this.scene.add(entity.root);
+        });
+    }
+
+    getPlayerColor(id, fallback = '#fff') {
+        return this.players.get(id)?.color || fallback;
+    }
+
+    /**
+     * Reset HUD and overlays for a fresh match (idempotent)
+     */
+    resetMatchUI() {
+        document.getElementById('round-end-overlay')?.classList.add('hidden');
+        document.getElementById('tournament-end-overlay')?.classList.add('hidden');
+
+        const timerElement = document.getElementById('match-timer');
+        if (timerElement) timerElement.textContent = '02:00';
+
+        const itAnnouncement = document.getElementById('it-announcement');
+        if (itAnnouncement) {
+            itAnnouncement.textContent = '¡BUSCA A ALGUIEN!';
+            itAnnouncement.style.color = '';
+        }
+
+        const playerList = document.getElementById('tag-player-list');
+        if (playerList) playerList.replaceChildren();
+        this.playerListKey = null;
+        this.penaltyEls.clear();
+
+        this.setRematchButtonState(false);
+    }
+
+    updatePlayerList(players) {
+        const playerList = document.getElementById('tag-player-list');
+        if (!playerList) return;
+
+        // Sort players by penalty time (ascending - lower is better)
+        const sortedPlayers = [...players].sort((a, b) => a.penaltyTime - b.penaltyTime);
+
+        // Rebuild the DOM only when order, names or "it" status change
+        const key = sortedPlayers.map(p => `${p.id}|${p.name}|${p.isIt ? 1 : 0}`).join(';');
+        if (key !== this.playerListKey) {
+            this.playerListKey = key;
+            this.penaltyEls.clear();
+            playerList.replaceChildren();
+
+            sortedPlayers.forEach(p => {
+                const item = document.createElement('div');
+                item.className = `tag-player-item ${p.isIt ? 'is-it' : ''}`;
+                item.style.setProperty('--player-color', p.color || this.getPlayerColor(p.id));
+
+                const nameEl = document.createElement('span');
+                nameEl.className = 'tag-player-name';
+                nameEl.textContent = `${p.name} `;
+                if (p.isIt) {
+                    const badge = document.createElement('span');
+                    badge.className = 'tag-badge';
+                    badge.textContent = 'IT';
+                    nameEl.appendChild(badge);
+                }
+
+                const penaltyEl = document.createElement('span');
+                penaltyEl.className = 'tag-penalty-time';
+
+                item.appendChild(nameEl);
+                item.appendChild(penaltyEl);
+                playerList.appendChild(item);
+                this.penaltyEls.set(p.id, penaltyEl);
+            });
+        }
+
+        // Cheap text-only updates for the penalty timers
+        sortedPlayers.forEach(p => {
+            const el = this.penaltyEls.get(p.id);
+            if (!el) return;
+            const text = `${(p.penaltyTime / 1000).toFixed(1)}s`;
+            if (el.textContent !== text) el.textContent = text;
         });
     }
 
     updateGameState(state) {
+        if (!state) return;
+
         const timerElement = document.getElementById('match-timer');
         if (timerElement) {
             const remainingTime = state.remainingTime || 0;
             const seconds = Math.floor(remainingTime / 1000);
             const m = Math.floor(seconds / 60).toString().padStart(2, '0');
             const s = (seconds % 60).toString().padStart(2, '0');
-            timerElement.textContent = `${m}:${s}`;
+            const text = `${m}:${s}`;
+            if (timerElement.textContent !== text) timerElement.textContent = text;
         }
 
-        const playerList = document.getElementById('tag-player-list');
-        if (playerList) {
-            playerList.innerHTML = '';
-            // Sort players by penalty time (ascending - lower is better)
-            const sortedPlayers = [...state.players].sort((a, b) => a.penaltyTime - b.penaltyTime);
-            
-            sortedPlayers.forEach(p => {
-                const item = document.createElement('div');
-                item.className = `tag-player-item ${p.isIt ? 'is-it' : ''}`;
-                item.style.setProperty('--player-color', p.color || '#fff');
-                
-                const penaltySec = (p.penaltyTime / 1000).toFixed(1);
-                item.innerHTML = `
-                    <span class="tag-player-name">${p.name} ${p.isIt ? '<span class="tag-badge">IT</span>' : ''}</span>
-                    <span class="tag-penalty-time">${penaltySec}s</span>
-                `;
-                playerList.appendChild(item);
+        // The final 'finished' snapshot carries winner/ranking instead of players
+        const players = Array.isArray(state.players) ? state.players : null;
+
+        if (players) {
+            this.updatePlayerList(players);
+
+            // Only apply state here; animations are advanced in the render loop
+            players.forEach(pState => {
+                const entity = this.players.get(pState.id);
+                if (entity) {
+                    if (pState.name && entity.name !== pState.name) entity.setName(pState.name);
+                    entity.applyState(pState);
+                }
             });
         }
-
-        state.players.forEach(pState => {
-            const entity = this.players.get(pState.id);
-            if (entity) {
-                entity.update(this.clock.getDelta(), pState);
-            }
-        });
 
         const itAnnouncement = document.getElementById('it-announcement');
         if (itAnnouncement) {
             if (state.gameState === 'finished') {
                 itAnnouncement.textContent = '¡TIEMPO AGOTADO!';
                 itAnnouncement.style.color = '#fff';
-            } else {
-                const itPlayer = state.players.find(p => p.isIt);
+            } else if (players) {
+                const itPlayer = players.find(p => p.isIt);
                 if (itPlayer) {
-                    itAnnouncement.textContent = `¡${itPlayer.name.toUpperCase()} LA TRAE!`;
-                    itAnnouncement.style.color = itPlayer.color;
+                    const text = `¡${String(itPlayer.name || '').toUpperCase()} LA TRAE!`;
+                    if (itAnnouncement.textContent !== text) {
+                        itAnnouncement.textContent = text;
+                        itAnnouncement.style.color = itPlayer.color || this.getPlayerColor(itPlayer.id);
+                    }
                 }
             }
         }
     }
 
     handleTagTransfer(data) {
-        // Play sound or show effect
         console.log(`Tag transfer: ${data.oldItId} -> ${data.newItId}`);
+        const entity = this.players.get(data.newItId);
+        if (!entity) return;
+
+        // Burst + flash on the newly tagged player
+        entity.playTagBurst();
+
+        // Pop the announcement
+        const itAnnouncement = document.getElementById('it-announcement');
+        if (itAnnouncement) {
+            itAnnouncement.classList.remove('tag-flash');
+            void itAnnouncement.offsetWidth; // restart CSS animation
+            itAnnouncement.classList.add('tag-flash');
+        }
+
+        // SFX (optional)
+        try {
+            this.sfx?.play?.('punchHit');
+        } catch (e) { /* ignore audio errors */ }
     }
 
     showGameOver(data) {
         const overlay = document.getElementById('round-end-overlay');
+        if (!overlay) return;
         overlay.classList.remove('hidden');
-        
+
+        const winner = data?.winner || null;
+        const winnerEl = document.getElementById('round-winner');
         document.getElementById('round-title').textContent = '¡FIN DE LA PARTIDA!';
-        document.getElementById('round-winner').textContent = `👑 ¡${data.winner.name} GANA!`;
-        document.getElementById('round-winner').style.color = data.winner.color;
+        winnerEl.textContent = winner ? `👑 ¡${winner.name} GANA!` : '¡FIN!';
+        // Server sends no color: fall back to the player's known color
+        winnerEl.style.color = (winner && (winner.color || this.getPlayerColor(winner.id, ''))) || '';
 
         const scoresContainer = document.getElementById('round-scores');
-        scoresContainer.innerHTML = '<h3>TIEMPOS DE PENALIZACIÓN:</h3>';
-        
-        data.ranking.forEach((p, i) => {
+        scoresContainer.replaceChildren();
+        const heading = document.createElement('h3');
+        heading.textContent = 'TIEMPOS DE PENALIZACIÓN:';
+        scoresContainer.appendChild(heading);
+
+        (data?.ranking || []).forEach((p, i) => {
             const pSec = (p.penaltyTime / 1000).toFixed(1);
             const row = document.createElement('div');
             row.style.margin = '10px 0';
-            row.innerHTML = `${i + 1}. ${p.name}: <strong>${pSec}s</strong>`;
+            row.innerHTML = `${i + 1}. ${escapeHtml(p.name)}: <strong>${pSec}s</strong>`;
             scoresContainer.appendChild(row);
         });
 
-        document.getElementById('next-round-countdown').classList.add('hidden');
+        document.getElementById('next-round-countdown')?.classList.add('hidden');
+
+        // Freeze players; winner celebrates
+        this.players.forEach((entity, id) => {
+            entity.setFinalPose(winner && id === winner.id ? 'win' : 'idle');
+        });
+
+        this.setRematchButtonState(false);
+    }
+
+    // =================================
+    // Rematch
+    // =================================
+
+    setupRematchButton() {
+        const btn = document.getElementById('rematch-btn');
+        if (!btn || btn.dataset.bound) return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => this.requestRematch());
+    }
+
+    setRematchButtonState(pending, errorText) {
+        this.rematchPending = pending;
+        const btn = document.getElementById('rematch-btn');
+        if (btn) {
+            btn.disabled = pending;
+            btn.textContent = pending ? 'PREPARANDO...' : 'REVANCHA';
+        }
+        const errorEl = document.getElementById('rematch-error');
+        if (errorEl) errorEl.textContent = errorText || '';
+    }
+
+    requestRematch() {
+        if (this.rematchPending || !this.socket) return;
+        this.setRematchButtonState(true);
+
+        // Timeout so the button never stays stuck if the ack is lost
+        this.socket.timeout(5000).emit('request-rematch', (err, res) => {
+            if (err || !res?.success) {
+                const reason = err ? 'Sin respuesta del servidor' : (res?.error || 'No se pudo iniciar la revancha');
+                console.warn('[Tag] Rematch failed:', reason);
+                this.setRematchButtonState(false, reason);
+            }
+            // On success the button stays disabled until 'round-starting' resets the UI
+        });
     }
 
     animate() {
         requestAnimationFrame(() => this.animate());
-        const delta = this.clock.getDelta();
-        
+        // One shared delta per frame (clamped to avoid jumps after tab switches)
+        const delta = Math.min(this.clock.getDelta(), 0.1);
+
+        this.players.forEach(entity => entity.tick(delta));
+
         this.renderer.render(this.scene, this.camera);
         this.labelRenderer.render(this.scene, this.camera);
     }
