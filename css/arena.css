@@ -526,3 +526,298 @@
     80% { opacity: 1; }
     100% { opacity: 0; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
 }
+
+/* ==================================
+   Spirit meter, SPECIAL banner, finisher cinematic (phase 2)
+   ================================== */
+
+/* Spirit meter (under stamina in each HUD card) */
+.arena-spirit-container {
+    width: 100%;
+    margin-top: 6px;
+    border-radius: 6px;
+}
+
+.arena-spirit-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 3px;
+}
+
+.arena-spirit-bar {
+    width: 100%;
+    height: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.arena-spirit-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff8800, #ffcc00);
+    transition: width 0.15s ease;
+    border-radius: 5px;
+    box-shadow: 0 0 8px rgba(255, 170, 0, 0.45);
+}
+
+.arena-spirit-container.full .arena-spirit-fill {
+    background: linear-gradient(90deg, #ffcc00, #fff3a0);
+}
+
+/* SPECIAL: glowing, pulsing bar with the countdown */
+.arena-spirit-container.special .arena-spirit-label {
+    color: #ffe066;
+    font-weight: 900;
+    text-shadow: 0 0 8px rgba(255, 204, 0, 0.9);
+    animation: spirit-text-pulse 0.5s ease-in-out infinite alternate;
+}
+
+.arena-spirit-container.special .arena-spirit-bar {
+    height: 10px;
+    border-color: rgba(255, 230, 120, 0.9);
+    box-shadow: 0 0 10px rgba(255, 204, 0, 0.8), 0 0 22px rgba(255, 51, 102, 0.5);
+    animation: spirit-bar-pulse 0.5s ease-in-out infinite alternate;
+}
+
+.arena-spirit-container.special .arena-spirit-fill {
+    background: linear-gradient(90deg, #ff3366, #ffcc00, #ffffff, #ffcc00, #ff3366);
+    background-size: 200% 100%;
+    transition: width 0.1s linear;
+    animation: spirit-fill-flow 0.8s linear infinite;
+}
+
+@keyframes spirit-text-pulse {
+    from { opacity: 0.75; }
+    to { opacity: 1; }
+}
+
+@keyframes spirit-bar-pulse {
+    from { box-shadow: 0 0 6px rgba(255, 204, 0, 0.6), 0 0 12px rgba(255, 51, 102, 0.3); }
+    to { box-shadow: 0 0 14px rgba(255, 230, 120, 1), 0 0 28px rgba(255, 51, 102, 0.7); }
+}
+
+@keyframes spirit-fill-flow {
+    from { background-position: 0% 0; }
+    to { background-position: 200% 0; }
+}
+
+/* "+ÁNIMO" over a taunting player (CSS2DObject) */
+.arena-spirit-popup {
+    pointer-events: none;
+    user-select: none;
+}
+
+.arena-spirit-popup span {
+    display: inline-block;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 18px;
+    font-weight: 900;
+    color: #ffcc00;
+    white-space: nowrap;
+    -webkit-text-stroke: 1px #000;
+    text-shadow: 0 0 10px rgba(255, 136, 0, 0.9), 2px 2px 0 #000;
+    animation: spirit-popup 1.4s ease-out forwards;
+}
+
+@keyframes spirit-popup {
+    0% { opacity: 0; transform: translateY(10px) scale(0.6); }
+    20% { opacity: 1; transform: translateY(0) scale(1.15); }
+    35% { transform: translateY(-4px) scale(1); }
+    100% { opacity: 0; transform: translateY(-40px) scale(1); }
+}
+
+/* "¡ESPECIAL! <player>" banners */
+#arena-special-banners {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 55;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+    user-select: none;
+}
+
+.arena-special-banner {
+    --player-color: #ffcc00;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 34px 10px;
+    font-family: 'Orbitron', sans-serif;
+    background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.8) 18%, rgba(0, 0, 0, 0.8) 82%, transparent);
+    border-top: 2px solid var(--player-color);
+    border-bottom: 2px solid var(--player-color);
+    white-space: nowrap;
+    animation: special-banner 2.6s ease-out forwards;
+}
+
+.arena-special-title {
+    font-size: clamp(1.8rem, 6vw, 3.2rem);
+    font-weight: 900;
+    line-height: 1;
+    color: #fff;
+    -webkit-text-stroke: 1px #000;
+    text-shadow: 0 0 18px var(--player-color), 0 0 36px var(--player-color), 3px 3px 0 #000;
+}
+
+.arena-special-player {
+    margin-top: 4px;
+    font-size: clamp(1rem, 3vw, 1.5rem);
+    font-weight: 900;
+    color: var(--player-color);
+    text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 2px 2px 0 #000;
+}
+
+.arena-special-move {
+    margin-top: 2px;
+    font-size: 0.75rem;
+    letter-spacing: 3px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+@keyframes special-banner {
+    0% { opacity: 0; transform: scaleX(0.2) scaleY(1.6); }
+    12% { opacity: 1; transform: scaleX(1.08) scaleY(1); }
+    20% { transform: scale(1); }
+    80% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: translateY(-20px) scale(0.95); }
+}
+
+/* Finisher cinematic: letterbox bars (under the HUD cards) + big move name */
+#arena-finisher-cinema {
+    --player-color: #ffcc00;
+    position: absolute;
+    inset: 0;
+    z-index: 9;
+    pointer-events: none;
+    user-select: none;
+    overflow: hidden;
+}
+
+#arena-finisher-cinema.hidden {
+    display: none;
+}
+
+#arena-finisher-cinema .cine-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 9vh;
+    background: rgba(0, 0, 0, 0.88);
+    transform: scaleY(0);
+    transition: transform 0.25s ease-out;
+}
+
+#arena-finisher-cinema .cine-top {
+    top: 0;
+    transform-origin: top;
+}
+
+#arena-finisher-cinema .cine-bottom {
+    bottom: 0;
+    transform-origin: bottom;
+}
+
+#arena-finisher-cinema.active .cine-bar {
+    transform: scaleY(1);
+}
+
+#arena-finisher-cinema.leaving .cine-bar {
+    transform: scaleY(0);
+    transition-duration: 0.4s;
+}
+
+.arena-finisher-banner {
+    position: absolute;
+    top: 70%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Orbitron', sans-serif;
+    white-space: nowrap;
+    opacity: 0;
+}
+
+#arena-finisher-cinema.active .arena-finisher-banner {
+    animation: finisher-banner-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+}
+
+#arena-finisher-cinema.active.impact .arena-finisher-banner {
+    animation: finisher-banner-impact 0.5s ease-out forwards;
+}
+
+#arena-finisher-cinema.leaving .arena-finisher-banner {
+    animation: finisher-banner-out 0.4s ease-in forwards;
+}
+
+.arena-finisher-attacker {
+    font-size: clamp(0.9rem, 2.5vw, 1.3rem);
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: var(--player-color);
+    text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 2px 2px 0 #000;
+}
+
+.arena-finisher-move {
+    max-width: 94vw;
+    white-space: normal;
+    text-align: center;
+    font-size: clamp(1.8rem, 4.8vw, 5rem);
+    font-weight: 900;
+    line-height: 1.05;
+    color: #fff;
+    -webkit-text-stroke: 2px #000;
+    text-shadow: 0 0 24px var(--player-color), 0 0 48px var(--player-color), 5px 5px 0 #000;
+    transform: rotate(-4deg);
+}
+
+@keyframes finisher-banner-in {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(3); }
+    60% { opacity: 1; transform: translate(-50%, -50%) scale(0.92); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes finisher-banner-impact {
+    0% { opacity: 1; transform: translate(-50%, -50%) scale(1.35); filter: brightness(2.2); }
+    40% { opacity: 1; transform: translate(-50%, -50%) scale(0.95); filter: brightness(1.2); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); filter: brightness(1); }
+}
+
+@keyframes finisher-banner-out {
+    from { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+    to { opacity: 0; transform: translate(-50%, -60%) scale(0.9); }
+}
+
+/* White flash at the finisher impact */
+#arena-impact-flash {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.95) 0%, rgba(255, 240, 200, 0.6) 40%, rgba(255, 255, 255, 0) 75%);
+}
+
+#arena-impact-flash.flash {
+    animation: impact-flash 0.4s ease-out forwards;
+}
+
+@keyframes impact-flash {
+    0% { opacity: 0.9; }
+    100% { opacity: 0; }
+}
+
+@media (max-width: 768px) {
+    .arena-spirit-bar {
+        height: 7px;
+    }
+}

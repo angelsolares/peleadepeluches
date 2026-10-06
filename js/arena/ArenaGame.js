@@ -131,13 +131,72 @@ const MIXAMO_FILES = {
     stomp: 'stomping.fbx',
     kneel: 'kneel.fbx',               // Pin cover (kneels down then stays kneeling: played once, clamped)
     down: 'laying_breathless.fbx',    // On the mat, lying on the back (the clip itself lies the body down)
-    getup: 'getting_up_c.fbx'         // Gets up from lying on the back
+    getup: 'getting_up_c.fbx',        // Gets up from lying on the back
+
+    // Phase 2: taunts, victory and signature finishers
+    tauntChest: 'taunt_chest_thump.fbx',
+    tauntCry: 'taunt_battlecry.fbx',
+    tauntFlex: 'taunt_flex.fbx',
+    tauntGesture: 'taunt_gesture.fbx',
+    victory: 'victory.fbx',
+    kickMma: 'mma_kick.fbx',          // Superkick variants
+    kickFlying: 'flying_kick.fbx',
+    kickHurricane: 'hurricane_kick.fbx',
+    jumpAttack: 'jump_attack.fbx',    // Splash variants (the leap itself is procedural)
+    dive: 'dive_forward.fbx',
+    sit: 'sitting.fbx'                // Piledriver attacker: only the sit-down part is used
 };
 
 // Meshy clip copied in when a Mixamo clip can't be loaded/retargeted (no fallback = skipped)
 const MIXAMO_FALLBACKS = {
     tieup: 'grab', headbutt: 'punch', knee: 'kick', suplex: 'fall',
-    stomp: 'kick', kneel: 'block', down: 'fall'
+    stomp: 'kick', kneel: 'block', down: 'fall',
+    kickMma: 'kick', kickFlying: 'kick', kickHurricane: 'kick'
+};
+
+// =================================
+// Spirit meter, taunts & finishers (phase 2)
+// =================================
+
+// Each plush has its own taunt ('tauntDance' = private copy of the Meshy hip-hop dance)
+const TAUNT_CLIPS = ['tauntChest', 'tauntCry', 'tauntFlex', 'tauntGesture', 'tauntDance'];
+const CHARACTER_TAUNTS = {
+    edgar: 'tauntChest', hector: 'tauntChest', baby: 'tauntChest',
+    marile: 'tauntCry', gabriel: 'tauntCry', fabian: 'tauntCry',
+    sol: 'tauntFlex', lidia: 'tauntFlex', angel: 'tauntFlex',
+    jesus: 'tauntGesture', isabella: 'tauntGesture', katy: 'tauntGesture',
+    lia: 'tauntDance', yadira: 'tauntDance', mariana: 'tauntDance'
+};
+
+const SUPERKICK_CLIPS = { mma: 'kickMma', flying: 'kickFlying', hurricane: 'kickHurricane' };
+const FINISHER_COLORS = { powerbomb: 0xff3366, piledriver: 0x9966ff, ddt: 0x00ffcc, superkick: 0xffcc00, splash: 0x33ccff };
+
+// Head direction of a finisher victim once on the mat, relative to the attacker -> defender angle
+// (0 = head away from the attacker, PI = head towards the attacker)
+const FLIGHT_BETA = { slam: Math.PI / 2, suplex: 0, powerbomb: 0, piledriver: Math.PI, ddt: Math.PI };
+// Where the victim is held, in front of the attacker (world units along attacker -> defender)
+const FLIGHT_HOLD_OFFSET = { powerbomb: 0.35, piledriver: 0.38, ddt: 0.45 };
+
+const FINISHER_CONFIG = {
+    TAUNT_MS: 2500,            // Server taunt duration
+    SPECIAL_MS: 12000,         // Server SPECIAL_DURATION (fallback when the event has none)
+    CAMERA_HEIGHT: 4.5,        // Punch-in camera height during a finisher (normal: 7-20)
+    CAMERA_LERP: 0.12,
+    CAMERA_HOLD_MS: 600,       // Camera stays punched in after the move ends
+    BANNER_AFTER_IMPACT_MS: 1100,
+    POWERBOMB_LIFT: 1.4,       // Lowest body point (the head) at the top: hips end up ~2.2 above the mat
+    POWERBOMB_TOP_ROT: 0.55 * Math.PI, // Upside down, slightly tilted, back against the attacker
+    PILEDRIVER_HEAD: 0.9,      // Head height while held upside down (attacker's chest)
+    PILEDRIVER_DROP: 0.62,     // Fraction of the impact delay where the attacker starts sitting
+    DDT_SPIKE_ROT: -1.6 * Math.PI, // Head-first into the mat, legs up
+    DDT_ARC: 0.35,
+    FALL_MS: 380,              // Piledriver / DDT: victim topples flat after the head hits the mat
+    KICK_AIR_MS: 420,          // Superkick: time to tip from upright to flat while flying
+    KICK_MAX_TIMESCALE: 2.2,
+    SPLASH_JUMP_ARC: 1.3,      // Extra procedural arc of the leap (minus the clip's own hip rise)
+    SPLASH_DIVE_ARC: 0.6,
+    SIT_RISE_MS: 600,          // Piledriver attacker stands back up (sit clip played backwards)
+    BOUNCE_MS: 280             // Splash victim jolts on the mat
 };
 
 // Attacker clip per grapple move ('slamThrow' is a private copy of the Meshy 'throw' clip)
@@ -191,6 +250,10 @@ function easeInOut(t) {
     return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+function easeOut(t) {
+    return 1 - (1 - t) * (1 - t);
+}
+
 // =================================
 // Arena Player Entity
 // =================================
@@ -230,6 +293,10 @@ class ArenaPlayerEntity {
         this.flight = null;       // Procedural slam/suplex motion of a defender
         this.positionHold = null; // { x, z, until } landing spot kept until the server position catches up
         this.moveVisual = null;   // { type, role } grapple move being shown
+        this.leap = null;         // Splash attacker: procedural leap onto the landing spot
+        this.launch = null;       // Superkick victim: tips back flat while the server flies them
+        this.bounce = null;       // Splash victim: short jolt on the mat
+        this.celebrating = false; // Match winner: victory clip, grapple sync ignored
 
         // Arena-specific controller (360 movement)
         this.controller = new ArenaPlayerController(id, number, color);
@@ -374,8 +441,56 @@ class ArenaPlayerEntity {
 
         this.lockAnim = name;
         this.lockOpts = options;
-        this.animController.playState(name, options);
+        this.playLockClip(name, options);
         return true;
+    }
+
+    /**
+     * playState + optional start time (options.startAt, seconds into the clip)
+     */
+    playLockClip(name, options) {
+        const ac = this.animController;
+        ac.playState(name, options);
+        const action = ac.actions[name];
+        if (action && options.startAt > 0) {
+            action.time = Math.min(options.startAt, action.getClip().duration);
+        }
+    }
+
+    /**
+     * Lock a one-shot clip so that clip time `keySec` (the kick connecting, the landing...)
+     * is shown exactly `keyMs` from now. Too slow a clip is started part-way in.
+     */
+    playSynced(name, keySec, keyMs, { maxTimeScale = FINISHER_CONFIG.KICK_MAX_TIMESCALE, fade = 0.1 } = {}) {
+        if (!this.animController.actions[name]) return false;
+        const duration = this.clipDuration(name);
+        const key = Math.max(0, Math.min(Number.isFinite(keySec) ? keySec : duration * 0.5, duration));
+        const keyS = Math.max(0.05, keyMs / 1000);
+        let timeScale = key > 0.01 ? key / keyS : 1;
+        let startAt = 0;
+        if (timeScale > maxTimeScale) {
+            timeScale = maxTimeScale;
+            startAt = key - timeScale * keyS;
+        }
+        return this.setLock(name, { loop: false, timeScale, fade, restart: true, startAt });
+    }
+
+    /**
+     * Lock a one-shot clip so that its segment [segStart, segEnd] (seconds) plays between
+     * msStart and msEnd from now (the piledriver sit-down lands exactly on the impact)
+     */
+    playSegment(name, segStart, segEnd, msStart, msEnd, fade = 0.15) {
+        if (!this.animController.actions[name]) return false;
+        const s0 = msStart / 1000;
+        const s1 = Math.max(s0 + 0.05, msEnd / 1000);
+        let timeScale = (segEnd - segStart) / (s1 - s0);
+        let startAt = segStart - timeScale * s0;
+        if (!(timeScale > 0) || startAt < 0) {
+            startAt = 0;
+            timeScale = Math.max(0.1, segEnd / s1);
+        }
+        timeScale = Math.min(timeScale, 4);
+        return this.setLock(name, { loop: false, timeScale, fade, restart: true, startAt });
     }
 
     /**
@@ -397,20 +512,39 @@ class ArenaPlayerEntity {
             const yaw = m ? this.model.rotation.y + (m.suplexEndAlpha - m.getupAlpha) : null;
             this.playTimed('getup', WRESTLE_CONFIG.POST_SUPLEX_GETUP_MS, { yaw });
         }
+
+        // The piledriver attacker sat down: stand back up (the sit-down played backwards)
+        const sit = prev === 'sit' ? this.getSitSegment() : null;
+        if (sit && !this.controller.isEliminated) {
+            const ms = FINISHER_CONFIG.SIT_RISE_MS;
+            this.playTimed('sit', ms, { from: sit.end, timeScale: -(sit.end - sit.start) / (ms / 1000) });
+        }
     }
 
     /**
-     * Short one-shot that locomotion can't override until it ends (or the player moves)
+     * Sit-down part of the sitting clip ({ start, end } seconds), from the pose analysis or a guess
      */
-    playTimed(name, ms, { yaw = null, cancelOnMove = true, timeScale } = {}) {
+    getSitSegment() {
+        if (!this.animController.actions.sit || this.isFallbackClip('sit')) return null;
+        if (this.wrestleMeta?.sit) return this.wrestleMeta.sit;
+        const duration = this.clipDuration('sit');
+        return { start: duration * 0.15, end: duration * 0.5 };
+    }
+
+    /**
+     * Short one-shot that locomotion can't override until it ends (or the player moves).
+     * `from` starts part-way into the clip (with a negative timeScale it plays backwards).
+     */
+    playTimed(name, ms, { yaw = null, cancelOnMove = true, timeScale, from = 0 } = {}) {
         const ac = this.animController;
         if (this.lockAnim || !ac.actions[name]) return false;
         const duration = this.clipDuration(name);
-        ac.playState(name, {
+        this.playLockClip(name, {
             loop: false,
             timeScale: timeScale ?? Math.max(0.1, duration / (ms / 1000)),
             fade: 0.1,
-            restart: true
+            restart: true,
+            startAt: from
         });
         const now = performance.now();
         this.timedAnim = { name, start: now, until: now + ms, yaw, cancelOnMove };
@@ -480,19 +614,26 @@ class ArenaPlayerEntity {
     }
 
     /**
-     * Start the procedural flight of a slammed/suplexed defender. The body plays the lying
-     * clip the whole time and is rotated/moved as a rigid block, landing on its back on
-     * `landing` exactly impactMs after the start.
+     * Start the procedural flight of a slammed/suplexed/finished defender. The body plays the
+     * lying clip the whole time and is rotated/moved as a rigid block, landing on its back on
+     * `landing` exactly impactMs after the start (endMs > impactMs: it keeps moving after the
+     * impact, e.g. toppling flat after a head-first spike).
      * - slam: lifted horizontal above the attacker's head, then slammed in front
      * - suplex: arcs backwards over the attacker's head (270 deg flip) and lands behind
+     * - powerbomb: bent over the attacker, lifted upside down over the shoulders, driven down flat
+     * - piledriver: flipped upside down (facing the attacker), dropped on the head as the
+     *   attacker sits, then topples flat away from the attacker
+     * - ddt: twisted head-first into the mat, legs up, then topples flat
      */
-    startFlight({ type, start, attacker, landing, angle, impactMs }) {
+    startFlight({ type, start, attacker, landing, angle, impactMs, endMs, dropStartMs }) {
         const lie = this.getLieInfo();
-        // World direction the head points once landed: across the attacker for a slam,
-        // back towards the attacker for a suplex
-        const beta = type === 'slam' ? angle + Math.PI / 2 : angle;
+        // World direction the head points once landed (see FLIGHT_BETA)
+        const beta = angle + (FLIGHT_BETA[type] ?? 0);
         const yaw = beta - lie.alpha;
         const qFinal = new THREE.Quaternion().setFromAxisAngle(UP_AXIS, yaw).multiply(lie.local);
+        const impact = Math.max(1, impactMs || 1);
+        const dir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle)); // attacker -> defender
+        const attackerPos = new THREE.Vector3(attacker.x, 0, attacker.z);
 
         this.flight = {
             type,
@@ -502,12 +643,16 @@ class ArenaPlayerEntity {
             points: lie.points,
             minYFinal: minPointY(qFinal, lie.points),
             start: new THREE.Vector3(start.x, 0, start.z),
-            attacker: new THREE.Vector3(attacker.x, 0, attacker.z),
+            attacker: attackerPos,
+            hold: attackerPos.clone().addScaledVector(dir, FLIGHT_HOLD_OFFSET[type] || 0),
             landing: new THREE.Vector3(landing.x, 0, landing.z),
             ground: Number.isFinite(landing.y) ? landing.y : ARENA_CONFIG.RING_HEIGHT,
-            impactMs: Math.max(1, impactMs || 1),
+            impactMs: impact,
+            endMs: Math.max(impact, endMs || impact),
+            dropStartMs: dropStartMs || impact * FINISHER_CONFIG.PILEDRIVER_DROP,
             startTime: performance.now()
         };
+        this.launch = null;
         this.positionHold = null;
         this.poseYaw = yaw;
         this.setLock('down', { loop: true, fade: 0.2 });
@@ -522,7 +667,7 @@ class ArenaPlayerEntity {
 
         const t = now - fl.startTime;
         const impact = fl.impactMs;
-        if (t >= impact) {
+        if (t >= fl.endMs) {
             this.finishFlight();
             return false;
         }
@@ -532,32 +677,110 @@ class ArenaPlayerEntity {
         let rot = 0;
         let spin = 0;
         let height = 0;
+        const PI = Math.PI;
 
-        if (fl.type === 'slam') {
-            const liftEnd = 0.45 * impact;
-            const holdEnd = 0.75 * impact;
-            if (t < liftEnd) {
-                // Upright and facing the attacker -> horizontal above their head
-                const s = easeInOut(t / liftEnd);
-                rot = -Math.PI / 2 * (1 - s);
-                spin = -Math.PI / 2 * (1 - s);
-                _flightPos.lerpVectors(fl.start, fl.attacker, s);
-                height = WRESTLE_CONFIG.LIFT_HEIGHT * s;
-            } else if (t < holdEnd) {
-                _flightPos.copy(fl.attacker);
-                height = WRESTLE_CONFIG.LIFT_HEIGHT + 0.1 * Math.sin(((t - liftEnd) / (holdEnd - liftEnd)) * Math.PI);
-            } else {
-                // Slammed down (accelerating) onto the landing spot
-                const s = (t - holdEnd) / (impact - holdEnd);
-                _flightPos.lerpVectors(fl.attacker, fl.landing, s);
-                height = WRESTLE_CONFIG.LIFT_HEIGHT * (1 - s * s);
+        switch (fl.type) {
+            case 'slam': {
+                const liftEnd = 0.45 * impact;
+                const holdEnd = 0.75 * impact;
+                if (t < liftEnd) {
+                    // Upright and facing the attacker -> horizontal above their head
+                    const s = easeInOut(t / liftEnd);
+                    rot = -PI / 2 * (1 - s);
+                    spin = -PI / 2 * (1 - s);
+                    _flightPos.lerpVectors(fl.start, fl.attacker, s);
+                    height = WRESTLE_CONFIG.LIFT_HEIGHT * s;
+                } else if (t < holdEnd) {
+                    _flightPos.copy(fl.attacker);
+                    height = WRESTLE_CONFIG.LIFT_HEIGHT + 0.1 * Math.sin(((t - liftEnd) / (holdEnd - liftEnd)) * PI);
+                } else {
+                    // Slammed down (accelerating) onto the landing spot
+                    const s = (t - holdEnd) / (impact - holdEnd);
+                    _flightPos.lerpVectors(fl.attacker, fl.landing, s);
+                    height = WRESTLE_CONFIG.LIFT_HEIGHT * (1 - s * s);
+                }
+                break;
             }
-        } else {
-            // Suplex: upright (3PI/2) -> head first over the attacker -> upside down -> flat on the back
-            const s = t / impact;
-            rot = 1.5 * Math.PI * (1 - s) * (1 - s);
-            _flightPos.lerpVectors(fl.start, fl.landing, s);
-            height = WRESTLE_CONFIG.SUPLEX_PEAK * Math.sin(Math.PI * s);
+            case 'powerbomb': {
+                const liftEnd = 0.42 * impact;
+                const holdEnd = 0.72 * impact;
+                const lift = FINISHER_CONFIG.POWERBOMB_LIFT;
+                const topRot = FINISHER_CONFIG.POWERBOMB_TOP_ROT;
+                if (t < liftEnd) {
+                    // Upright facing the attacker -> bent over their shoulder -> upside down
+                    const s = easeInOut(t / liftEnd);
+                    rot = 1.5 * PI + (topRot - 1.5 * PI) * s;
+                    _flightPos.lerpVectors(fl.start, fl.hold, s);
+                    height = lift * s;
+                } else if (t < holdEnd) {
+                    // Held high over the shoulders
+                    const u = Math.sin(((t - liftEnd) / (holdEnd - liftEnd)) * PI);
+                    rot = topRot + 0.06 * u;
+                    _flightPos.copy(fl.hold);
+                    height = lift + 0.15 * u;
+                } else {
+                    // Driven down (accelerating), flat on the back onto the landing spot
+                    const s = (t - holdEnd) / (impact - holdEnd);
+                    const e = s * s;
+                    rot = topRot * (1 - e);
+                    _flightPos.lerpVectors(fl.hold, fl.landing, e);
+                    height = lift * (1 - e);
+                }
+                break;
+            }
+            case 'piledriver': {
+                const flipEnd = 0.45 * impact;
+                const dropStart = Math.min(Math.max(fl.dropStartMs, flipEnd), impact - 1);
+                const head = FINISHER_CONFIG.PILEDRIVER_HEAD;
+                if (t < flipEnd) {
+                    // Flipped upside down with a half twist: ends facing the attacker (tombstone)
+                    const s = easeInOut(t / flipEnd);
+                    rot = -PI / 2 - PI * s;
+                    spin = PI * (1 - s);
+                    _flightPos.lerpVectors(fl.start, fl.hold, s);
+                    height = head * s;
+                } else if (t < dropStart) {
+                    rot = -1.5 * PI;
+                    _flightPos.copy(fl.hold);
+                    height = head + 0.05 * Math.sin(((t - flipEnd) / (dropStart - flipEnd)) * PI);
+                } else if (t < impact) {
+                    // The attacker sits down: head into the mat exactly at the impact
+                    const s = (t - dropStart) / (impact - dropStart);
+                    rot = -1.5 * PI;
+                    _flightPos.copy(fl.hold);
+                    height = head * (1 - s * s);
+                } else {
+                    // Topples flat on the back, away from the attacker
+                    const s = easeOut((t - impact) / (fl.endMs - impact));
+                    rot = -1.5 * PI - 0.5 * PI * s;
+                    _flightPos.lerpVectors(fl.hold, fl.landing, s);
+                }
+                break;
+            }
+            case 'ddt': {
+                const spike = FINISHER_CONFIG.DDT_SPIKE_ROT;
+                if (t < impact) {
+                    // Pulled forward and twisted head-first into the mat (accelerating)
+                    const s = t / impact;
+                    rot = -PI / 2 + (spike + PI / 2) * Math.pow(s, 1.6);
+                    spin = PI * (1 - easeInOut(s));
+                    _flightPos.lerpVectors(fl.start, fl.hold, easeInOut(s));
+                    height = FINISHER_CONFIG.DDT_ARC * Math.sin(PI * s);
+                } else {
+                    // Legs flop over: flat on the back
+                    const s = easeOut((t - impact) / (fl.endMs - impact));
+                    rot = spike + (-2 * PI - spike) * s;
+                    _flightPos.lerpVectors(fl.hold, fl.landing, s);
+                }
+                break;
+            }
+            default: {
+                // Suplex: upright (3PI/2) -> head first over the attacker -> upside down -> flat on the back
+                const s = t / impact;
+                rot = 1.5 * PI * (1 - s) * (1 - s);
+                _flightPos.lerpVectors(fl.start, fl.landing, s);
+                height = WRESTLE_CONFIG.SUPLEX_PEAK * Math.sin(PI * s);
+            }
         }
 
         _qAxis.setFromAxisAngle(fl.axis, rot);
@@ -586,6 +809,156 @@ class ArenaPlayerEntity {
     }
 
     /**
+     * Superkick victim: the server flies them (position), the host tips the body from upright
+     * to flat on the back (head away from the kicker) and keeps the lying clip. When the server
+     * position can't be used (eliminated players aren't simulated), the arc is simulated here.
+     */
+    startLaunch({ angle, simulate = false }) {
+        const lie = this.getLieInfo();
+        const yaw = angle - lie.alpha;
+        const qFinal = new THREE.Quaternion().setFromAxisAngle(UP_AXIS, yaw).multiply(lie.local);
+        const dir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+        this.flight = null;
+        this.launch = {
+            yaw,
+            qFinal,
+            axis: new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle)),
+            points: lie.points,
+            minYFinal: minPointY(qFinal, lie.points),
+            sim: null,
+            airborne: false,
+            startTime: performance.now()
+        };
+        if (simulate) {
+            const p0 = this.model.position.clone();
+            p0.y = Math.max(p0.y, ARENA_CONFIG.RING_HEIGHT);
+            this.simulateLaunch(p0, dir.multiplyScalar(8), 6);
+        }
+        this.positionHold = null;
+        this.poseYaw = yaw;
+        this.setLock('down', { loop: true, fade: 0.12 });
+    }
+
+    /**
+     * Continue the launch as a host-side ballistic arc (the server stops simulating
+     * eliminated players)
+     */
+    simulateLaunch(p0, velH, velY) {
+        if (!this.launch) return;
+        this.launch.sim = {
+            p0: p0.clone(),
+            vx: velH.x,
+            vz: velH.z,
+            vy: velY,
+            t0: performance.now()
+        };
+    }
+
+    /**
+     * @returns {boolean} True while the launch drives the model transform
+     */
+    updateLaunch(now) {
+        const la = this.launch;
+        if (!la) return false;
+
+        const t = now - la.startTime;
+        const c = this.controller;
+        const ground = ARENA_CONFIG.RING_HEIGHT;
+        const air = FINISHER_CONFIG.KICK_AIR_MS;
+        let landed;
+
+        if (la.sim) {
+            const ts = (now - la.sim.t0) / 1000;
+            _flightPos.set(la.sim.p0.x + la.sim.vx * ts, 0, la.sim.p0.z + la.sim.vz * ts);
+            const half = ARENA_CONFIG.RING_SIZE / 2;
+            const floor = Math.abs(_flightPos.x) <= half && Math.abs(_flightPos.z) <= half ? ground : -0.1;
+            _flightPos.y = la.sim.p0.y + la.sim.vy * ts + 0.5 * ARENA_CONFIG.GRAVITY * ts * ts;
+            landed = (_flightPos.y <= floor && ts > 0.05) || ts > 2.5;
+            if (landed) _flightPos.y = floor;
+        } else {
+            _flightPos.copy(c.position);
+            if (c.position.y > ground + 0.25) la.airborne = true;
+            landed = c.isDown || (la.airborne && c.position.y <= ground + 0.05) || t > 3000;
+        }
+
+        if (landed && t > 150) {
+            this.launch = null;
+            this.poseYaw = la.yaw;
+            this.model.position.copy(_flightPos);
+            this.model.rotation.set(0, la.yaw, 0);
+            if (la.sim) this.positionHold = { x: _flightPos.x, y: _flightPos.y, z: _flightPos.z, until: now + 60000 };
+            this.onLaunchLanded?.(this);
+            return false;
+        }
+
+        // Upright -> flat on the back while flying
+        const rot = -Math.PI / 2 * (1 - easeOut(Math.min(1, t / air)));
+        _qAxis.setFromAxisAngle(la.axis, rot);
+        _qPose.copy(_qAxis).multiply(la.qFinal);
+        const y = _flightPos.y + (la.minYFinal - minPointY(_qPose, la.points));
+        this.model.position.set(_flightPos.x, y, _flightPos.z);
+        this.model.quaternion.copy(_qPose);
+        return true;
+    }
+
+    /**
+     * Splash attacker: procedural leap (linear in X/Z + arc) from `from` onto `to`, touching
+     * down exactly impactMs after the start. The clip's own vertical motion adds on top.
+     */
+    startLeap({ from, to, impactMs, delayMs = 0, arc = 1, yaw }) {
+        const now = performance.now();
+        const delay = Math.max(0, Math.min(delayMs, impactMs - 250));
+        this.leap = {
+            from: new THREE.Vector3(from.x, 0, from.z),
+            to: new THREE.Vector3(to.x, 0, to.z),
+            ground: Number.isFinite(to.y) ? to.y : ARENA_CONFIG.RING_HEIGHT,
+            arc,
+            yaw,
+            takeoff: now + delay,
+            land: now + Math.max(delay + 1, impactMs)
+        };
+        this.positionHold = null;
+    }
+
+    /**
+     * @returns {boolean} True while the leap drives the model transform
+     */
+    updateLeap(now) {
+        const lp = this.leap;
+        if (!lp) return false;
+
+        if (now >= lp.land) {
+            this.leap = null;
+            this.model.position.set(lp.to.x, lp.ground, lp.to.z);
+            this.positionHold = { x: lp.to.x, z: lp.to.z, until: now + WRESTLE_CONFIG.LANDING_HOLD_MS };
+            return false;
+        }
+
+        const s = Math.max(0, (now - lp.takeoff) / (lp.land - lp.takeoff));
+        _flightPos.lerpVectors(lp.from, lp.to, s);
+        this.model.position.set(_flightPos.x, lp.ground + lp.arc * 4 * s * (1 - s), _flightPos.z);
+        this.model.rotation.set(0, lp.yaw, 0);
+        return true;
+    }
+
+    /**
+     * Splash victim: quick jolt of the lying body
+     */
+    startBounce() {
+        this.bounce = { start: performance.now() };
+    }
+
+    applyBounce(now) {
+        if (!this.bounce) return;
+        const s = (now - this.bounce.start) / FINISHER_CONFIG.BOUNCE_MS;
+        if (s >= 1) {
+            this.bounce = null;
+            return;
+        }
+        this.model.position.y += 0.25 * Math.sin(Math.PI * s) * (1 - s);
+    }
+
+    /**
      * Drop every grapple visual (new round / rematch)
      */
     resetWrestleVisuals() {
@@ -596,6 +969,10 @@ class ArenaPlayerEntity {
         this.flight = null;
         this.positionHold = null;
         this.moveVisual = null;
+        this.leap = null;
+        this.launch = null;
+        this.bounce = null;
+        this.celebrating = false;
     }
 
     /**
@@ -621,9 +998,15 @@ class ArenaPlayerEntity {
             if (now > hold.until || dx * dx + dz * dz < 0.04) this.positionHold = null;
         }
         if (this.positionHold) {
-            this.model.position.set(hold.x, ctrlPos.y, hold.z);
+            this.model.position.set(hold.x, hold.y ?? ctrlPos.y, hold.z);
         } else {
             this.model.position.copy(ctrlPos);
+        }
+
+        // Match winner: turn towards the winner camera (+Z)
+        if (this.celebrating) {
+            this.rotateTowards(0, 0.08);
+            return;
         }
 
         // Fixed yaw on the mat / getting up / scrambling up
@@ -685,9 +1068,11 @@ class ArenaPlayerEntity {
         this.controller.update(delta);
         const isMoving = this.controller.velocity.length() > 0.5;
 
-        // Procedural flight (slam/suplex) owns the transform; otherwise follow the controller
-        if (!this.updateFlight(now)) {
+        // Procedural motion (slam/suplex/finisher flight, superkick launch, splash leap) owns
+        // the transform; otherwise follow the controller
+        if (!this.updateFlight(now) && !this.updateLaunch(now) && !this.updateLeap(now)) {
             this.updateModelTransform(now);
+            this.applyBounce(now);
         }
 
         // Animation priority: grapple lock > timed one-shot > locomotion
@@ -696,7 +1081,7 @@ class ArenaPlayerEntity {
             // Something else took over (a one-shot's auto-return to idle...): put the lock clip back
             const action = ac.actions[this.lockAnim];
             if (action && ac.currentAction !== action) {
-                ac.playState(this.lockAnim, { ...this.lockOpts, restart: true });
+                this.playLockClip(this.lockAnim, { ...this.lockOpts, restart: true });
             }
         } else if (!this.updateTimed(now, isMoving)) {
             this.updateLocomotion(isMoving);
@@ -755,6 +1140,11 @@ class ArenaGame {
         this.tieUpIndicators = new Map();  // attackerId -> floating "AMARRE" tag
         this.transientLabels = new Set();  // Move-name popups
         this.pinVerdictTimer = null;
+
+        // Spirit meter & finishers
+        this.specialAuras = new Map();     // playerId -> glowing aura while SPECIAL
+        this.finisherCam = null;           // Camera punch-in during a finisher
+        this.finisherTimers = new Set();   // Cinematic/impact timers (cleared on reset)
 
         // Networking
         this.socket = null;
@@ -1331,6 +1721,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             if (base.throw) this.sharedGrappleClips.slamThrow = base.throw.clone(); // Slam attacker
             if (base.hit) this.sharedGrappleClips.hitReact = base.hit.clone();     // Headbutt/knee victim
             if (base.fall) this.sharedGrappleClips.ko = base.fall.clone();         // Eliminated: fall and stay down
+            if (base.taunt) this.sharedGrappleClips.tauntDance = base.taunt.clone(); // Hip-hop taunt (timed)
         }
         return this.sharedGrappleClips;
     }
@@ -1384,7 +1775,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             downIsLying: meta.downIsLying,
             downHeadYawDeg: deg(meta.downAlpha),
             getupStartHeadYawDeg: deg(meta.getupAlpha),
-            suplexEndHeadYawDeg: deg(meta.suplexEndAlpha)
+            suplexEndHeadYawDeg: deg(meta.suplexEndAlpha),
+            kickHitSec: meta.kickHit,
+            leap: meta.leap,
+            sit: meta.sit
         });
         return { animations, meta };
     }
@@ -1403,7 +1797,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             getupAlpha: Math.PI,
             suplexEndAlpha: Math.PI,
             downPoints: null,
-            restPoints: null
+            restPoints: null,
+            kickHit: {},   // superkick clip -> seconds where the kick connects
+            leap: {},      // splash clip -> { start, land, rise } (seconds / world units)
+            sit: null      // { start, end } seconds of the sit-down part of the sitting clip
         };
         if (!model) return meta;
 
@@ -1435,9 +1832,22 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             return {
                 alpha: Math.atan2(d.x, d.z),
                 lying: Math.hypot(d.x, d.z) > Math.abs(d.y),
-                points: Object.values(points)
+                points: Object.values(points),
+                named: points
             };
         };
+
+        // Evenly spaced samples of a clip: [{ t, named }]
+        const series = (clip, count = 48) => {
+            const out = [];
+            for (let i = 0; i <= count; i++) {
+                const t = (clip.duration * i) / count;
+                const info = sample(clip, t);
+                if (info) out.push({ t, named: info.named });
+            }
+            return out;
+        };
+        const usable = (name) => animations[name] && !fallback.has(name);
 
         try {
             const rest = sample(null, 0);
@@ -1459,6 +1869,8 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
             const sup = animations.suplex ? sample(animations.suplex, animations.suplex.duration) : null;
             meta.suplexEndAlpha = sup && sup.lying ? sup.alpha : meta.getupAlpha;
+
+            this.analyzeFinisherClips(meta, animations, series, usable);
         } catch (err) {
             console.warn('[Arena] Wrestle pose analysis failed:', err);
         } finally {
@@ -1466,6 +1878,83 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             mixer.uncacheRoot(probe);
         }
         return meta;
+    }
+
+    /**
+     * Key moments of the finisher clips, so the host can sync them to the server impact:
+     * - kicks: the frame where a foot is furthest in front (model +Z) and high
+     * - jump/dive: takeoff and touchdown from the hips height after its highest point
+     * - sitting: start and end of the sit-down (hips going from standing to their lowest)
+     */
+    analyzeFinisherClips(meta, animations, series, usable) {
+        ['kickMma', 'kickFlying', 'kickHurricane'].forEach((name) => {
+            if (!usable(name)) return;
+            let best = -Infinity;
+            let bestT = animations[name].duration * 0.5;
+            series(animations[name]).forEach(({ t, named }) => {
+                [named.LeftFoot, named.RightFoot].forEach((foot) => {
+                    if (!foot) return;
+                    const score = foot.z + 0.35 * foot.y;
+                    if (score > best) {
+                        best = score;
+                        bestT = t;
+                    }
+                });
+            });
+            meta.kickHit[name] = bestT;
+        });
+
+        ['jumpAttack', 'dive'].forEach((name) => {
+            if (!usable(name)) return;
+            const s = series(animations[name]).filter((p) => p.named.Hips);
+            if (s.length < 3) return;
+            const ys = s.map((p) => p.named.Hips.y);
+            const y0 = ys[0];
+            let peak = 0;
+            ys.forEach((y, i) => { if (y > ys[peak]) peak = i; });
+            const minAfter = Math.min(...ys.slice(peak));
+            const range = Math.max(1e-3, ys[peak] - minAfter);
+            let land = ys.length - 1;
+            for (let i = peak; i < ys.length; i++) {
+                if (ys[i] <= minAfter + 0.2 * range) { land = i; break; }
+            }
+            // Takeoff: the jump leaves the ground on the way to the peak; the dive starts moving
+            const motion = Math.max(1e-3, Math.max(...ys) - Math.min(...ys));
+            let start = 0;
+            if (name === 'jumpAttack' && ys[peak] - y0 > 0.1) {
+                for (let i = 0; i <= peak; i++) {
+                    if (ys[i] >= y0 + 0.15 * (ys[peak] - y0)) { start = i; break; }
+                }
+            } else {
+                for (let i = 0; i <= land; i++) {
+                    if (Math.abs(ys[i] - y0) > 0.1 * motion) { start = i; break; }
+                }
+            }
+            meta.leap[name] = {
+                start: s[Math.min(start, land)].t,
+                land: s[land].t,
+                rise: Math.max(0, ys[peak] - y0)
+            };
+        });
+
+        if (usable('sit')) {
+            const s = series(animations.sit, 60).filter((p) => p.named.Hips);
+            if (s.length >= 3) {
+                const ys = s.map((p) => p.named.Hips.y);
+                const y0 = ys[0];
+                const min = Math.min(...ys);
+                const range = y0 - min;
+                if (range > 0.05) {
+                    let end = ys.findIndex((y) => y <= min + 0.08 * range);
+                    let start = 0;
+                    for (let i = end; i >= 0; i--) {
+                        if (ys[i] >= y0 - 0.08 * range) { start = i; break; }
+                    }
+                    if (end <= start) end = Math.min(ys.length - 1, start + 1);
+                    meta.sit = { start: s[start].t, end: s[end].t };
+                }
+            }
+        }
     }
 
     loadFBX(loader, path) {
@@ -1686,6 +2175,11 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         this.socket.on('arena-pin-start', (data) => this.handleArenaPinStart(data));
         this.socket.on('arena-pin-count', (data) => this.handleArenaPinCount(data));
         this.socket.on('arena-pin-end', (data) => this.handleArenaPinEnd(data));
+
+        // Spirit meter & signature finishers
+        this.socket.on('arena-special', (data) => this.handleArenaSpecial(data));
+        this.socket.on('arena-special-end', (data) => this.handleArenaSpecialEnd(data));
+        this.socket.on('arena-finisher', (data) => this.handleArenaFinisher(data));
 
         // Tournament events - listen for round transitions
         this.socket.on('round-starting', (data) => {
@@ -1977,6 +2471,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
                 // Grapple animations follow the server flags (tie-up, move, down, get-up, pin)
                 this.syncGrappleVisuals(player);
+
+                // Spirit: aura while SPECIAL (self-heals a missed event), taunt cut short by the server
+                this.syncSpiritVisuals(player);
 
                 // Update HUD
                 if (this.hud) {
@@ -2355,11 +2852,22 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
                 : '¡K.O.!';
             this.showEliminationAnnouncement(data.playerName, reason);
 
-            // Already on the mat (pinned, stomped, or mid slam/suplex): stay lying down.
-            // Otherwise fall and stay down (the plain 'fall' one-shot used to pop back to idle).
-            const onTheMat = player.flight || player.lockAnim === 'down' || data.reason === 'pinfall';
+            // No more SPECIAL for them
+            this.removeSpecialAura(data.playerId);
+            player.leap = null;
+
+            // Already on the mat (pinned, stomped, mid slam/suplex/finisher, superkicked):
+            // stay lying down. Otherwise fall and stay down (the plain 'fall' one-shot used to
+            // pop back to idle).
+            const midAir = player.flight || player.launch;
+            const onTheMat = midAir || player.lockAnim === 'down' || data.reason === 'pinfall';
             if (onTheMat) {
-                if (!player.flight) player.enterDown();
+                if (!midAir) player.enterDown();
+                // Eliminated players aren't simulated by the server: finish the superkick arc here
+                if (player.launch && !player.launch.sim) {
+                    const c = player.controller;
+                    player.simulateLaunch(c.position, c.velocity, c.velocity.y);
+                }
             } else {
                 player.clearLock();
                 const fallSpeed = ANIMATION_CONFIG.defaultSpeeds.fall || 1;
@@ -2492,10 +3000,8 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         // Game is over
         this.gameState = 'finished';
 
-        // Play victory animation
-        if (winner?.player && winner.player.playAnimation) {
-            winner.player.playAnimation('taunt');
-        }
+        // Play victory animation (Mixamo celebration, looped)
+        if (winner?.player) this.playVictory(winner.player);
 
         // Zoom camera on winner
         if (winner?.player) this.focusCameraOnWinner(winner.player);
@@ -2970,8 +3476,14 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         console.log('[Arena] Taunt:', data);
         const player = this.players.get(data.playerId);
         if (player) {
-            player.playAnimation('taunt');
-            
+            // The character's own taunt, sized to the server taunt (fills the spirit meter)
+            this.playCharacterTaunt(player);
+            if (!player.controller.isEliminated) {
+                const head = player.model.position.clone();
+                head.y += 2.1;
+                this.showFloatingText('+ÁNIMO', head, 'arena-spirit-popup', 1400);
+            }
+
             // Create taunt VFX - sparkles around player
             if (this.vfxManager && player.model) {
                 const pos = player.model.position.clone();
@@ -3106,7 +3618,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
      */
     syncGrappleVisuals(player) {
         const c = player.controller;
-        if (c.isEliminated || player.flight) return;
+        if (c.isEliminated || player.flight || player.launch || player.leap || player.celebrating) return;
         if (!c.move) player.moveVisual = null;
 
         if (c.pin) {
@@ -3121,9 +3633,11 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             player.enterGetUp();
         } else if (c.move) {
             if (!player.moveVisual) {
-                // Missed 'arena-grapple-move': best-effort pose until the move ends
+                // Missed 'arena-grapple-move' / 'arena-finisher': best-effort pose until the move ends
                 player.moveVisual = { type: c.move.type, role: c.move.role };
-                if (c.move.role === 'attacker') {
+                if (c.move.role === 'attacker' && c.move.type === 'finisher') {
+                    player.setLock('slamThrow', { loop: false, fade: 0.1 }) || player.setLock('tieup', { loop: true });
+                } else if (c.move.role === 'attacker') {
                     player.setLock(MOVE_ATTACKER_CLIPS[c.move.type] || 'tieup', { loop: false, fade: 0.1 });
                 } else {
                     player.setLock('tieup', { loop: true });
@@ -3226,6 +3740,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
     }
 
     handleArenaGrappleImpact(data) {
+        if (data.move === 'finisher') {
+            this.handleFinisherImpact(data);
+            return;
+        }
         const defender = this.players.get(data.defenderId);
         if (defender) {
             if (typeof data.newHealth === 'number') defender.controller.health = data.newHealth;
@@ -3304,7 +3822,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
     handleArenaGetUp(data) {
         const player = this.players.get(data.playerId);
-        if (!player || player.controller.isEliminated || player.flight) return;
+        if (!player || player.controller.isEliminated || player.flight || player.launch) return;
         player.enterGetUp();
     }
 
@@ -3360,6 +3878,747 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         } else {
             this.hud?.hideRefCount();
         }
+    }
+
+    // =================================
+    // Spirit meter, taunts, victory & finishers (phase 2)
+    // =================================
+
+    /**
+     * Per arena-state: aura while SPECIAL (heals a missed 'arena-special'/'-end') and taunts
+     * the server cut short (hit, grabbed...)
+     */
+    syncSpiritVisuals(player) {
+        const c = player.controller;
+        if (!c.hasSpiritState) return;
+
+        if (c.isSpecial && !c.isEliminated) {
+            if (!this.specialAuras.has(player.id)) this.addSpecialAura(player);
+        } else if (this.specialAuras.has(player.id)) {
+            this.removeSpecialAura(player.id);
+        }
+
+        const timed = player.timedAnim;
+        if (timed?.taunt && !c.isTaunting && performance.now() - timed.start > 400) {
+            timed.until = 0; // updateTimed ends it next frame, locomotion takes over
+        }
+    }
+
+    /**
+     * Taunt clip of a character (each plush has its own, see CHARACTER_TAUNTS)
+     */
+    getTauntClip(player) {
+        const actions = player.animController.actions;
+        const id = player.characterId || this.selectedCharacter || 'edgar';
+        let clip = CHARACTER_TAUNTS[id];
+        if (!clip) {
+            let hash = 0;
+            for (const ch of String(id)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+            clip = TAUNT_CLIPS[hash % TAUNT_CLIPS.length];
+        }
+        if (actions[clip] && !player.isFallbackClip(clip)) return clip;
+        if (actions.tauntDance) return 'tauntDance';
+        return TAUNT_CLIPS.find((name) => actions[name] && !player.isFallbackClip(name)) || null;
+    }
+
+    /**
+     * Play the character's taunt for the server taunt duration (2.5 s)
+     */
+    playCharacterTaunt(player) {
+        if (player.controller.isEliminated || player.lockAnim) return;
+        const ms = FINISHER_CONFIG.TAUNT_MS;
+        const clip = this.getTauntClip(player);
+        if (clip) {
+            // Close to the clip's own speed; a long clip is cut, a short one holds its last frame
+            const timeScale = THREE.MathUtils.clamp(player.clipDuration(clip) / (ms / 1000), 0.8, 1.6);
+            if (player.playTimed(clip, ms, { cancelOnMove: false, timeScale })) {
+                player.timedAnim.taunt = true;
+                return;
+            }
+        }
+        player.playAnimation('taunt');
+    }
+
+    /**
+     * Match winner: Mixamo victory celebration (looped), turning towards the winner camera
+     */
+    playVictory(player) {
+        if (!player || player.controller.isEliminated) return;
+        if (player.flight) player.finishFlight();
+        player.launch = null;
+        player.leap = null;
+        player.bounce = null;
+        player.clearLock();
+        player.timedAnim = null;
+        player.poseYaw = null;
+
+        const actions = player.animController.actions;
+        const clip = actions.victory && !player.isFallbackClip('victory')
+            ? 'victory'
+            : (actions.tauntDance ? 'tauntDance' : null);
+        if (clip && player.setLock(clip, { loop: true, fade: 0.3, restart: true })) {
+            player.celebrating = true;
+            return;
+        }
+        player.playAnimation('taunt');
+    }
+
+    handleArenaSpecial(data) {
+        const player = this.players.get(data.playerId);
+        if (!player) return;
+        const c = player.controller;
+        c.isSpecial = true;
+        c.specialDuration = data.duration || FINISHER_CONFIG.SPECIAL_MS;
+        c.specialMsLeft = c.specialDuration;
+        c.spirit = 100;
+        if (data.finisher) c.finisher = data.finisher;
+        this.hud?.updatePlayer(player);
+        if (c.isEliminated) return;
+
+        this.addSpecialAura(player);
+        this.showSpecialBanner(player, data.finisher || c.finisher);
+
+        if (this.vfxManager) {
+            const color = new THREE.Color(player.color).getHex();
+            const pos = player.model.position.clone();
+            pos.y += 1.2;
+            this.vfxManager.createHitSparks?.(pos, color, 2.2);
+            const feet = player.model.position.clone();
+            feet.y = ARENA_CONFIG.RING_HEIGHT + 0.05;
+            this.vfxManager.createImpactRing?.(feet, color);
+            this.vfxManager.createCharacterFlash?.(player.model, 200);
+        }
+        this.sfxManager?.play?.('firePunch', 0.9);
+        this.shakeScreen(0.2, 200);
+    }
+
+    handleArenaSpecialEnd(data) {
+        this.removeSpecialAura(data.playerId);
+        const player = this.players.get(data.playerId);
+        if (!player) return;
+        player.controller.isSpecial = false;
+        player.controller.specialMsLeft = 0;
+        this.hud?.updatePlayer(player);
+        if (data.reason === 'timeout' && !player.controller.isEliminated) {
+            this.hud?.showStatus(data.playerId, 'SE ENFRIÓ');
+        }
+    }
+
+    /**
+     * Glowing, pulsing aura in the player's color while SPECIAL
+     */
+    addSpecialAura(player) {
+        if (this.specialAuras.has(player.id) || !player.model) return;
+
+        if (!this.auraGeometries) {
+            const column = new THREE.CylinderGeometry(0.6, 0.85, 2.5, 32, 1, true);
+            column.translate(0, 1.25, 0);
+            const ring = new THREE.RingGeometry(0.55, 1.0, 48);
+            ring.rotateX(-Math.PI / 2);
+            this.auraGeometries = { column, ring };
+        }
+
+        const color = new THREE.Color(player.color);
+        const group = new THREE.Group();
+
+        // Light column fading upwards, with flickering vertical streaks
+        const colMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor: { value: color },
+                uTime: { value: 0 },
+                uOpacity: { value: 0.5 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 uColor;
+                uniform float uTime;
+                uniform float uOpacity;
+                varying vec2 vUv;
+                void main() {
+                    float fade = pow(1.0 - vUv.y, 1.5);
+                    float streaks = 0.65 + 0.35 * sin(vUv.x * 50.0 + uTime * 5.0 + vUv.y * 8.0);
+                    gl_FragColor = vec4(uColor * 1.5, fade * streaks * uOpacity);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
+        const column = new THREE.Mesh(this.auraGeometries.column, colMat);
+        column.renderOrder = 5;
+        group.add(column);
+
+        // Ring on the mat
+        const ringMat = new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.7,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
+        const ring = new THREE.Mesh(this.auraGeometries.ring, ringMat);
+        ring.position.y = 0.04;
+        ring.renderOrder = 5;
+        group.add(ring);
+
+        // Rising sparks
+        const count = 18;
+        const sparkGeo = new THREE.BufferGeometry();
+        sparkGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+        const sparkMat = new THREE.PointsMaterial({
+            color,
+            size: 0.1,
+            transparent: true,
+            opacity: 0.95,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const sparks = new THREE.Points(sparkGeo, sparkMat);
+        sparks.frustumCulled = false;
+        group.add(sparks);
+        const seeds = Array.from({ length: count }, () => ({
+            angle: Math.random() * Math.PI * 2,
+            radius: 0.35 + Math.random() * 0.45,
+            speed: 0.5 + Math.random() * 0.6,
+            offset: Math.random()
+        }));
+
+        // The model itself glows (pulses the color tint set by applyColorTint)
+        const materials = [];
+        player.model.traverse((child) => {
+            if (!child.isMesh || !child.material) return;
+            (Array.isArray(child.material) ? child.material : [child.material]).forEach((m) => {
+                if (m.emissive) materials.push(m);
+            });
+        });
+
+        this.scene.add(group);
+        this.specialAuras.set(player.id, {
+            group, column, colMat, ring, ringMat, sparkGeo, sparkMat, seeds, materials,
+            start: performance.now()
+        });
+        this.updateSpecialAuras(performance.now());
+    }
+
+    removeSpecialAura(playerId) {
+        const aura = this.specialAuras.get(playerId);
+        if (!aura) return;
+        this.specialAuras.delete(playerId);
+        aura.group.removeFromParent();
+        aura.colMat.dispose();
+        aura.ringMat.dispose();
+        aura.sparkGeo.dispose();
+        aura.sparkMat.dispose();
+        aura.materials.forEach((m) => { m.emissiveIntensity = 0.15; });
+    }
+
+    updateSpecialAuras(now) {
+        this.specialAuras.forEach((aura, id) => {
+            const player = this.players.get(id);
+            if (!player || !player.model.parent || player.controller.isEliminated) {
+                this.removeSpecialAura(id);
+                return;
+            }
+            const t = (now - aura.start) / 1000;
+            const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+            const p = player.model.position;
+            aura.group.position.set(p.x, p.y, p.z);
+
+            aura.colMat.uniforms.uTime.value = t;
+            aura.colMat.uniforms.uOpacity.value = 0.3 + 0.35 * pulse;
+            const s = 1 + 0.08 * pulse;
+            aura.column.scale.set(s, 1 + 0.05 * pulse, s);
+            aura.ring.scale.setScalar(1 + 0.2 * pulse);
+            aura.ringMat.opacity = 0.4 + 0.4 * pulse;
+
+            const pos = aura.sparkGeo.attributes.position.array;
+            aura.seeds.forEach((seed, i) => {
+                const life = (t * seed.speed + seed.offset) % 1;
+                const a = seed.angle + t * 1.3;
+                const r = seed.radius * (1 - 0.4 * life);
+                pos[i * 3] = Math.cos(a) * r;
+                pos[i * 3 + 1] = 0.1 + life * 2.5;
+                pos[i * 3 + 2] = Math.sin(a) * r;
+            });
+            aura.sparkGeo.attributes.position.needsUpdate = true;
+
+            const glow = 0.3 + 0.55 * pulse;
+            aura.materials.forEach((m) => { m.emissiveIntensity = glow; });
+        });
+    }
+
+    /**
+     * Absolutely positioned overlay inside the game container (created if arena.html lacks it)
+     */
+    getOverlayHost(id) {
+        let el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = id;
+            (document.getElementById('game-container') || document.body).appendChild(el);
+        }
+        return el;
+    }
+
+    /**
+     * "¡ESPECIAL! <player>" banner
+     */
+    showSpecialBanner(player, finisher) {
+        const host = this.getOverlayHost('arena-special-banners');
+        const el = document.createElement('div');
+        el.className = 'arena-special-banner';
+        el.style.setProperty('--player-color', player.color);
+
+        const title = document.createElement('span');
+        title.className = 'arena-special-title';
+        title.textContent = '¡ESPECIAL!';
+        const name = document.createElement('span');
+        name.className = 'arena-special-player';
+        name.textContent = player.name;
+        el.append(title, name);
+        if (finisher?.name) {
+            const move = document.createElement('span');
+            move.className = 'arena-special-move';
+            move.textContent = `${finisher.name} LISTO`;
+            el.appendChild(move);
+        }
+
+        host.appendChild(el);
+        setTimeout(() => el.remove(), 2600);
+    }
+
+    /**
+     * Floating world-space text (CSS2D) that removes itself
+     */
+    showFloatingText(text, worldPos, className, ms = 1300) {
+        const el = document.createElement('div');
+        el.className = className;
+        const inner = document.createElement('span');
+        inner.textContent = text;
+        el.appendChild(inner);
+
+        const label = new CSS2DObject(el);
+        label.position.copy(worldPos);
+        label.center.set(0.5, 1);
+        this.scene.add(label);
+        this.transientLabels.add(label);
+
+        setTimeout(() => {
+            label.removeFromParent();
+            this.transientLabels.delete(label);
+        }, ms);
+    }
+
+    /**
+     * Timer cancelled on a new round / rematch
+     */
+    addFinisherTimer(fn, ms) {
+        const matchId = this.matchId;
+        const timer = setTimeout(() => {
+            this.finisherTimers.delete(timer);
+            if (matchId === this.matchId) fn();
+        }, ms);
+        this.finisherTimers.add(timer);
+        return timer;
+    }
+
+    handleArenaFinisher(data) {
+        console.log('[Arena] Finisher:', data);
+        const attacker = this.players.get(data.attackerId);
+        const defender = this.players.get(data.defenderId);
+        const type = data.finisher;
+        const duration = data.duration || 1500;
+        const impact = Math.min(data.impactDelay || duration * 0.6, duration);
+
+        this.removeTieUpIndicator(data.attackerId);
+        this.removeSpecialAura(data.attackerId);
+
+        const angle = typeof data.facingAngle === 'number'
+            ? data.facingAngle
+            : (attacker && defender
+                ? Math.atan2(defender.model.position.x - attacker.model.position.x,
+                    defender.model.position.z - attacker.model.position.z)
+                : 0);
+
+        if (attacker) {
+            const c = attacker.controller;
+            c.isSpecial = false;
+            c.specialMsLeft = 0;
+            c.spirit = 0;
+            this.hud?.updatePlayer(attacker);
+        }
+
+        this.showFinisherCinematic(attacker, data, impact, duration);
+        this.finisherCam = {
+            attackerId: data.attackerId,
+            defenderId: data.defenderId,
+            until: performance.now() + duration + FINISHER_CONFIG.CAMERA_HOLD_MS
+        };
+
+        if (attacker && !attacker.controller.isEliminated) {
+            attacker.moveVisual = { type: 'finisher', role: 'attacker' };
+            attacker.controller.facingAngle = angle;
+            this.playFinisherAttacker(attacker, defender, data, type, angle, impact, duration);
+        }
+        if (defender && !defender.controller.isEliminated) {
+            defender.moveVisual = { type: 'finisher', role: 'defender' };
+            this.playFinisherDefender(defender, attacker, data, type, angle, impact, duration);
+        }
+
+        // Wind-up
+        const color = FINISHER_COLORS[type] || 0xffcc00;
+        this.sfxManager?.play?.('firePunch', 0.8);
+        if (type === 'superkick') this.sfxManager?.playKickWhoosh?.();
+        else this.sfxManager?.playJump?.();
+        if (this.vfxManager && attacker) {
+            const pos = attacker.model.position.clone();
+            pos.y += 1.2;
+            this.vfxManager.createChargeGlow?.(attacker.model, color);
+            this.vfxManager.createHitSparks?.(pos, color, 1.6);
+        }
+    }
+
+    /**
+     * Attacker side of a finisher: clip timed to the server impact
+     */
+    playFinisherAttacker(attacker, defender, data, type, angle, impact, duration) {
+        const meta = attacker.wrestleMeta || {};
+        const actions = attacker.animController.actions;
+        const fitWhole = (clip, ms) => attacker.setLock(clip, {
+            loop: false,
+            timeScale: attacker.clipDuration(clip) / (ms / 1000),
+            fade: 0.1,
+            restart: true
+        });
+
+        switch (type) {
+            case 'powerbomb':
+                // Meshy throw fitted to the move (like the slam)
+                if (!fitWhole('slamThrow', duration)) attacker.setLock('tieup', { loop: true });
+                break;
+
+            case 'piledriver': {
+                // Sit-down part of the sitting clip: seated exactly at the impact
+                const sit = attacker.getSitSegment();
+                const dropStart = impact * FINISHER_CONFIG.PILEDRIVER_DROP;
+                if (sit && attacker.playSegment('sit', sit.start, sit.end, dropStart, impact)) break;
+                if (!fitWhole('kneel', impact)) fitWhole('slamThrow', duration);
+                break;
+            }
+
+            case 'ddt': {
+                // falling_back: the back hits the mat at the impact (scrambles up after the move)
+                const clip = 'suplex';
+                if (!actions[clip]) {
+                    fitWhole('slamThrow', duration);
+                    break;
+                }
+                const timeScale = attacker.isFallbackClip(clip)
+                    ? attacker.clipDuration(clip) / (duration / 1000)
+                    : (attacker.clipDuration(clip) * WRESTLE_CONFIG.SUPLEX_FALL_FRACTION) / (impact / 1000);
+                attacker.setLock(clip, { loop: false, timeScale, fade: 0.1, restart: true });
+                break;
+            }
+
+            case 'splash': {
+                const wanted = data.variant === 'jump' ? 'jumpAttack' : 'dive';
+                const other = wanted === 'jumpAttack' ? 'dive' : 'jumpAttack';
+                const clip = actions[wanted] ? wanted : (actions[other] ? other : null);
+                const info = clip ? meta.leap?.[clip] : null;
+                let delayMs = 0;
+                if (clip) {
+                    attacker.playSynced(clip, info ? info.land : attacker.clipDuration(clip) * 0.6, impact);
+                    // Real time of the clip's takeoff through the synced playback
+                    const { timeScale = 1, startAt = 0 } = attacker.lockOpts || {};
+                    if (info) delayMs = Math.max(0, ((info.start - startAt) / timeScale) * 1000);
+                }
+                const baseArc = clip === 'jumpAttack' ? FINISHER_CONFIG.SPLASH_JUMP_ARC : FINISHER_CONFIG.SPLASH_DIVE_ARC;
+                let to = data.landing;
+                if (!to) {
+                    const victim = data.defenderPos || defender?.model.position || attacker.model.position;
+                    to = { x: victim.x - Math.sin(angle) * 0.6, z: victim.z - Math.cos(angle) * 0.6 };
+                }
+                attacker.startLeap({
+                    from: attacker.model.position,
+                    to,
+                    impactMs: impact,
+                    delayMs,
+                    arc: Math.max(0.2, baseArc - (info?.rise || 0)),
+                    yaw: angle
+                });
+                break;
+            }
+
+            default: {
+                // Superkick (unknown finishers too): the kick connects at the impact
+                let clip = SUPERKICK_CLIPS[data.variant] || 'kickMma';
+                if (!actions[clip]) clip = 'kickMma';
+                if (!actions[clip]) {
+                    attacker.playAnimation('kick');
+                    break;
+                }
+                const key = attacker.isFallbackClip(clip) ? attacker.clipDuration(clip) * 0.5 : meta.kickHit?.[clip];
+                attacker.playSynced(clip, key, impact);
+            }
+        }
+    }
+
+    /**
+     * Defender side of a finisher (the superkick launch starts on the impact)
+     */
+    playFinisherDefender(defender, attacker, data, type, angle, impact, duration) {
+        if (type === 'powerbomb' || type === 'piledriver' || type === 'ddt') {
+            if (!data.landing) return;
+            const attackerPos = data.attackerPos || attacker?.model.position || defender.model.position;
+            const fallMs = Math.min(FINISHER_CONFIG.FALL_MS, Math.max(0, duration - impact - 50));
+            defender.timedAnim = null;
+            defender.startFlight({
+                type,
+                start: defender.model.position,
+                attacker: attackerPos,
+                landing: data.landing,
+                angle,
+                impactMs: impact,
+                endMs: type === 'powerbomb' ? impact : impact + fallMs,
+                dropStartMs: impact * FINISHER_CONFIG.PILEDRIVER_DROP
+            });
+        } else if (type === 'splash') {
+            defender.enterDown(); // Already on the mat: stays lying until the splash lands
+        }
+    }
+
+    handleFinisherImpact(data) {
+        const attacker = this.players.get(data.attackerId);
+        const defender = this.players.get(data.defenderId);
+        const type = data.finisher;
+        const color = FINISHER_COLORS[type] || 0xffcc00;
+        const damage = data.damage || 0;
+        const ringY = ARENA_CONFIG.RING_HEIGHT;
+
+        if (defender) {
+            if (typeof data.newHealth === 'number') defender.controller.health = data.newHealth;
+
+            if (type === 'superkick') {
+                // Flies from the server physics; lies down when the state says isDown
+                const from = attacker?.model.position;
+                const to = defender.model.position;
+                const angle = from
+                    ? Math.atan2(to.x - from.x, to.z - from.z)
+                    : (defender.controller.facingAngle || 0) + Math.PI;
+                defender.timedAnim = null;
+                defender.startLaunch({ angle, simulate: defender.controller.isEliminated });
+                defender.onLaunchLanded = (p) => {
+                    p.onLaunchLanded = null;
+                    this.playLaunchLanding(p);
+                };
+            } else if (type === 'splash') {
+                if (!defender.flight) defender.enterDown();
+                defender.startBounce();
+            } else if (!defender.flight && !defender.controller.isEliminated) {
+                // The flight was missed (or already over): make sure they're on the mat
+                defender.enterDown();
+            }
+        }
+
+        // Impact point
+        let hitPos;
+        if (type === 'superkick' && defender) {
+            hitPos = defender.model.position.clone();
+            hitPos.y = Math.max(hitPos.y, ringY) + 1.3;
+        } else if (data.landing && type !== 'splash') {
+            hitPos = new THREE.Vector3(data.landing.x, ringY + 0.3, data.landing.z);
+        } else if (defender) {
+            hitPos = defender.model.position.clone();
+            hitPos.y = ringY + 0.3;
+        } else {
+            return;
+        }
+        const ground = hitPos.clone();
+        ground.y = ringY + 0.02;
+
+        const vfx = this.vfxManager;
+        if (vfx) {
+            vfx.createHitSparks?.(hitPos, color, 3.5);
+            vfx.createHitSparks?.(hitPos, 0xffffff, 2.0);
+            vfx.createImpactRing?.(ground, color);
+            vfx.createLandingImpact?.(ground, 3.5);
+            vfx.createDustCloud?.(ground, 1);
+            vfx.createDustCloud?.(ground, -1);
+            vfx.createDamageNumber?.(hitPos, damage, 0xffcc00);
+            if (defender) vfx.createCharacterFlash?.(defender.model, 220);
+            this.addFinisherTimer(() => {
+                vfx.createImpactRing?.(ground, 0xffffff);
+                vfx.createHitSparks?.(hitPos, 0xffcc00, 2.5);
+            }, 110);
+            this.addFinisherTimer(() => vfx.createImpactRing?.(ground, color), 240);
+        }
+
+        if (this.sfxManager) {
+            this.sfxManager.play?.('heavyHit', 1);
+            this.sfxManager.playKO?.();
+            this.sfxManager.playLand?.(1);
+        }
+
+        this.shakeScreen(1.5, 750);
+        this.flashScreen();
+        this.markFinisherImpact();
+
+        if (this.hud && defender) {
+            this.hud.updatePlayer(defender);
+            this.hud.showDamage(data.defenderId, damage, false);
+            if (!data.eliminated) this.hud.showStatus(data.defenderId, type === 'superkick' ? '¡NOQUEADO!' : '¡A LA LONA!');
+        }
+    }
+
+    /**
+     * Superkicked player hits the mat
+     */
+    playLaunchLanding(player) {
+        if (this.vfxManager) {
+            const pos = player.model.position.clone();
+            pos.y = Math.max(pos.y, 0) + 0.05;
+            this.vfxManager.createDustCloud?.(pos, 2);
+            this.vfxManager.createImpactRing?.(pos, 0xffffff);
+            this.vfxManager.createLandingImpact?.(pos, 1.5);
+        }
+        this.sfxManager?.playLand?.(1);
+        this.shakeScreen(0.5, 250);
+    }
+
+    /**
+     * Cinematic bars + big move-name banner ("¡EDGARBOMBA!")
+     */
+    showFinisherCinematic(attacker, data, impact, duration) {
+        const root = this.getFinisherCinema();
+        root.querySelector('.arena-finisher-move').textContent = `¡${data.name || 'FINISHER'}!`;
+        root.querySelector('.arena-finisher-attacker').textContent = attacker?.name || '';
+        root.style.setProperty('--player-color', attacker?.color || '#ffcc00');
+
+        // Restart the animations
+        root.className = '';
+        void root.offsetWidth;
+        root.className = 'active';
+
+        // Hidden after the impact (rescheduled when the impact event arrives)
+        this.scheduleCinemaHide(Math.max(duration, impact + FINISHER_CONFIG.BANNER_AFTER_IMPACT_MS) + 200);
+    }
+
+    getFinisherCinema() {
+        const root = this.getOverlayHost('arena-finisher-cinema');
+        if (!root.querySelector('.arena-finisher-move')) {
+            root.innerHTML = `
+                <div class="cine-bar cine-top"></div>
+                <div class="cine-bar cine-bottom"></div>
+                <div class="arena-finisher-banner">
+                    <span class="arena-finisher-attacker"></span>
+                    <span class="arena-finisher-move"></span>
+                </div>
+            `;
+        }
+        return root;
+    }
+
+    markFinisherImpact() {
+        const root = document.getElementById('arena-finisher-cinema');
+        if (!root || !root.classList.contains('active')) return;
+        root.classList.remove('impact');
+        void root.offsetWidth;
+        root.classList.add('impact');
+        this.scheduleCinemaHide(FINISHER_CONFIG.BANNER_AFTER_IMPACT_MS);
+    }
+
+    scheduleCinemaHide(ms) {
+        if (this.cinemaHideTimer) {
+            clearTimeout(this.cinemaHideTimer);
+            this.finisherTimers.delete(this.cinemaHideTimer);
+        }
+        this.cinemaHideTimer = this.addFinisherTimer(() => this.hideFinisherCinematic(), ms);
+    }
+
+    hideFinisherCinematic() {
+        const root = document.getElementById('arena-finisher-cinema');
+        if (root && root.classList.contains('active')) root.className = 'leaving';
+    }
+
+    /**
+     * White impact flash over the whole screen
+     */
+    flashScreen() {
+        const el = this.getOverlayHost('arena-impact-flash');
+        el.className = '';
+        void el.offsetWidth;
+        el.className = 'flash';
+    }
+
+    /**
+     * Camera punched in on the finisher pair (restored by the normal follow camera afterwards)
+     * @returns {boolean} True while it drives the camera
+     */
+    updateFinisherCamera() {
+        const fc = this.finisherCam;
+        if (!fc) return false;
+        if (performance.now() > fc.until || this.gameState === 'finished') {
+            this.finisherCam = null;
+            return false;
+        }
+
+        let cx = 0;
+        let cz = 0;
+        let n = 0;
+        [fc.attackerId, fc.defenderId].forEach((id) => {
+            const p = this.players.get(id);
+            if (!p || !p.model.parent) return;
+            cx += p.model.position.x;
+            cz += p.model.position.z;
+            n++;
+        });
+        if (n === 0) {
+            this.finisherCam = null;
+            return false;
+        }
+        cx /= n;
+        cz /= n;
+
+        const height = FINISHER_CONFIG.CAMERA_HEIGHT;
+        const offset = height * Math.tan(ARENA_CONFIG.CAMERA_ANGLE);
+        const k = FINISHER_CONFIG.CAMERA_LERP;
+        const lookY = 1.0;
+        const cam = this.camera;
+        cam.position.x = THREE.MathUtils.lerp(cam.position.x, cx, k);
+        cam.position.y = THREE.MathUtils.lerp(cam.position.y, height + lookY, k);
+        cam.position.z = THREE.MathUtils.lerp(cam.position.z, cz + offset, k);
+
+        if (!cam.userData.lookAtTarget) cam.userData.lookAtTarget = new THREE.Vector3(cx, 0, cz);
+        const look = cam.userData.lookAtTarget;
+        look.x = THREE.MathUtils.lerp(look.x, cx, k);
+        look.y = THREE.MathUtils.lerp(look.y, lookY, k);
+        look.z = THREE.MathUtils.lerp(look.z, cz, k);
+        cam.lookAt(look);
+        return true;
+    }
+
+    /**
+     * Remove every spirit/finisher visual (new round / rematch)
+     */
+    clearSpiritOverlays() {
+        Array.from(this.specialAuras.keys()).forEach((id) => this.removeSpecialAura(id));
+        this.finisherTimers.forEach((timer) => clearTimeout(timer));
+        this.finisherTimers.clear();
+        this.cinemaHideTimer = null;
+        this.finisherCam = null;
+        const cinema = document.getElementById('arena-finisher-cinema');
+        if (cinema) cinema.className = 'hidden';
+        const flash = document.getElementById('arena-impact-flash');
+        if (flash) flash.className = '';
+        document.querySelectorAll('.arena-special-banner').forEach((el) => el.remove());
     }
 
     /**
@@ -3458,6 +4717,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         this.transientLabels.clear();
         clearTimeout(this.pinVerdictTimer);
         this.hud?.hideRefCount?.();
+        this.clearSpiritOverlays();
     }
 
     async addPlayer(playerData, index = 0, total= Math.max(this.players.size + 1, 4)) {
@@ -3519,6 +4779,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             this.tieUpIndicators.forEach((ind, attackerId) => {
                 if (ind.attackerId === playerId || ind.defenderId === playerId) this.removeTieUpIndicator(attackerId);
             });
+            this.removeSpecialAura(playerId);
             this.scene.remove(player.model);
             player.dispose();
             this.players.delete(playerId);
@@ -3755,6 +5016,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         // Floating "AMARRE" tags follow their pair
         this.updateTieUpIndicators();
 
+        // SPECIAL auras follow their player and pulse
+        this.updateSpecialAuras(performance.now());
+
         // Check collisions
         this.checkPlayerCollisions();
         this.checkRingBoundaries();
@@ -3844,6 +5108,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
      */
     updateCamera() {
         if (this.players.size === 0) return;
+
+        // A finisher punches the camera in on the pair
+        if (this.updateFinisherCamera()) return;
         
         // Camera configuration for Arena - DYNAMIC based on player count
         const ARENA_CAMERA = {
@@ -3938,6 +5205,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         );
         this.camera.userData.lookAtTarget.z = THREE.MathUtils.lerp(
             this.camera.userData.lookAtTarget.z, centerZ, ARENA_CAMERA.POSITION_LERP
+        );
+        // Back to the mat after a finisher punch-in (which looks a bit higher)
+        this.camera.userData.lookAtTarget.y = THREE.MathUtils.lerp(
+            this.camera.userData.lookAtTarget.y, 0, ARENA_CAMERA.POSITION_LERP
         );
         
         this.camera.lookAt(this.camera.userData.lookAtTarget);

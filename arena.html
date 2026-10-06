@@ -46,6 +46,22 @@
         <!-- Referee pin count ("1", "2", "3!") -->
         <div id="arena-ref-count" class="hidden" aria-live="polite"></div>
         
+        <!-- Finisher cinematic: letterbox bars + move name ("¡EDGARBOMBA!") -->
+        <div id="arena-finisher-cinema" class="hidden" aria-live="polite">
+            <div class="cine-bar cine-top"></div>
+            <div class="cine-bar cine-bottom"></div>
+            <div class="arena-finisher-banner">
+                <span class="arena-finisher-attacker"></span>
+                <span class="arena-finisher-move"></span>
+            </div>
+        </div>
+        
+        <!-- White flash at a finisher impact -->
+        <div id="arena-impact-flash"></div>
+        
+        <!-- "¡ESPECIAL! <player>" banners (spirit meter full) -->
+        <div id="arena-special-banners" aria-live="polite"></div>
+        
         <!-- Round End Overlay -->
         <div id="round-end-overlay" class="hidden">
             <h2>RONDA <span id="round-number">1</span> TERMINADA</h2>

@@ -77,6 +77,14 @@ class ArenaPlayerController {
         this.pin = null;          // { partnerId, role, count, taps, tapsNeeded }
         this.carryEscape = null;  // { taps, needed }
 
+        // Spirit meter & finisher (mirrored from the server)
+        this.spirit = 0;              // 0-100
+        this.isSpecial = false;       // Meter full: the signature finisher is available
+        this.specialMsLeft = 0;       // Time left to use it
+        this.specialDuration = 12000; // Length of a SPECIAL window (from 'arena-special')
+        this.finisher = null;         // { type, name, variant }
+        this.hasSpiritState = false;  // The server sends spirit fields
+
         // True once the server starts sending state: the server is authoritative,
         // so the host must not run its own (different) movement physics on top of it.
         this.serverControlled = false;
@@ -454,6 +462,9 @@ class ArenaPlayerController {
         this.move = null;
         this.pin = null;
         this.carryEscape = null;
+        this.spirit = 0;
+        this.isSpecial = false;
+        this.specialMsLeft = 0;
         this.velocity.set(0, 0, 0);
     }
     
@@ -485,6 +496,16 @@ class ArenaPlayerController {
         if ('move' in state) this.move = state.move || null;
         if ('pin' in state) this.pin = state.pin || null;
         if ('carryEscape' in state) this.carryEscape = state.carryEscape || null;
+
+        // Spirit meter & finisher
+        if (typeof state.spirit === 'number') {
+            this.spirit = state.spirit;
+            this.hasSpiritState = true;
+        }
+        if ('isSpecial' in state) this.isSpecial = !!state.isSpecial;
+        if (typeof state.specialMsLeft === 'number') this.specialMsLeft = state.specialMsLeft;
+        if ('finisher' in state) this.finisher = state.finisher || null;
+        if ('isTaunting' in state) this.isTaunting = !!state.isTaunting;
     }
 
     /**

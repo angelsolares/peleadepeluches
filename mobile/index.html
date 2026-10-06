@@ -168,6 +168,18 @@
                 <div class="player-badge" id="controller-player-badge">
                     <span class="badge-name">P1</span>
                 </div>
+                <!-- Arena spirit meter (fills with strikes, grapples, pin counts and taunts).
+                     Full = SPECIAL: the BURLA button becomes ¡REMATE! for a few seconds. -->
+                <div class="spirit-meter hidden" id="spirit-meter" aria-live="polite">
+                    <div class="spirit-top">
+                        <span class="spirit-label" id="spirit-label">ÁNIMO</span>
+                        <span class="spirit-value" id="spirit-value">0</span>
+                    </div>
+                    <div class="spirit-bar">
+                        <div class="spirit-fill" id="spirit-fill"></div>
+                    </div>
+                    <div class="spirit-finisher" id="spirit-finisher"></div>
+                </div>
                 <div class="game-info">
                     <span class="health-label">DAÑO</span>
                     <span class="health-value" id="player-damage">0%</span>
@@ -191,6 +203,7 @@
                         <span class="guide-row"><b>PATADA</b> Rodillazo</span>
                         <span class="guide-row"><b>PATADA + 🕹</b> Suplex</span>
                         <span class="guide-row guide-wide"><b>AGARRAR</b> Cargar</span>
+                        <span class="guide-row guide-wide guide-finisher hidden" id="arena-hud-guide-finisher"><b>★ ¡REMATE!</b> <span id="arena-hud-guide-finisher-name"></span></span>
                     </div>
                     <div class="arena-hud-count pin-count hidden" id="arena-hud-count">
                         <span class="pin-num" data-n="1">1</span><span class="pin-sep">·</span><span class="pin-num" data-n="2">2</span><span class="pin-sep">·</span><span class="pin-num" data-n="3">3</span>
@@ -241,6 +254,13 @@
                 </div>
             </div>
             
+            <!-- Arena banner (SPECIAL, finisher errors, "Se acabó el especial"). Never takes touches. -->
+            <div id="arena-banner" class="arena-banner hidden" data-tone="" aria-live="assertive">
+                <div class="arena-banner-title" id="arena-banner-title"></div>
+                <div class="arena-banner-sub" id="arena-banner-sub"></div>
+                <div class="arena-banner-hint" id="arena-banner-hint"></div>
+            </div>
+
             <!-- Footer with menu button -->
             <div class="controller-footer">
                 <button id="menu-btn" class="btn-menu">

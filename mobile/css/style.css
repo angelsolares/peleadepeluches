@@ -2524,3 +2524,258 @@ input, textarea {
         font-size: 1.1rem;
     }
 }
+
+/* ==================================
+   Arena spirit meter, ¡REMATE! button and banner (phase 2)
+   ================================== */
+
+/* Header meter: fills the free middle of the header (badge | meter | health) */
+.spirit-meter {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 240px;
+    margin: 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.spirit-meter.hidden {
+    display: none;
+}
+
+.spirit-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.62rem;
+    font-weight: 900;
+    letter-spacing: 1px;
+    color: #ff9933;
+}
+
+.spirit-value {
+    font-size: 0.7rem;
+    color: var(--text);
+}
+
+.spirit-bar {
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 153, 51, 0.55);
+}
+
+.spirit-fill {
+    height: 100%;
+    width: 100%;
+    transform-origin: left center;
+    transform: scaleX(0);
+    background: linear-gradient(90deg, #ff6600, var(--accent));
+    transition: transform 0.3s ease-out;
+}
+
+.spirit-finisher {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.spirit-finisher:empty {
+    display: none;
+}
+
+/* Taunting: the meter visibly charges */
+.spirit-meter.taunting .spirit-fill {
+    animation: spiritCharge 0.35s linear infinite;
+}
+
+@keyframes spiritCharge {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.6); }
+}
+
+/* SPECIAL: glowing bar that drains with the time left */
+.spirit-meter.special .spirit-top {
+    color: var(--accent);
+    text-shadow: 0 0 8px rgba(255, 204, 0, 0.8);
+}
+
+.spirit-meter.special .spirit-bar {
+    border-color: var(--accent);
+    animation: spiritGlow 0.6s ease-in-out infinite;
+}
+
+.spirit-meter.special .spirit-fill {
+    background: linear-gradient(90deg, var(--primary), var(--accent), #ffffff);
+    transition: transform 0.15s linear;
+}
+
+.spirit-meter.special .spirit-finisher {
+    color: var(--accent);
+}
+
+@keyframes spiritGlow {
+    0%, 100% { box-shadow: 0 0 6px rgba(255, 204, 0, 0.5); }
+    50% { box-shadow: 0 0 16px rgba(255, 204, 0, 1), 0 0 4px #ffffff; }
+}
+
+.spirit-meter.out {
+    opacity: 0.35;
+}
+
+/* BURLA -> ¡REMATE! while SPECIAL */
+.btn-y.mode-finisher {
+    border-color: #ff9933;
+    color: var(--accent);
+    background: radial-gradient(circle, rgba(255, 153, 51, 0.35) 0%, var(--panel) 72%);
+    animation: pulse-finisher 0.9s ease-in-out infinite;
+}
+
+.btn-y.mode-finisher .btn-action {
+    letter-spacing: 0;
+}
+
+/* The finisher would connect right now: pulse much harder */
+.btn-y.mode-finisher.ready {
+    border-color: #ffffff;
+    color: #ffffff;
+    background: radial-gradient(circle, rgba(255, 204, 0, 0.75) 0%, rgba(255, 51, 102, 0.55) 78%);
+    animation: pulse-finisher-ready 0.35s ease-in-out infinite;
+}
+
+.btn-y.mode-finisher:active,
+.btn-y.mode-finisher.pressed {
+    background: var(--accent);
+    color: var(--dark);
+}
+
+@keyframes pulse-finisher {
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 153, 51, 0.45); }
+    50% { box-shadow: 0 0 24px rgba(255, 153, 51, 0.9); }
+}
+
+@keyframes pulse-finisher-ready {
+    0%, 100% { box-shadow: 0 0 14px rgba(255, 204, 0, 0.6); transform: scale(1); }
+    50% { box-shadow: 0 0 34px rgba(255, 204, 0, 1), 0 0 10px #ffffff; transform: scale(1.1); }
+}
+
+/* Tie-up move guide: the finisher row while SPECIAL */
+.arena-hud-guide .guide-finisher b {
+    color: #ff9933;
+}
+
+.arena-hud-guide .guide-finisher.hidden {
+    display: none;
+}
+
+/* Centered banner (SPECIAL, finisher errors, special over) */
+.arena-banner {
+    position: fixed;
+    left: 50%;
+    top: 28%; /* between the header and the buttons (portrait) */
+    transform: translate(-50%, -50%);
+    width: min(calc(100vw - 32px), 400px);
+    z-index: 30; /* above the HUD, below the mash screen (90) and end overlays (100) */
+    padding: 12px 16px;
+    border-radius: 16px;
+    background: rgba(10, 10, 21, 0.93);
+    border: 3px solid var(--primary);
+    box-shadow: var(--glow-pink);
+    text-align: center;
+    pointer-events: none; /* never blocks the joystick or the buttons */
+    animation: arenaBannerIn 0.22s ease-out;
+}
+
+.arena-banner.hidden {
+    display: none;
+}
+
+.arena-banner[data-tone="special"] {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, rgba(70, 25, 0, 0.95), rgba(50, 0, 30, 0.95));
+    animation: arenaBannerIn 0.22s ease-out, arenaBannerGlow 0.5s ease-in-out 0.22s infinite;
+}
+
+.arena-banner[data-tone="info"] {
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow: none;
+}
+
+@keyframes arenaBannerIn {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes arenaBannerGlow {
+    0%, 100% { box-shadow: 0 0 14px rgba(255, 204, 0, 0.5); }
+    50% { box-shadow: 0 0 36px rgba(255, 204, 0, 0.95); }
+}
+
+.arena-banner-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 900;
+    letter-spacing: 1px;
+    color: var(--primary);
+}
+
+.arena-banner[data-tone="special"] .arena-banner-title {
+    font-size: 1.7rem;
+    color: var(--accent);
+    text-shadow: 0 0 14px rgba(255, 204, 0, 0.8);
+}
+
+.arena-banner[data-tone="info"] .arena-banner-title {
+    color: var(--text);
+}
+
+.arena-banner-sub {
+    margin-top: 4px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.arena-banner-hint {
+    margin-top: 4px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.arena-banner-sub:empty,
+.arena-banner-hint:empty {
+    display: none;
+}
+
+@media (max-width: 400px) {
+    .spirit-meter {
+        margin: 0 8px;
+    }
+}
+
+@media (max-height: 600px) {
+    .spirit-meter {
+        gap: 2px;
+    }
+
+    .spirit-bar {
+        height: 8px;
+    }
+
+    .arena-banner {
+        top: 50%;
+        padding: 8px 12px;
+    }
+
+    .arena-banner[data-tone="special"] .arena-banner-title {
+        font-size: 1.35rem;
+    }
+}

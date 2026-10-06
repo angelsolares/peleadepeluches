@@ -298,7 +298,11 @@ function connectToServer() {
     socket.on('arena-pin-start', handleArenaPinStart);
     socket.on('arena-pin-count', handleArenaPinCount);
     socket.on('arena-pin-end', handleArenaPinEnd);
-    
+    // Arena spirit meter & signature finishers
+    socket.on('arena-special', handleArenaSpecial);
+    socket.on('arena-special-end', handleArenaSpecialEnd);
+    socket.on('arena-finisher', handleArenaFinisher);
+
     // Race mode events
     socket.on('race-state', handleRaceState);
     socket.on('race-countdown', handleRaceCountdown);
@@ -1410,6 +1414,9 @@ function updateControllerUIForMode() {
 
         console.log('[Controller] Smash mode UI configured');
     }
+
+    // Spirit meter only in Arena; BURLA back to its normal look everywhere else
+    renderSpiritUI(true);
 }
 
 // Setup race mode controls (left/right foot buttons)
@@ -1811,6 +1818,9 @@ function handleArenaState(data) {
         // (auto-release, throw, escape, reconnection)
         isGrabbing = !!myState.isGrabbing && !myState.isEliminated;
         isGrabbed = !!myState.isGrabbed && !myState.isEliminated;
+
+        // Spirit meter, SPECIAL countdown, taunt and BURLA / ¡REMATE! button
+        syncSpiritFromState(myState, data.players);
 
         // Tie-up / grapple move / down / pin / carry escape, plus CUBRIR proximity
         syncWrestleFromState(myState, data.players);
@@ -2265,7 +2275,12 @@ function handleAction(action, btn) {
     if (gameMode === 'arena') {
         // Arena mode events
         if (action === 'taunt') {
-            socket.emit('player-taunt');
+            // While SPECIAL the BURLA button is ¡REMATE! (signature finisher)
+            if (spirit.isSpecial && !spirit.eliminated) {
+                requestFinisher();
+            } else {
+                socket.emit('player-taunt');
+            }
         } else if (action === 'grab') {
             // isGrabbing is refreshed from 'arena-state' every tick (me.isGrabbing)
             console.log(`[Arena] Grab button pressed. mode=${grabButtonMode} isGrabbing=${isGrabbing}`);
@@ -2461,6 +2476,7 @@ const wrestle = {
     pinCount: 0,
     moveType: null,         // 'headbutt' | 'slam' | 'knee' | 'suplex' | null
     moveRole: null,         // 'attacker' | 'defender' | null
+    moveName: '',           // Finisher name while moveType === 'finisher'
     isDown: false,
     isGettingUp: false,
     eliminated: false,
@@ -2587,6 +2603,7 @@ function syncWrestleFromState(me, players) {
     setPinRole(pin ? pin.role : null);
     if (pin) setPinCount(Number(pin.count) || 0);
 
+    wrestle.moveName = move && move.type === 'finisher' ? getFinisherMoveName(me, move, players) : '';
     wrestle.moveType = move ? move.type : null;
     wrestle.moveRole = move ? move.role : null;
     wrestle.isDown = !out && !!me.isDown;
@@ -2622,6 +2639,7 @@ function clearArenaWrestling() {
         pinCount: 0,
         moveType: null,
         moveRole: null,
+        moveName: '',
         isDown: false,
         isGettingUp: false,
         eliminated: false,
@@ -2632,6 +2650,9 @@ function clearArenaWrestling() {
     setMash(null);
     mash.lastTapAt = 0;
     mash.lastEmitAt = 0;
+
+    // Spirit meter, SPECIAL, ¡REMATE! button and banner
+    clearArenaSpirit();
 
     // Leftovers from the old escape overlay (older builds created it on the fly)
     const oldOverlay = document.getElementById('escape-overlay');
@@ -2715,13 +2736,27 @@ function getHudView() {
     if (gameMode !== 'arena' || wrestle.eliminated) return null;
 
     if (wrestle.tieRole === 'attacker') {
-        return { key: 'tie', title: '¡AMARRE! ELIGE TU LLAVE', tone: 'warn', guide: true, timer: true };
+        // SPECIAL with a finisher that works from here: add it to the move guide
+        const finisher = spirit.isSpecial && canFinishFromTieUp() ? getMyFinisherName() : '';
+        return {
+            key: `tie:${finisher}`,
+            title: finisher ? '¡AMARRE! ¡USA TU REMATE!' : '¡AMARRE! ELIGE TU LLAVE',
+            tone: 'warn', guide: true, timer: true, finisher
+        };
     }
     if (wrestle.pinRole === 'pinner') {
         return { key: 'pinner', title: 'CONTANDO…', tone: 'danger', count: true };
     }
     if (wrestle.moveType) {
         const attacking = wrestle.moveRole === 'attacker';
+        if (wrestle.moveType === 'finisher') {
+            return {
+                key: `move:finisher:${wrestle.moveRole}:${wrestle.moveName}`,
+                title: wrestle.moveName || '¡REMATE!',
+                sub: attacking ? '¡Tu remate!' : '¡Te aplican un remate!',
+                tone: attacking ? 'good' : 'danger'
+            };
+        }
         return {
             key: `move:${wrestle.moveType}:${wrestle.moveRole}`,
             title: GRAPPLE_MOVE_NAMES[wrestle.moveType] || '¡LLAVE!',
@@ -2731,6 +2766,9 @@ function getHudView() {
     }
     if (isGrabbing) {
         return { key: 'carry', title: '¡LO CARGAS!', sub: 'Apunta con 🕹 y pulsa LANZAR', tone: 'warn' };
+    }
+    if (spirit.isTaunting) {
+        return { key: 'taunt', title: '¡PROVOCANDO! +ÁNIMO', sub: '¡Cuidado: quedas expuesto!', tone: 'warn' };
     }
     if (wrestle.flash) {
         return { key: `flash:${wrestle.flash.id}`, title: wrestle.flash.title, sub: wrestle.flash.sub, tone: wrestle.flash.tone };
@@ -2765,6 +2803,10 @@ function renderHud() {
         if (sub) sub.textContent = view.sub || '';
         const guide = wEl('arena-hud-guide');
         if (guide) guide.classList.toggle('hidden', !view.guide);
+        const guideFinisher = wEl('arena-hud-guide-finisher');
+        if (guideFinisher) guideFinisher.classList.toggle('hidden', !view.finisher);
+        const guideFinisherName = wEl('arena-hud-guide-finisher-name');
+        if (guideFinisherName) guideFinisherName.textContent = view.finisher || '';
         const count = wEl('arena-hud-count');
         if (count) {
             count.classList.toggle('hidden', !view.count);
@@ -2983,6 +3025,10 @@ function handleArenaGrappleMove(data) {
 
 function handleArenaGrappleImpact(data) {
     if (!data) return;
+    if (data.move === 'finisher') {
+        handleFinisherImpact(data);
+        return;
+    }
     if (isMe(data.defenderId)) {
         vibrate(HEAVY_GRAPPLE_MOVES.includes(data.move) ? WRESTLE_VIBRATION.impactHeavy : WRESTLE_VIBRATION.impactLight);
         if (data.down && !data.eliminated) {
@@ -3053,6 +3099,441 @@ function handleArenaPinEnd(data) {
         }
     }
     renderWrestleUI();
+}
+
+// =================================
+// Arena spirit meter, taunts and signature finishers
+// =================================
+// Same approach as the wrestling section: my 'arena-state' entry is the truth (meter,
+// SPECIAL countdown, taunting), the events only make the phone react a frame early, and
+// every haptic / banner fires on a state CHANGE so event + state never double up.
+
+const SPIRIT = {
+    MAX: 100,
+    SPECIAL_MS: 12000,          // Server SPECIAL_DURATION ('arena-special' sends the real value)
+    SUPERKICK_RANGE: 2.2,       // Server FINISHERS.superkick.range
+    SUPERKICK_CONE: Math.PI / 2.5, // Server findFinisherTarget: "roughly in front"
+    SPLASH_RANGE: 3.2,          // Server FINISHERS.splash.range
+    BANNER_MS: 2800,            // "¡ESPECIAL! Tu remate: ..."
+    NOTE_MS: 1600,              // "Se acabó el especial"
+    ERROR_MS: 1300,             // "¡Primero amárralo!", ...
+    REQUEST_TIMEOUT_MS: 1200    // A finisher request whose ack never came stops blocking
+};
+
+const TIEUP_FINISHERS = ['powerbomb', 'piledriver', 'ddt'];
+
+const FINISHER_HOWTO = {
+    tieup: 'Amarra al rival y presiona ¡REMATE!',
+    superkick: 'Frente a un rival: ¡REMATE!',
+    splash: 'Junto a un rival en la lona: ¡REMATE!'
+};
+
+const SPIRIT_VIBRATION = {
+    special: [90, 40, 90, 40, 260],          // Meter full: SPECIAL
+    specialEnd: 40,
+    ready: [12, 40, 12],                     // Superkick / splash target just came into range
+    finisherStart: 30,                       // My finisher starts
+    finisherIncoming: [60, 40, 60],          // Someone starts a finisher on me
+    finisherDealt: [50, 30, 50, 30, 200],    // My finisher lands
+    finisherTaken: [320, 60, 220, 60, 480],  // A finisher lands on me (strongest pattern)
+    error: [20, 40, 20]
+};
+
+const TAUNT_BUTTON_MODES = {
+    taunt: { label: 'Y', action: 'BURLA', className: '' },
+    finisher: { label: '★', action: '¡REMATE!', className: 'mode-finisher' }
+};
+
+// MY spirit (mirrors my 'arena-state' entry; events update it a frame early)
+const spirit = {
+    value: 0,               // 0..100
+    isSpecial: false,
+    msLeft: 0,
+    duration: SPIRIT.SPECIAL_MS,
+    finisher: null,         // { type, name, variant }
+    isTaunting: false,
+    ready: false,           // The finisher would connect right now
+    eliminated: false,
+    requestPending: false,
+    requestTimer: null,
+    requestSeq: 0,          // Bumped on resets so stale callbacks are ignored
+    bannerTimer: null,
+    view: {}                // Render cache (only touch the DOM on changes)
+};
+
+function getFinisherKind(type) {
+    if (TIEUP_FINISHERS.includes(type)) return 'tieup';
+    return type === 'splash' ? 'splash' : 'superkick';
+}
+
+function getMyFinisherName() {
+    return (spirit.finisher && spirit.finisher.name) || '¡REMATE!';
+}
+
+/** Tie-up finishers and the superkick can be used as the tie-up attacker */
+function canFinishFromTieUp() {
+    return getFinisherKind(spirit.finisher && spirit.finisher.type) !== 'splash';
+}
+
+/** Name of the finisher I am giving / taking (from the attacker's entry) */
+function getFinisherMoveName(me, move, players) {
+    const attacker = move.role === 'attacker' ? me :
+        players.find(p => p && p.id === move.partnerId);
+    return (attacker && attacker.finisher && attacker.finisher.name) || wrestle.moveName || '';
+}
+
+/**
+ * Would the server accept my finisher right now? (same rules as processFinisher /
+ * findFinisherTarget). Only drives the button pulse: the server still has the last word.
+ */
+function isFinisherReady(me, players) {
+    if (!me || !me.position || me.isEliminated) return false;
+    const kind = getFinisherKind(spirit.finisher && spirit.finisher.type);
+    const tieAttacker = !!(me.tieUp && me.tieUp.role === 'attacker');
+    if (kind === 'tieup') return tieAttacker;
+    if (kind === 'superkick' && tieAttacker) return true;
+    if (me.tieUp || me.move || me.isDown || me.isGettingUp || me.pin ||
+        me.isGrabbed || me.isGrabbing || me.isStunned) return false;
+
+    const downed = kind === 'splash';
+    const range = downed ? SPIRIT.SPLASH_RANGE : SPIRIT.SUPERKICK_RANGE;
+    const facing = Number(me.facingAngle) || 0;
+    return players.some(other => {
+        if (!other || other.id === me.id || !other.position || other.isEliminated ||
+            other.move || other.isGrabbed || other.isGrabbing) return false;
+        if (downed ? !other.isDown : (other.isDown || other.isGettingUp || other.pin)) return false;
+        const dx = other.position.x - me.position.x;
+        const dz = other.position.z - me.position.z;
+        if (Math.hypot(dx, dz) > range) return false;
+        if (!downed) {
+            let diff = Math.atan2(dx, dz) - facing;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            if (Math.abs(diff) > SPIRIT.SUPERKICK_CONE) return false;
+        }
+        return true;
+    });
+}
+
+// ---------- Model setters (haptics / banners only on real changes) ----------
+
+/**
+ * Enter / leave SPECIAL
+ * @param {object} opts - { duration, msLeft, finisher } when entering;
+ *                        { used } (finisher spent) or { timeout } when leaving
+ */
+function setSpecial(on, opts = {}) {
+    if (spirit.isSpecial === on) return false;
+    spirit.isSpecial = on;
+    spirit.ready = false;
+
+    if (on) {
+        if (opts.finisher && opts.finisher.type) spirit.finisher = opts.finisher;
+        const duration = Number(opts.duration);
+        const msLeft = Number(opts.msLeft);
+        spirit.duration = Math.max(duration > 0 ? duration : SPIRIT.SPECIAL_MS, msLeft > 0 ? msLeft : 0);
+        spirit.msLeft = msLeft > 0 ? msLeft : spirit.duration;
+        spirit.value = SPIRIT.MAX;
+        vibrate(SPIRIT_VIBRATION.special);
+        const kind = getFinisherKind(spirit.finisher && spirit.finisher.type);
+        showArenaBanner({
+            title: '¡ESPECIAL!',
+            sub: `Tu remate: ${getMyFinisherName()}`,
+            hint: FINISHER_HOWTO[kind],
+            tone: 'special',
+            ms: SPIRIT.BANNER_MS
+        });
+    } else {
+        spirit.msLeft = 0;
+        if (opts.used) {
+            spirit.value = 0;
+            hideArenaBanner();
+        } else if (opts.timeout) {
+            vibrate(SPIRIT_VIBRATION.specialEnd);
+            showArenaBanner({ title: 'Se acabó el especial', tone: 'info', ms: SPIRIT.NOTE_MS });
+        }
+    }
+    return true;
+}
+
+function setFinisherReady(ready) {
+    if (spirit.ready === ready) return;
+    spirit.ready = ready;
+    // Tie-up finishers: the tie-up itself already buzzes
+    if (ready && getFinisherKind(spirit.finisher && spirit.finisher.type) !== 'tieup') {
+        vibrate(SPIRIT_VIBRATION.ready);
+    }
+}
+
+/**
+ * Mirror my 'arena-state' entry (called every tick, before the wrestling sync)
+ */
+function syncSpiritFromState(me, players) {
+    const out = !!me.isEliminated;
+    spirit.eliminated = out;
+    if (me.finisher && me.finisher.type) spirit.finisher = me.finisher;
+
+    const value = Math.max(0, Math.min(SPIRIT.MAX, Number(me.spirit) || 0));
+    const special = !out && !!me.isSpecial;
+    const msLeft = Math.max(0, Number(me.specialMsLeft) || 0);
+
+    // Leaving SPECIAL with meter left over = it ran out unused (a finisher empties it)
+    setSpecial(special, special ? { msLeft } : { timeout: !out && value > 0 });
+    spirit.value = value;
+    if (special) {
+        spirit.msLeft = msLeft;
+        if (msLeft > spirit.duration) spirit.duration = msLeft;
+    }
+    spirit.isTaunting = !out && !!me.isTaunting;
+    setFinisherReady(special && isFinisherReady(me, players));
+
+    renderSpiritUI();
+}
+
+/**
+ * Forget the spirit state and hide its UI (rematch, next round, game over, leave)
+ */
+function clearArenaSpirit() {
+    if (spirit.requestTimer) clearTimeout(spirit.requestTimer);
+    spirit.requestSeq++;
+    Object.assign(spirit, {
+        value: 0,
+        isSpecial: false,
+        msLeft: 0,
+        duration: SPIRIT.SPECIAL_MS,
+        finisher: null,
+        isTaunting: false,
+        ready: false,
+        eliminated: false,
+        requestPending: false,
+        requestTimer: null
+    });
+    hideArenaBanner();
+    renderSpiritUI(true);
+}
+
+// ---------- Rendering ----------
+
+/**
+ * @param {boolean} force - rewrite everything (mode change / reset)
+ */
+function renderSpiritUI(force = false) {
+    if (force) spirit.view = {};
+    renderSpiritMeter();
+    renderTauntButton();
+}
+
+function renderSpiritMeter() {
+    const meter = wEl('spirit-meter');
+    if (!meter) return;
+    const view = spirit.view;
+
+    const show = gameMode === 'arena';
+    if (view.show !== show) {
+        view.show = show;
+        meter.classList.toggle('hidden', !show);
+    }
+    if (!show) return;
+
+    const special = spirit.isSpecial && !spirit.eliminated;
+    const cls = `${special ? 'special' : ''}|${spirit.isTaunting ? 'taunting' : ''}|${spirit.eliminated ? 'out' : ''}`;
+    if (view.cls !== cls) {
+        view.cls = cls;
+        meter.classList.toggle('special', special);
+        meter.classList.toggle('taunting', spirit.isTaunting && !special);
+        meter.classList.toggle('out', spirit.eliminated);
+    }
+
+    // While SPECIAL the bar shows the time left to use the finisher
+    const ratio = special ?
+        Math.max(0, Math.min(1, spirit.msLeft / (spirit.duration || SPIRIT.SPECIAL_MS))) :
+        spirit.value / SPIRIT.MAX;
+    const fill = ratio.toFixed(3);
+    if (view.fill !== fill) {
+        view.fill = fill;
+        const fillEl = wEl('spirit-fill');
+        if (fillEl) fillEl.style.transform = `scaleX(${fill})`;
+    }
+
+    const label = special ? '¡ESPECIAL!' : 'ÁNIMO';
+    if (view.label !== label) {
+        view.label = label;
+        const labelEl = wEl('spirit-label');
+        if (labelEl) labelEl.textContent = label;
+    }
+
+    const valueText = special ? `${Math.ceil(spirit.msLeft / 1000)}s` : `${Math.round(spirit.value)}`;
+    if (view.value !== valueText) {
+        view.value = valueText;
+        const valueEl = wEl('spirit-value');
+        if (valueEl) valueEl.textContent = valueText;
+    }
+
+    const finisherText = spirit.finisher && spirit.finisher.name ? `Remate: ${spirit.finisher.name}` : '';
+    if (view.finisher !== finisherText) {
+        view.finisher = finisherText;
+        const finEl = wEl('spirit-finisher');
+        if (finEl) finEl.textContent = finisherText;
+    }
+}
+
+/** BURLA <-> ¡REMATE! (glows while SPECIAL, pulses harder when it would connect) */
+function renderTauntButton() {
+    const mode = gameMode === 'arena' && spirit.isSpecial && !spirit.eliminated ? 'finisher' : 'taunt';
+    const ready = mode === 'finisher' && spirit.ready;
+    const key = `${mode}:${ready}`;
+    if (spirit.view.button === key) return;
+
+    const btn = document.querySelector('.action-btn[data-action="taunt"]');
+    if (!btn) return;
+    spirit.view.button = key;
+
+    const cfg = TAUNT_BUTTON_MODES[mode];
+    Object.values(TAUNT_BUTTON_MODES).forEach(c => {
+        if (c.className) btn.classList.remove(c.className);
+    });
+    if (cfg.className) btn.classList.add(cfg.className);
+    btn.classList.toggle('ready', ready);
+    const labelEl = btn.querySelector('.btn-label');
+    if (labelEl) labelEl.textContent = cfg.label;
+    const actionEl = btn.querySelector('.btn-action');
+    if (actionEl) actionEl.textContent = cfg.action;
+}
+
+/**
+ * Big centered message that never takes touches
+ * @param {object} opts - { title, sub, hint, tone: 'special'|'info'|'error', ms }
+ */
+function showArenaBanner(opts) {
+    const banner = wEl('arena-banner');
+    if (!banner) return;
+    if (spirit.bannerTimer) clearTimeout(spirit.bannerTimer);
+
+    const set = (id, text) => { const el = wEl(id); if (el) el.textContent = text || ''; };
+    set('arena-banner-title', opts.title);
+    set('arena-banner-sub', opts.sub);
+    set('arena-banner-hint', opts.hint);
+    banner.dataset.tone = opts.tone || '';
+    // Restart the pop-in animation when a banner replaces another one
+    banner.classList.add('hidden');
+    void banner.offsetWidth;
+    banner.classList.remove('hidden');
+
+    spirit.bannerTimer = setTimeout(hideArenaBanner, opts.ms || SPIRIT.NOTE_MS);
+}
+
+function hideArenaBanner() {
+    if (spirit.bannerTimer) clearTimeout(spirit.bannerTimer);
+    spirit.bannerTimer = null;
+    const banner = wEl('arena-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
+// ---------- Finisher request ----------
+
+function showFinisherError(error) {
+    const kind = getFinisherKind(spirit.finisher && spirit.finisher.type);
+    let title = 'Ahora no puedes';
+    let sub = '';
+    if (error === 'need-tieup') {
+        title = '¡Primero amárralo!';
+        sub = 'AGARRAR para amarrar y luego ¡REMATE!';
+    } else if (error === 'no-target') {
+        title = 'No hay rival en rango';
+        sub = kind === 'splash' ? 'Acércate a un rival en la lona' : 'Ponte frente a un rival';
+    } else if (error === 'not-special') {
+        title = 'Ya no tienes ESPECIAL';
+    }
+    vibrate(SPIRIT_VIBRATION.error);
+    showArenaBanner({ title, sub, tone: 'error', ms: SPIRIT.ERROR_MS });
+}
+
+/**
+ * ¡REMATE! pressed: ask the server (it checks SPECIAL, the tie-up and the target)
+ */
+function requestFinisher() {
+    if (spirit.requestPending || !socket || !socket.connected) return;
+    spirit.requestPending = true;
+    const seq = ++spirit.requestSeq;
+    if (spirit.requestTimer) clearTimeout(spirit.requestTimer);
+    spirit.requestTimer = setTimeout(() => {
+        spirit.requestPending = false;
+        spirit.requestTimer = null;
+    }, SPIRIT.REQUEST_TIMEOUT_MS);
+
+    socket.emit('arena-finisher', (res) => {
+        if (seq !== spirit.requestSeq) return; // Reset / newer request since then
+        spirit.requestPending = false;
+        if (spirit.requestTimer) clearTimeout(spirit.requestTimer);
+        spirit.requestTimer = null;
+        console.log('[Arena Finisher] Response:', res);
+
+        if (res && res.success) {
+            // The 'arena-finisher' broadcast brings the move HUD and its haptics
+            setSpecial(false, { used: true });
+            renderSpiritUI();
+            return;
+        }
+        const error = res && res.error;
+        if (error === 'not-special') {
+            // SPECIAL just ran out: back to BURLA (the state confirms it next frame)
+            setSpecial(false, { used: true });
+            renderSpiritUI();
+        }
+        showFinisherError(error);
+    });
+}
+
+// ---------- Server events ----------
+
+function handleArenaSpecial(data) {
+    if (!data || !isMe(data.playerId) || spirit.eliminated) return;
+    setSpecial(true, { duration: data.duration, finisher: data.finisher });
+    renderSpiritUI();
+    renderHud();
+}
+
+function handleArenaSpecialEnd(data) {
+    if (!data || !isMe(data.playerId)) return;
+    setSpecial(false, { timeout: data.reason === 'timeout' && !spirit.eliminated });
+    renderSpiritUI();
+    renderHud();
+}
+
+function handleArenaFinisher(data) {
+    if (!data) return;
+    const meAttacker = isMe(data.attackerId);
+    const meDefender = isMe(data.defenderId);
+    if (!meAttacker && !meDefender) return;
+
+    // Both of us are now in the finisher (a tie-up / mash screen ends here)
+    setTieRole(null);
+    if (mash.mode === 'tieup') setMash(null);
+    wrestle.moveType = 'finisher';
+    wrestle.moveRole = meAttacker ? 'attacker' : 'defender';
+    wrestle.moveName = data.name || '';
+
+    if (meAttacker) {
+        setSpecial(false, { used: true });
+        vibrate(SPIRIT_VIBRATION.finisherStart);
+    } else {
+        vibrate(SPIRIT_VIBRATION.finisherIncoming);
+    }
+    renderSpiritUI();
+    renderWrestleUI();
+}
+
+function handleFinisherImpact(data) {
+    if (isMe(data.defenderId)) {
+        vibrate(SPIRIT_VIBRATION.finisherTaken);
+        if (data.down && !data.eliminated) {
+            wrestle.isDown = true;
+            renderWrestleUI();
+        }
+    } else if (isMe(data.attackerId)) {
+        vibrate(SPIRIT_VIBRATION.finisherDealt);
+        flashHud(data.name || '¡REMATE!', data.eliminated ? '¡Fuera de combate!' : '¡Lo conectaste!', 'good');
+    }
 }
 
 function resetState() {

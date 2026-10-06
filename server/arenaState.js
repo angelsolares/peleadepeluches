@@ -85,6 +85,47 @@ const ARENA_CONFIG = {
     }
 };
 
+// ---- Spirit meter & finishers (phase 2) ----
+const SPIRIT_CONFIG = {
+    MAX: 100,
+    GAIN: { punch: 5, kick: 6, stomp: 4, headbutt: 8, knee: 8, slam: 12, suplex: 12, throw: 10, pinCount: 3 },
+    TAUNT_PER_SEC: 22,       // Taunting fills the meter fast (but leaves you open)
+    DAMAGE_TAKEN_LOSS: 3,    // Taking a hit lowers it a bit (not while SPECIAL)
+    SPECIAL_DURATION: 12000, // ms to use the finisher once the meter is full
+    AFTER_TIMEOUT: 60,       // Meter left if SPECIAL runs out unused
+    TAUNT_DURATION: 2500
+};
+
+// Finisher types. 'from': tieup = from a tie-up as the attacker; standing = opponent in front;
+// downed = opponent on the mat nearby.
+const FINISHERS = {
+    powerbomb:  { from: 'tieup',    damage: 30, duration: 1800, impact: 1300, down: 4500, landingDist: 1.4 },
+    piledriver: { from: 'tieup',    damage: 32, duration: 1700, impact: 1150, down: 4500, landingDist: 0.8 },
+    ddt:        { from: 'tieup',    damage: 28, duration: 1400, impact: 900,  down: 4500, landingDist: 1.0 },
+    superkick:  { from: 'standing', damage: 28, duration: 1000, impact: 500,  down: 3500, range: 2.2, knockback: 13, launchY: 6 },
+    splash:     { from: 'downed',   damage: 30, duration: 1200, impact: 800,  down: 4000, range: 3.2 }
+};
+
+// One signature finisher per character (variant picks the attacker animation on the host)
+const CHARACTER_FINISHERS = {
+    edgar:    { type: 'powerbomb',  name: 'EDGARBOMBA' },
+    sol:      { type: 'powerbomb',  name: 'ECLIPSE TOTAL' },
+    marile:   { type: 'powerbomb',  name: 'MARILE BOMBA' },
+    jesus:    { type: 'piledriver', name: 'MARTINETE MILAGROSO' },
+    lidia:    { type: 'piledriver', name: 'MARTINETE DE LIDIA' },
+    gabriel:  { type: 'piledriver', name: 'MARTINETE CELESTIAL' },
+    lia:      { type: 'ddt',        name: 'DDT DE LIA' },
+    yadira:   { type: 'ddt',        name: 'YADI-DDT' },
+    isabella: { type: 'ddt',        name: 'ISA-DDT' },
+    hector:   { type: 'superkick',  name: 'SÚPER PATADA HÉCTOR', variant: 'mma' },
+    katy:     { type: 'superkick',  name: 'KATY KICK',           variant: 'flying' },
+    fabian:   { type: 'superkick',  name: 'PATADA HURACÁN',      variant: 'hurricane' },
+    angel:    { type: 'splash',     name: 'SALTO DEL ÁNGEL',     variant: 'jump' },
+    mariana:  { type: 'splash',     name: 'PLANCHA MARIANA',     variant: 'dive' },
+    baby:     { type: 'splash',     name: 'PAÑALAZO',            variant: 'dive' }
+};
+const DEFAULT_FINISHER = { type: 'superkick', name: 'SÚPER PATADA', variant: 'mma' };
+
 /**
  * Taps a pinned player needs to kick out: harder the more damage they have taken
  */
@@ -154,7 +195,12 @@ class ArenaStateManager {
             name: player.name,
             number: player.number,
             color: player.color,
-            
+            character: player.character || null,
+            finisher: CHARACTER_FINISHERS[player.character] || DEFAULT_FINISHER,
+            spirit: 0,
+            specialUntil: 0,    // > now while SPECIAL (finisher available)
+            pendingDown: 0,     // ms to stay down when a launched player lands (superkick)
+                        
             // Position (3D) - positioned around the ring
             position: { x: initialX, y: ARENA_CONFIG.RING_HEIGHT, z: initialZ },
             velocity: { x: 0, y: 0, z: 0 },
@@ -215,7 +261,12 @@ class ArenaStateManager {
         if (!arenaState || arenaState.roundState !== 'active') return null;
         
         const now = Date.now();
-        const delta = 1 / 60; // 60 FPS tick
+        // Real elapsed time: setInterval(16.7 ms) can run much slower (e.g. ~36 Hz on Windows),
+        // and a fixed 1/60 step would slow the whole match down
+        const delta = Math.min(0.05, Math.max(0.001, (now - (arenaState.lastTickAt || (now - 1000 / 60))) / 1000));
+        arenaState.lastTickAt = now;
+        // Per-tick factors (friction) were tuned at 60 FPS: scale them to the real step
+        this.frameScale = delta * 60;
         const room = this.lobbyManager.rooms.get(roomCode);
         if (!room) return null;
         
@@ -253,6 +304,21 @@ class ArenaStateManager {
             // Grappling timers (tie-up timeout, move impact/end, down/get-up, pin counts)
             this.updateGrappleTimers(arenaState, playerState, now);
             if (playerState.isEliminated) return;
+
+            // Taunt ends on its own timer (no overlapping setTimeouts)
+            if (playerState.isTaunting && now >= playerState.tauntEndTime) {
+                playerState.isTaunting = false;
+            }
+
+            // Spirit: taunting fills it; SPECIAL runs out if unused
+            if (playerState.isTaunting) {
+                this.addSpirit(arenaState, playerState, SPIRIT_CONFIG.TAUNT_PER_SEC * delta);
+            }
+            if (playerState.specialUntil && now >= playerState.specialUntil) {
+                playerState.specialUntil = 0;
+                playerState.spirit = SPIRIT_CONFIG.AFTER_TIMEOUT;
+                this.pushEvent(arenaState, 'arena-special-end', { playerId: playerState.id, reason: 'timeout' });
+            }
                         
             previousPositions.set(socketId, { x: playerState.position.x, z: playerState.position.z });
 
@@ -314,8 +380,8 @@ class ArenaStateManager {
             // Stunned or flying: no input, momentum is handled by friction below
         } else if (isLockedInAction) {
             // Slow down while locked in action (can't move)
-            playerState.velocity.x *= 0.9;
-            playerState.velocity.z *= 0.9;
+            playerState.velocity.x *= Math.pow(0.9, this.frameScale || 1);
+            playerState.velocity.z *= Math.pow(0.9, this.frameScale || 1);
         } else {
             // Calculate movement direction
             let dirX = 0, dirZ = 0;
@@ -350,8 +416,9 @@ class ArenaStateManager {
         const friction = playerState.isBeingThrown ? 0.98 :
                          playerState.isStunned ? ARENA_CONFIG.STUN_FRICTION :
                          ARENA_CONFIG.FRICTION;
-        playerState.velocity.x *= friction;
-        playerState.velocity.z *= friction;
+        const frictionStep = Math.pow(friction, this.frameScale || 1);
+        playerState.velocity.x *= frictionStep;
+        playerState.velocity.z *= frictionStep;
 
         // Gravity applies in the air and anywhere off the ring platform (there is no floor out there)
         const prevY = playerState.position.y;
@@ -378,6 +445,16 @@ class ArenaStateManager {
                     playerState.isBeingThrown = false;
                     // Reduce stun time when landing
                     playerState.stunEndTime = Math.min(playerState.stunEndTime, Date.now() + 500);
+                }
+
+                // A superkicked player lands flat on the mat
+                if (playerState.pendingDown) {
+                    playerState.isDown = true;
+                    playerState.downUntil = Date.now() + playerState.pendingDown;
+                    playerState.pendingDown = 0;
+                    playerState.isStunned = false;
+                    playerState.velocity.x = 0;
+                    playerState.velocity.z = 0;
                 }
             }
         }
@@ -721,6 +798,12 @@ class ArenaStateManager {
                     
                     // Apply damage
                     targetState.health = Math.max(0, targetState.health - actualDamage);
+
+                    // Spirit: the attacker gains, the target loses a little
+                    if (!blocked) {
+                        this.addSpirit(arenaState, attacker, SPIRIT_CONFIG.GAIN[attack.attackType] || 0);
+                        this.loseSpirit(targetState);
+                    }
                     
                     // Apply knockback (away from attacker)
                     const knockbackAngle = Math.atan2(dx, dz);
@@ -896,6 +979,8 @@ class ArenaStateManager {
         
         // Apply throw damage and knockback
         target.health = Math.max(0, target.health - ARENA_CONFIG.THROW_DAMAGE);
+        this.addSpirit(arenaState, attacker, SPIRIT_CONFIG.GAIN.throw);
+        this.loseSpirit(target);
         
         // 0 is a valid angle (straight "down"), so only fall back to facing when no number was sent
         const throwAngle = (typeof direction === 'number' && Number.isFinite(direction))
@@ -972,11 +1057,17 @@ class ArenaStateManager {
         const playerState = arenaState.players.get(socketId);
         if (!playerState) return;
         
-        playerState.isTaunting = isTaunting;
-        
         if (isTaunting) {
-            console.log(`[Arena] Player ${playerState.name} is taunting (stamina boost active)`);
+            // Can't taunt while locked in a grapple, on the mat, carried or carrying
+            if (this.isLocked(playerState) || playerState.isGrabbed || playerState.isGrabbing || playerState.isEliminated) {
+                return false;
+            }
+            playerState.isTaunting = true;
+            playerState.tauntEndTime = Date.now() + SPIRIT_CONFIG.TAUNT_DURATION;
+            return true;
         }
+        playerState.isTaunting = false;
+        return true;
     }
     
     /**
@@ -1223,6 +1314,10 @@ class ArenaStateManager {
             playerState.isBeingThrown = false;
             playerState.isOutOfRing = false;
             playerState.escapeTaps = 0;
+            playerState.spirit = 0;
+            playerState.specialUntil = 0;
+            playerState.pendingDown = 0;
+            playerState.isTaunting = false;
             playerState.tieUp = null;
             playerState.move = null;
             playerState.isDown = false;
@@ -1269,6 +1364,13 @@ class ArenaStateManager {
             isStunned: playerState.isStunned,
             isEliminated: playerState.isEliminated,
 
+            // Spirit & finisher
+            spirit: Math.round(playerState.spirit || 0),
+            isSpecial: (playerState.specialUntil || 0) > Date.now(),
+            specialMsLeft: Math.max(0, (playerState.specialUntil || 0) - Date.now()),
+            finisher: playerState.finisher,
+            isTaunting: !!playerState.isTaunting,
+
             // Grappling
             isDown: !!playerState.isDown,
             isGettingUp: !!playerState.isGettingUp,
@@ -1301,6 +1403,215 @@ class ArenaStateManager {
     // =====================================================================
     // Grappling (tie-ups, grapple moves, downs, pins)
     // =====================================================================
+
+    // =====================================================================
+    // Spirit meter & finishers
+    // =====================================================================
+
+    isSpecial(p) {
+        return (p.specialUntil || 0) > Date.now();
+    }
+
+    addSpirit(arenaState, p, amount) {
+        if (!p || p.isEliminated || !amount || this.isSpecial(p)) return;
+        p.spirit = Math.min(SPIRIT_CONFIG.MAX, (p.spirit || 0) + amount);
+        if (p.spirit >= SPIRIT_CONFIG.MAX) {
+            p.specialUntil = Date.now() + SPIRIT_CONFIG.SPECIAL_DURATION;
+            this.pushEvent(arenaState, 'arena-special', {
+                playerId: p.id,
+                finisher: p.finisher,
+                duration: SPIRIT_CONFIG.SPECIAL_DURATION
+            });
+        }
+    }
+
+    loseSpirit(p) {
+        if (!p || this.isSpecial(p)) return;
+        p.spirit = Math.max(0, (p.spirit || 0) - SPIRIT_CONFIG.DAMAGE_TAKEN_LOSS);
+    }
+
+    /**
+     * Use the signature finisher (only while SPECIAL).
+     * @returns {object} { success, error?, finisher? }
+     */
+    processFinisher(socketId, roomCode) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState) return { success: false, error: 'No arena state' };
+        const attacker = arenaState.players.get(socketId);
+        if (!attacker || attacker.isEliminated) return { success: false, error: 'Not playing' };
+        if (!this.isSpecial(attacker)) return { success: false, error: 'not-special' };
+
+        const fin = attacker.finisher || DEFAULT_FINISHER;
+        const cfg = FINISHERS[fin.type];
+        let defender = null;
+
+        if (cfg.from === 'tieup') {
+            if (!attacker.tieUp || attacker.tieUp.role !== 'attacker') return { success: false, error: 'need-tieup' };
+            defender = arenaState.players.get(attacker.tieUp.partnerId);
+        } else if (cfg.from === 'standing') {
+            if (attacker.tieUp && attacker.tieUp.role === 'attacker') {
+                defender = arenaState.players.get(attacker.tieUp.partnerId);
+            } else if (this.isLocked(attacker) || attacker.isGrabbed || attacker.isGrabbing || attacker.isStunned) {
+                return { success: false, error: 'busy' };
+            } else {
+                defender = this.findFinisherTarget(arenaState, attacker, cfg, false);
+            }
+        } else {
+            if (this.isLocked(attacker) || attacker.isGrabbed || attacker.isGrabbing || attacker.isStunned) {
+                return { success: false, error: 'busy' };
+            }
+            defender = this.findFinisherTarget(arenaState, attacker, cfg, true);
+        }
+        if (!defender || defender.isEliminated) return { success: false, error: 'no-target' };
+
+        // Spend the meter
+        attacker.specialUntil = 0;
+        attacker.spirit = 0;
+        attacker.isTaunting = false;
+        attacker.isBlocking = false;
+
+        const now = Date.now();
+        const angle = this.angleTo(attacker, defender);
+        attacker.facingAngle = angle;
+        if (cfg.from !== 'downed') defender.facingAngle = angle + Math.PI;
+        attacker.velocity = { x: 0, y: 0, z: 0 };
+        defender.velocity = { x: 0, y: 0, z: 0 };
+
+        let landing = null;
+        if (cfg.from === 'tieup') {
+            landing = this.clampInsideRopes({
+                x: attacker.position.x + Math.sin(angle) * cfg.landingDist,
+                y: ARENA_CONFIG.RING_HEIGHT,
+                z: attacker.position.z + Math.cos(angle) * cfg.landingDist
+            });
+        } else if (cfg.from === 'downed') {
+            // The attacker lands right next to the victim
+            landing = this.clampInsideRopes({
+                x: defender.position.x - Math.sin(angle) * 0.6,
+                y: ARENA_CONFIG.RING_HEIGHT,
+                z: defender.position.z - Math.cos(angle) * 0.6
+            });
+        }
+
+        // Both players are part of the move (a downed victim stays down)
+        attacker.tieUp = null;
+        defender.tieUp = null;
+        if (defender.pin) this.endPin(arenaState, defender, 'interrupted');
+        const base = { type: 'finisher', finisher: fin.type, startedAt: now, impactAt: now + cfg.impact, endAt: now + cfg.duration, impactDone: false, landing };
+        attacker.move = { ...base, role: 'attacker', partnerId: defender.id };
+        defender.move = { ...base, role: 'defender', partnerId: attacker.id };
+        if (defender.isDown) defender.downUntil = Math.max(defender.downUntil, now + cfg.duration);
+
+        const info = {
+            attackerId: attacker.id,
+            defenderId: defender.id,
+            finisher: fin.type,
+            name: fin.name,
+            variant: fin.variant || null,
+            duration: cfg.duration,
+            impactDelay: cfg.impact,
+            attackerPos: { ...attacker.position },
+            defenderPos: { ...defender.position },
+            facingAngle: angle,
+            landing
+        };
+        this.pushEvent(arenaState, 'arena-finisher', info);
+        return { success: true, finisher: info };
+    }
+
+    findFinisherTarget(arenaState, attacker, cfg, downed) {
+        let best = null;
+        let bestDist = cfg.range;
+        arenaState.players.forEach((other, otherId) => {
+            if (otherId === attacker.id || other.isEliminated || other.move || other.isGrabbed || other.isGrabbing) return;
+            if (downed ? !other.isDown : (other.isDown || other.isGettingUp || other.pin)) return;
+            const dx = other.position.x - attacker.position.x;
+            const dz = other.position.z - attacker.position.z;
+            const d = Math.hypot(dx, dz);
+            if (d > bestDist) return;
+            if (!downed) {
+                // Must be roughly in front for the superkick
+                let diff = Math.atan2(dx, dz) - attacker.facingAngle;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                if (Math.abs(diff) > Math.PI / 2.5) return;
+            }
+            bestDist = d;
+            best = other;
+        });
+        return best;
+    }
+
+    applyFinisherImpact(arenaState, attacker, defender) {
+        const fin = attacker.finisher || DEFAULT_FINISHER;
+        const cfg = FINISHERS[attacker.move.finisher] || FINISHERS[fin.type];
+        attacker.move.impactDone = true;
+        if (defender.move) defender.move.impactDone = true;
+        const now = Date.now();
+
+        defender.health = Math.max(0, defender.health - cfg.damage);
+        this.loseSpirit(defender);
+
+        let landing = null;
+        if (cfg.from === 'tieup') {
+            landing = attacker.move.landing;
+            defender.position.x = landing.x;
+            defender.position.z = landing.z;
+            defender.position.y = ARENA_CONFIG.RING_HEIGHT;
+            defender.velocity = { x: 0, y: 0, z: 0 };
+            defender.isDown = true;
+            defender.downUntil = now + cfg.down;
+            defender.isStunned = false;
+        } else if (cfg.from === 'downed') {
+            landing = attacker.move.landing;
+            attacker.position.x = landing.x;
+            attacker.position.z = landing.z;
+            defender.isDown = true;
+            defender.downUntil = now + cfg.down;
+        } else {
+            // Superkick: launch the defender; they go down when they land (or fly out of the ring)
+            const angle = this.angleTo(attacker, defender);
+            defender.move = null;
+            defender.velocity = {
+                x: Math.sin(angle) * cfg.knockback,
+                y: cfg.launchY,
+                z: Math.cos(angle) * cfg.knockback
+            };
+            defender.position.y = Math.max(defender.position.y, ARENA_CONFIG.RING_HEIGHT + 0.05);
+            defender.isBeingThrown = true;
+            defender.isStunned = true;
+            defender.stunEndTime = now + 1500;
+            defender.pendingDown = cfg.down;
+        }
+
+        let eliminated = false;
+        if (defender.health <= 0) {
+            const info = this.eliminatePlayer(arenaState, defender.id);
+            eliminated = !!info;
+            if (info) {
+                this.pushEvent(arenaState, 'arena-elimination', {
+                    playerId: defender.id,
+                    playerName: defender.name,
+                    playerNumber: defender.number,
+                    reason: 'knockout',
+                    eliminatedBy: attacker.id
+                });
+            }
+        }
+
+        this.pushEvent(arenaState, 'arena-grapple-impact', {
+            attackerId: attacker.id,
+            defenderId: defender.id,
+            move: 'finisher',
+            finisher: fin.type,
+            name: fin.name,
+            damage: cfg.damage,
+            newHealth: defender.health,
+            down: cfg.from !== 'standing',
+            landing,
+            eliminated
+        });
+    }
 
     /** Queue a socket event to be emitted by the server loop */
     pushEvent(arenaState, name, data) {
@@ -1474,13 +1785,19 @@ class ArenaStateManager {
 
     /** Apply a grapple move's impact (damage, knockdown or stun) */
     applyGrappleImpact(arenaState, attacker, defender) {
+        if (attacker.move.type === 'finisher') {
+            this.applyFinisherImpact(arenaState, attacker, defender);
+            return;
+        }
         const type = attacker.move.type;
         const cfg = ARENA_CONFIG.MOVES[type];
         attacker.move.impactDone = true;
         if (defender.move) defender.move.impactDone = true;
 
         defender.health = Math.max(0, defender.health - cfg.damage);
-
+        this.addSpirit(arenaState, attacker, SPIRIT_CONFIG.GAIN[type] || 0);
+        this.loseSpirit(defender);
+        
         if (cfg.down) {
             const landing = attacker.move.landing;
             defender.position.x = landing.x;
@@ -1642,6 +1959,7 @@ class ArenaStateManager {
             }
             p.pin.count++;
             if (victim.pin) victim.pin.count = p.pin.count;
+            this.addSpirit(arenaState, p, SPIRIT_CONFIG.GAIN.pinCount);
             this.pushEvent(arenaState, 'arena-pin-count', { pinnerId: p.id, victimId: victim.id, count: p.pin.count });
 
             if (p.pin.count >= 3) {

@@ -81,6 +81,16 @@ class ArenaHUD {
                     <div class="arena-stamina-fill" style="width: ${(controller.stamina / controller.maxStamina) * 100}%"></div>
                 </div>
             </div>
+
+            <div class="arena-spirit-container">
+                <div class="arena-spirit-label">
+                    <span class="spirit-title">🔥 ÁNIMO</span>
+                    <span class="spirit-value">0%</span>
+                </div>
+                <div class="arena-spirit-bar">
+                    <div class="arena-spirit-fill" style="width: 0%"></div>
+                </div>
+            </div>
         `;
         
         this.container.appendChild(hud);
@@ -214,6 +224,8 @@ class ArenaHUD {
         if (staminaValue) {
             staminaValue.textContent = `${Math.floor(controller.stamina)}/${controller.maxStamina}`;
         }
+
+        this.updateSpirit(hudData, controller);
         
         // Update eliminated state
         hud.classList.toggle('eliminated', controller.isEliminated);
@@ -225,6 +237,59 @@ class ArenaHUD {
         }
     }
     
+    /**
+     * Spirit meter: fills up to 100; when SPECIAL it glows/pulses with "¡ESPECIAL!" and drains
+     * with the time left to use the finisher (countdown in seconds)
+     * @param {object} hudData - Entry of playerHUDs
+     * @param {object} controller - ArenaPlayerController
+     */
+    updateSpirit(hudData, controller) {
+        if (!hudData.spirit) {
+            const hud = hudData.element;
+            hudData.spirit = {
+                container: hud.querySelector('.arena-spirit-container'),
+                fill: hud.querySelector('.arena-spirit-fill'),
+                title: hud.querySelector('.spirit-title'),
+                value: hud.querySelector('.spirit-value'),
+                last: {}
+            };
+        }
+        const ui = hudData.spirit;
+        if (!ui.container || !ui.fill) return;
+
+        const special = !!controller.isSpecial && !controller.isEliminated;
+        const spirit = Math.max(0, Math.min(100, Math.round(controller.spirit || 0)));
+        const duration = controller.specialDuration || 12000;
+        const msLeft = Math.max(0, controller.specialMsLeft || 0);
+        const width = special ? Math.max(0, Math.min(100, (msLeft / duration) * 100)) : spirit;
+        const title = special ? '¡ESPECIAL!' : '🔥 ÁNIMO';
+        const value = special ? `${Math.ceil(msLeft / 1000)}s` : `${spirit}%`;
+
+        // Only touch the DOM when something changed (called every frame)
+        const last = ui.last;
+        if (last.special !== special) {
+            ui.container.classList.toggle('special', special);
+            last.special = special;
+        }
+        if (last.width !== width) {
+            ui.fill.style.width = `${width}%`;
+            last.width = width;
+        }
+        if (last.title !== title) {
+            ui.title.textContent = title;
+            last.title = title;
+        }
+        if (last.value !== value) {
+            ui.value.textContent = value;
+            last.value = value;
+        }
+        const full = !special && spirit >= 100;
+        if (last.full !== full) {
+            ui.container.classList.toggle('full', full);
+            last.full = full;
+        }
+    }
+
     /**
      * Show a status indicator above a player's HUD
      * @param {string} playerId - Player ID

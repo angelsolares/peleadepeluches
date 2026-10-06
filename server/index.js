@@ -684,25 +684,38 @@ io.on('connection', (socket) => {
         
         // Update state based on game mode
         if (gameMode === 'arena') {
-            arenaStateManager.setPlayerTaunting(socket.id, roomCode, true);
+            // Arena ends the taunt on its own timer (and refuses it while grappling / on the mat)
+            if (arenaStateManager.setPlayerTaunting(socket.id, roomCode, true) === false) return;
         } else {
             // Smash mode
             gameStateManager.setPlayerTaunting(socket.id, roomCode, true);
         }
-        
+
         // Broadcast taunt to all clients
         io.to(roomCode).emit('player-taunting', {
             playerId: socket.id
         });
-        
-        // Taunt lasts for 3 seconds
-        setTimeout(() => {
-            if (gameMode === 'arena') {
-                arenaStateManager.setPlayerTaunting(socket.id, roomCode, false);
-            } else {
+
+        // Smash: taunt lasts for 3 seconds
+        if (gameMode !== 'arena') {
+            setTimeout(() => {
                 gameStateManager.setPlayerTaunting(socket.id, roomCode, false);
-            }
-        }, 3000);
+            }, 3000);
+        }
+    });
+
+    /**
+     * Arena finisher (signature move), only while the spirit meter is SPECIAL
+     */
+    socket.on('arena-finisher', (callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) {
+            if (typeof callback === 'function') callback({ success: false, error: 'Not in a room' });
+            return;
+        }
+        // The 'arena-finisher' broadcast is queued by the arena state and emitted by the loop
+        const result = arenaStateManager.processFinisher(socket.id, roomCode);
+        if (typeof callback === 'function') callback(result);
     });
     
     // ========== ARENA MODE EVENTS ==========
