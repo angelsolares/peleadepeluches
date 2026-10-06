@@ -25,8 +25,7 @@ export const MODE_CONFIG = {
             'Sistema de stocks',
             'Vista lateral'
         ],
-        color: '#ff3366',
-        hidden: true
+        color: '#ff3366'
     },
     [GAME_MODES.ARENA]: {
         id: 'arena',
@@ -39,8 +38,7 @@ export const MODE_CONFIG = {
             'Sistema de estamina',
             'Agarres y lanzamientos'
         ],
-        color: '#00ffcc',
-        hidden: true
+        color: '#00ffcc'
     },
     [GAME_MODES.TAG]: {
         id: 'tag',
@@ -66,8 +64,7 @@ export const MODE_CONFIG = {
             'Gestión de estamina',
             'Bonus de remontada'
         ],
-        color: '#9966ff',
-        hidden: true
+        color: '#9966ff'
     },
     [GAME_MODES.PAINT]: {
         id: 'paint',
@@ -106,7 +103,8 @@ export const MODE_CONFIG = {
             'Carreras de gateo',
             'Música festiva'
         ],
-        color: '#A2D2FF'
+        color: '#A2D2FF',
+        hidden: true // Oculto del selector; accesible via baby_shower.html
     }
 };
 
