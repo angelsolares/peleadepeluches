@@ -1976,11 +1976,12 @@ function handleAction(action, btn) {
             if (isGrabbing) {
                 // If already grabbing, try to throw
                 // Calculate throw direction from current input
+                // Must match the server's facing convention: atan2(dirX, dirZ), where "up" is -Z
                 let direction = null;
                 if (inputState.left) direction = -Math.PI / 2;
                 else if (inputState.right) direction = Math.PI / 2;
-                else if (inputState.up) direction = 0;
-                else if (inputState.down) direction = Math.PI;
+                else if (inputState.up) direction = Math.PI;
+                else if (inputState.down) direction = 0;
                 
                 console.log(`[Arena] Throwing with direction=${direction}`);
                 socket.emit('arena-throw', direction, (response) => {

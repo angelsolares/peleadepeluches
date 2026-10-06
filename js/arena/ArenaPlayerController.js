@@ -68,6 +68,10 @@ class ArenaPlayerController {
         this.isEliminated = false;
         this.isNearEdge = false;
         this.isExhausted = false; // No stamina
+
+        // True once the server starts sending state: the server is authoritative,
+        // so the host must not run its own (different) movement physics on top of it.
+        this.serverControlled = false;
         
         // Grab state
         this.grabbedPlayer = null;
@@ -100,6 +104,9 @@ class ArenaPlayerController {
     update(delta) {
         // Don't update if eliminated
         if (this.isEliminated) return;
+
+        // Online match: position/velocity come from the server every tick
+        if (this.serverControlled) return;
         
         // Update timers
         this.updateTimers(delta);
@@ -441,6 +448,7 @@ class ArenaPlayerController {
      * @param {object} state - Server state
      */
     applyServerState(state) {
+        this.serverControlled = true;
         if (state.position) {
             this.position.set(state.position.x, state.position.y, state.position.z);
         }

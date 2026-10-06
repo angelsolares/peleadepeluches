@@ -13,6 +13,13 @@ class GameStateManager {
         this.JUMP_FORCE = 15;  // Synced with client - allows reaching platforms
         this.GROUND_Y = 0;
         this.ARENA_RADIUS = 4.5;
+
+        // Knockback / hitstun physics (per-frame factors are normalized to 60 FPS)
+        this.AIR_DRAG = 0.965;               // Horizontal momentum kept per frame while airborne and launched (KO ~90% punch, ~65% kick from center)
+        this.HITSTUN_GROUND_FRICTION = 0.85; // Sliding friction per frame while in hitstun on the ground
+        this.DI_ACCEL = 6;                   // Directional influence (units/s^2) while carrying launch momentum
+        this.HITSTUN_PER_KNOCKBACK = 0.02;   // Extra hitstun seconds per point of knockback power
+        this.PLAYER_COLLISION_RADIUS = 0.8;  // Players closer than this (same height) are pushed apart
         
         // Stage platforms (synced with client - js/main.js createArena)
         // Must match floatingPlatformConfigs + main platform
@@ -35,7 +42,8 @@ class GameStateManager {
         
         // Game tick rate (60 FPS)
         this.TICK_RATE = 1000 / 60;
-        this.lastTickTime = Date.now();
+        // Last tick time per room (Map<roomCode, timestamp>) so rooms don't steal each other's delta
+        this.lastTickTimes = new Map();
     }
     
     /**
@@ -47,27 +55,35 @@ class GameStateManager {
         const room = this.lobbyManager.rooms.get(roomCode);
         
         if (!room || room.state !== 'playing') {
+            this.lastTickTimes.delete(roomCode);
             return null;
         }
-        
+
         const now = Date.now();
-        const delta = (now - this.lastTickTime) / 1000;
-        this.lastTickTime = now;
-        
+        const lastTick = this.lastTickTimes.get(roomCode) ?? (now - this.TICK_RATE);
+        const delta = (now - lastTick) / 1000;
+        this.lastTickTimes.set(roomCode, now);
+
         // Cap delta to prevent physics explosions
         const cappedDelta = Math.min(delta, 0.1);
-        
-        // Update each player
+
+        // Update each player's physics (eliminated players are out of the match)
+        for (const player of room.players.values()) {
+            if (player.stocks <= 0) continue;
+            this.updatePlayer(player, cappedDelta);
+        }
+
+        // Push overlapping players apart (server-authoritative, so the host doesn't fight it)
+        this.resolvePlayerCollisions(room);
+
         const playerUpdates = [];
-        
         for (const [playerId, player] of room.players) {
-            const update = this.updatePlayer(player, cappedDelta);
             playerUpdates.push({
                 id: playerId,
-                ...update
+                ...this.serializePlayer(player)
             });
         }
-        
+
         return {
             roomCode: roomCode,
             timestamp: now,
@@ -94,42 +110,52 @@ class GameStateManager {
             player.previousY = player.position.y;
         }
         
+        // Hitstun: after being hit the player can't act and keeps the knockback momentum
+        const inHitstun = (player.hitstunUntil || 0) > Date.now();
+
         // Check if player is locked in an action (blocking or taunting)
         const isLockedInAction = player.isBlocking === true || player.isTaunting === true;
-        
-        // Horizontal movement - blocked during blocking/taunting
+
+        // Per-frame factors were tuned at 60 FPS; normalize them to the real delta
+        const frames = delta * 60;
+
+        // Check if grounded on ANY platform before movement/jump
+        let isGrounded = this.checkIfGrounded(player);
+
+        // Horizontal movement
         const currentSpeed = input.run ? this.RUN_SPEED : this.MOVE_SPEED;
-        
-        if (!isLockedInAction) {
-            if (input.left) {
-                player.velocity.x = -currentSpeed;
-                player.facingRight = false;
-            } else if (input.right) {
-                player.velocity.x = currentSpeed;
-                player.facingRight = true;
-            } else {
-                // Deceleration
-                player.velocity.x *= 0.8;
-                if (Math.abs(player.velocity.x) < 0.1) {
-                    player.velocity.x = 0;
-                }
+        const inputDir = input.left ? -1 : (input.right ? 1 : 0);
+
+        if (inHitstun) {
+            // Launched: ignore input, keep momentum (strong friction on the ground, light drag in the air)
+            const friction = isGrounded ? this.HITSTUN_GROUND_FRICTION : this.AIR_DRAG;
+            player.velocity.x *= Math.pow(friction, frames);
+        } else if (isLockedInAction) {
+            // Force stop horizontal movement when blocking/taunting
+            player.velocity.x *= Math.pow(0.5, frames);
+            if (Math.abs(player.velocity.x) < 0.1) {
+                player.velocity.x = 0;
             }
+        } else if (!isGrounded && Math.abs(player.velocity.x) > this.RUN_SPEED + 0.5) {
+            // Hitstun ended mid-flight: keep drifting, input only nudges the trajectory (DI)
+            player.velocity.x *= Math.pow(this.AIR_DRAG, frames);
+            player.velocity.x += inputDir * this.DI_ACCEL * delta;
+        } else if (inputDir !== 0) {
+            player.velocity.x = inputDir * currentSpeed;
+            player.facingRight = inputDir > 0;
         } else {
-            // Force stop horizontal movement when locked
-            player.velocity.x *= 0.5;
+            // Deceleration
+            player.velocity.x *= Math.pow(0.8, frames);
             if (Math.abs(player.velocity.x) < 0.1) {
                 player.velocity.x = 0;
             }
         }
-        
+
         // Store previous Y before physics update
         const prevY = player.position.y;
-        
-        // Check if grounded on ANY platform before jump
-        let isGrounded = this.checkIfGrounded(player);
-        
-        // Jumping - blocked during blocking/taunting
-        if (input.jump && isGrounded && !isLockedInAction) {
+
+        // Jumping - blocked during blocking/taunting and hitstun
+        if (input.jump && isGrounded && !isLockedInAction && !inHitstun) {
             player.velocity.y = this.JUMP_FORCE;
             isGrounded = false;
         }
@@ -152,8 +178,9 @@ class GameStateManager {
             
             // Check if player is within platform's horizontal bounds
             if (player.position.x >= platformLeft && player.position.x <= platformRight) {
-                // Main ground - always collide
-                if (platform.isMainGround && player.position.y <= platform.y) {
+                // Main ground - only land when coming from above
+                // (a player who fell below the stage keeps falling instead of teleporting back up)
+                if (platform.isMainGround && player.position.y <= platform.y && prevY >= platform.y - 0.05) {
                     player.position.y = platform.y;
                     player.velocity.y = 0;
                     isGrounded = true;
@@ -174,23 +201,65 @@ class GameStateManager {
             }
         }
         
-        // Soft boundary - allow players to go slightly off stage but not walk infinitely
-        // Blast zones handle actual KOs (in checkKOs)
-        player.position.x = Math.max(this.STAGE_LEFT - 2, Math.min(this.STAGE_RIGHT + 2, player.position.x));
+        // No horizontal clamp: players can be launched past the stage edge.
+        // Blast zones handle KOs (in checkKOs).
         player.position.z = 0; // Lock Z axis for 2D gameplay
-        
-        // Store Y for next frame
+
+        // Store Y and grounded state for next frame / serialization
         player.previousY = player.position.y;
-        
+        player.isGrounded = isGrounded;
+    }
+
+    /**
+     * Build the network snapshot for a player
+     * @param {object} player - Player object
+     * @returns {object} Serializable state
+     */
+    serializePlayer(player) {
         return {
             position: { ...player.position },
             velocity: { ...player.velocity },
             health: player.health,
             stocks: player.stocks,
-            isGrounded: isGrounded,
+            isGrounded: player.isGrounded === true,
             facingRight: player.facingRight,
+            inHitstun: (player.hitstunUntil || 0) > Date.now(),
             input: { ...player.input }
         };
+    }
+
+    /**
+     * Push overlapping players apart on the X axis.
+     * Launched players (in hitstun) pass through so knockback isn't absorbed by bodies.
+     * @param {object} room - Room object
+     */
+    resolvePlayerCollisions(room) {
+        const now = Date.now();
+        const radius = this.PLAYER_COLLISION_RADIUS;
+        const active = Array.from(room.players.values()).filter(p =>
+            p.stocks > 0 && !((p.hitstunUntil || 0) > now)
+        );
+
+        for (let i = 0; i < active.length; i++) {
+            for (let j = i + 1; j < active.length; j++) {
+                const a = active[i];
+                const b = active[j];
+                const dx = b.position.x - a.position.x;
+                const dy = b.position.y - a.position.y;
+
+                // Only collide at similar heights (players can jump over each other)
+                if (Math.abs(dx) >= radius || Math.abs(dy) >= 1.5) continue;
+
+                const dir = dx === 0 ? 1 : Math.sign(dx);
+                const push = (radius - Math.abs(dx)) / 2;
+                a.position.x -= dir * push;
+                b.position.x += dir * push;
+
+                // Cancel velocity pushing into the other player
+                if (a.velocity.x * dir > 0) a.velocity.x = 0;
+                if (b.velocity.x * -dir > 0) b.velocity.x = 0;
+            }
+        }
     }
     
     /**
@@ -238,10 +307,23 @@ class GameStateManager {
             return null;
         }
         
-        // Don't allow attacks while blocking or taunting
-        if (attacker.isBlocking || attacker.isTaunting) {
+        // Eliminated players can't attack
+        if (attacker.stocks <= 0) {
             return null;
         }
+
+        // Don't allow attacks while blocking, taunting or in hitstun
+        if (attacker.isBlocking || attacker.isTaunting || (attacker.hitstunUntil || 0) > Date.now()) {
+            return null;
+        }
+
+        // Attack cooldown (matches the host's animation cooldown, so every hit has an animation)
+        const now = Date.now();
+        if (now < (attacker.attackReadyAt || 0)) {
+            return null;
+        }
+        const ATTACK_COOLDOWN_MS = { punch: 400, kick: 500 };
+        attacker.attackReadyAt = now + (ATTACK_COOLDOWN_MS[attackType] || ATTACK_COOLDOWN_MS.punch);
         
         // Attack timing properties (reduced for faster animations)
         const attackTiming = {
@@ -328,11 +410,11 @@ class GameStateManager {
         }
         
         const attacker = room.players.get(attackerId);
-        
-        if (!attacker) {
+
+        if (!attacker || attacker.stocks <= 0) {
             return null;
         }
-        
+
         // Attack properties (Smash Bros style) - With active frames timing
         const attackProps = {
             punch: { 
@@ -363,7 +445,8 @@ class GameStateManager {
         
         for (const [targetId, target] of room.players) {
             if (targetId === attackerId) continue;
-            
+            if (target.stocks <= 0) continue; // Eliminated players can't be hit
+
             // Calculate distance
             const dx = target.position.x - attacker.position.x;
             const dy = target.position.y - attacker.position.y;
@@ -399,6 +482,12 @@ class GameStateManager {
                 // Apply knockback (much reduced if blocking)
                 target.velocity.x = knockbackDirX * knockbackPower * Math.cos(knockbackAngle) * 1.5;
                 target.velocity.y = isBlocking ? 0 : knockbackPower * 0.8; // No vertical knockback when blocking
+
+                // Hitstun scales with knockback so strong hits launch further before the player regains control
+                const hitstunSeconds = isBlocking
+                    ? props.hitstun * 0.3
+                    : props.hitstun + knockbackPower * this.HITSTUN_PER_KNOCKBACK;
+                target.hitstunUntil = Date.now() + hitstunSeconds * 1000;
                 
                 hits.push({
                     targetId: targetId,
@@ -408,7 +497,7 @@ class GameStateManager {
                         x: target.velocity.x,
                         y: target.velocity.y
                     },
-                    hitstun: isBlocking ? props.hitstun * 0.3 : props.hitstun, // Less hitstun when blocking
+                    hitstun: hitstunSeconds,
                     blocked: isBlocking
                 });
             }
@@ -442,8 +531,10 @@ class GameStateManager {
         };
         
         for (const [playerId, player] of room.players) {
+            if (player.stocks <= 0) continue; // Already eliminated
+
             let isKO = false;
-            
+                        
             if (player.position.y > BLAST_ZONE.top ||
                 player.position.y < BLAST_ZONE.bottom ||
                 Math.abs(player.position.x) > BLAST_ZONE.sides) {
@@ -453,10 +544,14 @@ class GameStateManager {
             if (isKO) {
                 player.stocks--;
                 player.health = 0;
-                
-                // Respawn position
-                player.position = { x: 0, y: 5, z: 0 };
                 player.velocity = { x: 0, y: 0, z: 0 };
+                player.hitstunUntil = 0;
+
+                // Respawn only if the player still has stocks; eliminated players stay out
+                if (player.stocks > 0) {
+                    player.position = { x: 0, y: 5, z: 0 };
+                    player.previousY = player.position.y;
+                }
                 
                 kos.push({
                     playerId: playerId,
@@ -526,6 +621,9 @@ class GameStateManager {
                 z: 0
             };
             player.velocity = { x: 0, y: 0, z: 0 };
+            player.previousY = 0;
+            player.hitstunUntil = 0;
+            player.attackReadyAt = 0;
             player.health = 0;
             player.stocks = 3;
             player.ready = false;

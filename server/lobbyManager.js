@@ -586,10 +586,21 @@ class LobbyManager {
         room.state = 'playing';
         
         // Reset player states for new round (keep character selections)
+        const playerCount = room.players.size;
+        let index = 0;
         room.players.forEach((player) => {
             player.health = 0;
             player.stocks = 3;
             player.ready = false;
+            // Physics state (used by Smash) must not carry over from the previous round
+            player.position = { x: (index - (playerCount - 1) / 2) * 2.5, y: 0, z: 0 };
+            player.velocity = { x: 0, y: 0, z: 0 };
+            player.previousY = 0;
+            player.hitstunUntil = 0;
+            player.attackReadyAt = 0;
+            player.isBlocking = false;
+            player.isTaunting = false;
+            index++;
         });
         
         console.log(`[Lobby] Room ${roomCode} advancing to round ${room.currentRound}`);

@@ -2067,7 +2067,12 @@ function handleGameState(data) {
         if (player) {
             // Apply server state (position, velocity, health, stocks)
             player.controller.applyServerState(state);
-            
+
+            // Eliminated players (no stocks) are out of the match: hide them and their name tag
+            const isOut = typeof state.stocks === 'number' && state.stocks <= 0;
+            if (player.model) player.model.visible = !isOut;
+            if (player.nameLabel) player.nameLabel.visible = !isOut;
+                        
             // Update HUD with latest health/stocks from server
             updatePlayerHUD(player);
         }
@@ -3065,8 +3070,11 @@ function animate() {
         }
     });
     
-    // Check collisions between players (push them apart)
-    checkPlayerCollisions();
+    // Check collisions between players (push them apart).
+    // During an online match the server resolves collisions; running it here too makes players jitter.
+    if (gameState !== 'playing') {
+        checkPlayerCollisions();
+    }
     
     // Update VFX Manager (particle effects, etc.)
     if (vfxManager) {

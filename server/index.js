@@ -774,6 +774,17 @@ io.on('connection', (socket) => {
                 targetId: socket.id,
                 grabberId: result.grabberId
             });
+
+            // The escape punch can knock out the grabber
+            if (result.grabberEliminated) {
+                io.to(roomCode).emit('arena-elimination', {
+                    playerId: result.grabberId,
+                    playerName: result.grabberName || 'Player',
+                    playerNumber: result.grabberNumber,
+                    reason: 'knockout',
+                    eliminatedBy: socket.id
+                });
+            }
         }
     });
     
@@ -1081,7 +1092,8 @@ function handleDisconnect(socket) {
             stopTugLoop(result.roomCode);
             stopPaintLoop(result.roomCode);
             stopBalloonLoop(result.roomCode);
-            
+            arenaStateManager.cleanup(result.roomCode);
+
             // Notify all players
             result.affectedPlayers.forEach(playerId => {
                 io.to(playerId).emit('room-closed', {
@@ -1095,9 +1107,30 @@ function handleDisconnect(socket) {
                 player: result.player,
                 room: result.room
             });
+
+            // Arena: a player who leaves is eliminated and removed, so the round can still end.
+            // The arena loop picks up the finished round on its next tick.
+            const arenaElimination = arenaStateManager.removePlayer(result.roomCode, socket.id);
+            if (arenaElimination) {
+                io.to(result.roomCode).emit('arena-elimination', {
+                    playerId: socket.id,
+                    playerName: arenaElimination.playerName,
+                    playerNumber: arenaElimination.playerNumber,
+                    reason: 'disconnect'
+                });
+            }
+
+            // Smash: if the leaver leaves one player standing, end the match
+            const room = lobbyManager.rooms.get(result.roomCode);
+            if (room && (room.gameMode || 'smash') === 'smash' && room.state === 'playing' && gameLoops.has(result.roomCode)) {
+                const gameOver = gameStateManager.checkGameOver(result.roomCode);
+                if (gameOver) {
+                    finishSmashMatch(result.roomCode, gameOver);
+                }
+            }
         }
     }
-    
+
     return result;
 }
 
@@ -1132,29 +1165,7 @@ function startGameLoop(roomCode) {
                 // Check for game over
                 const gameOver = gameStateManager.checkGameOver(roomCode);
                 if (gameOver) {
-                    stopGameLoop(roomCode);
-                    
-                    // Handle tournament logic
-                    const room = lobbyManager.rooms.get(roomCode);
-                    if (room && room.tournamentRounds > 1) {
-                        const roundResult = handleRoundEnd(
-                            roomCode, 
-                            gameOver.winner?.id, 
-                            gameOver.winner?.name,
-                            'smash'
-                        );
-                        
-                        if (roundResult.action === 'tournament-end') {
-                            io.to(roomCode).emit('tournament-ended', roundResult);
-                        } else if (roundResult.action === 'round-end') {
-                            io.to(roomCode).emit('round-ended', roundResult);
-                            // Start next round after 5 seconds
-                            setTimeout(() => startNextRound(roomCode, 'smash'), 5000);
-                        }
-                    } else {
-                        // Single round, just emit game-over
-                        io.to(roomCode).emit('game-over', gameOver);
-                    }
+                    finishSmashMatch(roomCode, gameOver);
                 }
             }
         } else {
@@ -1165,6 +1176,35 @@ function startGameLoop(roomCode) {
     
     gameLoops.set(roomCode, loop);
     console.log(`[Game] Started game loop for room ${roomCode}`);
+}
+
+/**
+ * Stop the Smash loop and broadcast the round/match result
+ */
+function finishSmashMatch(roomCode, gameOver) {
+    stopGameLoop(roomCode);
+    
+    // Handle tournament logic
+    const room = lobbyManager.rooms.get(roomCode);
+    if (room && room.tournamentRounds > 1) {
+        const roundResult = handleRoundEnd(
+            roomCode, 
+            gameOver.winner?.id, 
+            gameOver.winner?.name,
+            'smash'
+        );
+        
+        if (roundResult.action === 'tournament-end') {
+            io.to(roomCode).emit('tournament-ended', roundResult);
+        } else if (roundResult.action === 'round-end') {
+            io.to(roomCode).emit('round-ended', roundResult);
+            // Start next round after 5 seconds
+            setTimeout(() => startNextRound(roomCode, 'smash'), 5000);
+        }
+    } else {
+        // Single round, just emit game-over
+        io.to(roomCode).emit('game-over', gameOver);
+    }
 }
 
 /**
@@ -1229,44 +1269,58 @@ function startArenaLoop(roomCode) {
             // Check for game over
             const gameOver = arenaStateManager.checkGameOver(roomCode);
             if (gameOver) {
-                stopArenaLoop(roomCode);
-                
-                // Handle tournament logic
-                const room = lobbyManager.rooms.get(roomCode);
-                if (room && room.tournamentRounds > 1) {
-                    const roundResult = handleRoundEnd(
-                        roomCode, 
-                        gameOver.winner?.id, 
-                        gameOver.winner?.name,
-                        'arena'
-                    );
-                    
-                    if (roundResult.action === 'tournament-end') {
-                        io.to(roomCode).emit('tournament-ended', {
-                            ...roundResult,
-                            gameMode: 'arena'
-                        });
-                    } else if (roundResult.action === 'round-end') {
-                        io.to(roomCode).emit('round-ended', {
-                            ...roundResult,
-                            gameMode: 'arena'
-                        });
-                        // Start next round after 5 seconds
-                        setTimeout(() => startNextRound(roomCode, 'arena'), 5000);
-                    }
-                } else {
-                    // Single round, just emit game-over
-                    io.to(roomCode).emit('arena-game-over', gameOver);
-                }
+                finishArenaRound(roomCode, gameOver);
             }
         } else {
-            // Room no longer active
-            stopArenaLoop(roomCode);
+            // The round may have ended outside the tick (throw/escape knockout or a player leaving).
+            // Emit the result instead of silently stopping, otherwise the match soft-locks.
+            const gameOver = arenaStateManager.checkGameOver(roomCode);
+            if (gameOver) {
+                finishArenaRound(roomCode, gameOver);
+            } else {
+                // Room no longer active
+                stopArenaLoop(roomCode);
+            }
         }
     }, tickRate);
-    
+
     arenaLoops.set(roomCode, loop);
     console.log(`[Arena] Started arena loop for room ${roomCode}`);
+}
+
+/**
+ * Stop the arena loop and broadcast the round/match result
+ */
+function finishArenaRound(roomCode, gameOver) {
+    stopArenaLoop(roomCode);
+
+    // Handle tournament logic
+    const room = lobbyManager.rooms.get(roomCode);
+    if (room && room.tournamentRounds > 1) {
+        const roundResult = handleRoundEnd(
+            roomCode,
+            gameOver.winner?.id,
+            gameOver.winner?.name,
+            'arena'
+        );
+
+        if (roundResult.action === 'tournament-end') {
+            io.to(roomCode).emit('tournament-ended', {
+                ...roundResult,
+                gameMode: 'arena'
+            });
+        } else if (roundResult.action === 'round-end') {
+            io.to(roomCode).emit('round-ended', {
+                ...roundResult,
+                gameMode: 'arena'
+            });
+            // Start next round after 5 seconds
+            setTimeout(() => startNextRound(roomCode, 'arena'), 5000);
+        }
+    } else {
+        // Single round, just emit game-over
+        io.to(roomCode).emit('arena-game-over', gameOver);
+    }
 }
 
 /**

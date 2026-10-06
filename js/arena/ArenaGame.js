@@ -221,6 +221,15 @@ class ArenaPlayerEntity {
         }
     }
     
+    /**
+     * Lerp the model's Y rotation toward an angle along the shortest arc
+     */
+    rotateTowards(targetAngle, t) {
+        const current = this.model.rotation.y;
+        const diff = Math.atan2(Math.sin(targetAngle - current), Math.cos(targetAngle - current));
+        this.model.rotation.y = current + diff * t;
+    }
+
     update(delta) {
         // Update controller physics
         this.controller.update(delta);
@@ -231,23 +240,14 @@ class ArenaPlayerEntity {
         // Update model rotation based on facing angle (always, not just when moving)
         // This ensures rotation updates even when grabbing/grabbed
         if (this.controller.facingAngle !== undefined) {
-            const targetAngle = this.controller.facingAngle;
-            this.model.rotation.y = THREE.MathUtils.lerp(
-                this.model.rotation.y,
-                targetAngle,
-                0.15
-            );
+            this.rotateTowards(this.controller.facingAngle, 0.15);
         } else if (this.controller.movementDirection.length() > 0.1) {
             // Fallback to movement direction
             const targetAngle = Math.atan2(
                 this.controller.movementDirection.x,
                 this.controller.movementDirection.z
             );
-            this.model.rotation.y = THREE.MathUtils.lerp(
-                this.model.rotation.y,
-                targetAngle,
-                0.15
-            );
+            this.rotateTowards(targetAngle, 0.15);
         }
         
         // Update animation based on state
@@ -2346,7 +2346,10 @@ class ArenaGame {
             for (let j = i + 1; j < playerArray.length; j++) {
                 const p1 = playerArray[i].controller;
                 const p2 = playerArray[j].controller;
-                
+
+                // The server resolves collisions during online matches
+                if (p1.serverControlled || p2.serverControlled) continue;
+
                 // Skip collision if one is grabbing the other
                 if (p1.isGrabbing && p1.grabbedPlayer === p2) continue;
                 if (p2.isGrabbing && p2.grabbedPlayer === p1) continue;
@@ -2378,6 +2381,39 @@ class ArenaGame {
         }
     }
     
+    /**
+     * Shake the camera. Called on throws, landings, escapes and eliminations.
+     * @param {number} intensity - Max offset in world units
+     * @param {number} durationMs - Duration in milliseconds
+     */
+    shakeScreen(intensity = 0.3, durationMs = 200) {
+        const now = performance.now();
+        const active = this.cameraShake && now < this.cameraShake.end;
+        // Keep the strongest active shake instead of letting a weak one cut a strong one short
+        if (!active || intensity >= this.cameraShake.intensity) {
+            this.cameraShake = { intensity, duration: durationMs, end: now + durationMs };
+        }
+    }
+
+    /**
+     * Current camera shake offset (decays linearly), or null when not shaking
+     */
+    getCameraShakeOffset() {
+        if (!this.cameraShake) return null;
+        const remaining = this.cameraShake.end - performance.now();
+        if (remaining <= 0) {
+            this.cameraShake = null;
+            return null;
+        }
+        const amp = this.cameraShake.intensity * (remaining / this.cameraShake.duration);
+        if (!this.shakeOffset) this.shakeOffset = new THREE.Vector3();
+        return this.shakeOffset.set(
+            (Math.random() * 2 - 1) * amp,
+            (Math.random() * 2 - 1) * amp * 0.5,
+            (Math.random() * 2 - 1) * amp
+        );
+    }
+
     checkRingBoundaries() {
         const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.8; // Rope boundary
         const ringBounce = 0.3; // Bounce back force when hitting ropes
@@ -2385,8 +2421,25 @@ class ArenaGame {
         this.players.forEach(player => {
             const pos = player.controller.position;
             const vel = player.controller.velocity;
-            
-            // Check and enforce rope boundaries (can't go through ropes)
+
+            if (player.controller.serverControlled) {
+                // Server already bounced the player off the ropes: only show warnings and play the sound once
+                const edgeDistance = 1.5;
+                player.controller.isNearEdge =
+                    Math.abs(pos.x) > ringHalf - edgeDistance ||
+                    Math.abs(pos.z) > ringHalf - edgeDistance;
+
+                const bouncedX = Math.abs(Math.abs(pos.x) - ringHalf) < 0.01 && vel.x * Math.sign(pos.x) < -2;
+                const bouncedZ = Math.abs(Math.abs(pos.z) - ringHalf) < 0.01 && vel.z * Math.sign(pos.z) < -2;
+                const bounced = bouncedX || bouncedZ;
+                if (bounced && !player.ropeSoundPlayed && this.sfxManager) {
+                    this.sfxManager.playBlock();
+                }
+                player.ropeSoundPlayed = bounced;
+                return;
+            }
+
+            // Local (non-server) players: enforce rope boundaries (can't go through ropes)
             let hitRope = false;
             
             // Left rope
@@ -2480,13 +2533,19 @@ class ArenaGame {
         
         // Update camera to follow action
         this.updateCamera();
-        
+
+        // Apply camera shake only for this frame's render, so it never accumulates into the follow camera
+        const shakeOffset = this.getCameraShakeOffset();
+        if (shakeOffset) this.camera.position.add(shakeOffset);
+
         this.renderer.render(this.scene, this.camera);
-        
+
         // Render floating name labels
         if (this.labelRenderer) {
             this.labelRenderer.render(this.scene, this.camera);
         }
+
+        if (shakeOffset) this.camera.position.sub(shakeOffset);
     }
     
     /**

@@ -16,6 +16,13 @@ const ARENA_CONFIG = {
     MOVE_SPEED: 6,         // Synced with client
     RUN_SPEED: 10,         // Synced with client
     FRICTION: 0.85,
+    STUN_FRICTION: 0.92,   // Lighter friction while stunned so hit knockback actually moves the victim
+    FALL_OUT_DEPTH: 3,     // Ring-out when a player falls this far below the ring floor
+    COLLISION_RADIUS: 0.8, // Players closer than this are pushed apart (server-authoritative)
+
+    // Carry position of a grabbed player relative to the grabber (MUST match client updateGrabbedPlayerPositions)
+    CARRY_OFFSET: 0.3,
+    CARRY_HEIGHT: 1.2,
     
     // Health & Stamina
     MAX_HEALTH: 100,
@@ -171,16 +178,17 @@ class ArenaStateManager {
         if (!room) return null;
         
         const players = [];
-        
+        const simulated = [];             // Active players updated this tick
+        const previousPositions = new Map(); // socketId -> {x, z} before movement (for rope checks)
+
+        // Pass 1: input, timers and movement
         arenaState.players.forEach((playerState, socketId) => {
-            if (playerState.isEliminated) {
-                players.push(this.getPlayerStateForClient(playerState));
-                return;
-            }
-            
+            if (playerState.isEliminated) return;
+
             const roomPlayer = room.players.get(socketId);
             if (!roomPlayer) return;
-            
+            simulated.push(playerState);
+                        
             // Update from room input
             const prevInput = { ...playerState.input };
             playerState.input = { ...roomPlayer.input };
@@ -200,20 +208,41 @@ class ArenaStateManager {
                 this.releaseGrab(arenaState, socketId);
             }
             
-            // Process movement (if not stunned or grabbed)
-            if (!playerState.isStunned && !playerState.isGrabbed) {
-                this.processPlayerMovement(playerState, delta);
+            previousPositions.set(socketId, { x: playerState.position.x, z: playerState.position.z });
+
+            // Carried players are positioned by their grabber (pass 4).
+            // Everyone else is integrated every tick, including stunned/thrown players
+            // so knockback and throws actually move them. They just can't steer.
+            if (!playerState.isGrabbed) {
+                const canControl = !playerState.isStunned && !playerState.isBeingThrown;
+                this.processPlayerMovement(playerState, delta, canControl);
             }
-            
+
             // Regenerate stamina
             this.updateStamina(playerState, delta);
-            
-            // Check ring boundaries
-            this.checkRingBoundaries(arenaState, playerState);
-            
-            players.push(this.getPlayerStateForClient(playerState));
         });
-        
+
+        // Pass 2: body collisions (server-authoritative so the host doesn't fight the server)
+        this.resolvePlayerCollisions(simulated);
+
+        // Pass 3: ropes
+        for (const playerState of simulated) {
+            if (playerState.isGrabbed) continue;
+            this.checkRingBoundaries(playerState, previousPositions.get(playerState.id));
+        }
+
+        // Pass 4: carried players follow their grabber
+        for (const playerState of simulated) {
+            if (playerState.isGrabbed) this.followGrabber(arenaState, playerState);
+        }
+
+        // Serialize (eliminated players are still sent so clients keep showing them)
+        arenaState.players.forEach((playerState, socketId) => {
+            if (playerState.isEliminated || simulated.includes(playerState)) {
+                players.push(this.getPlayerStateForClient(playerState));
+            }
+        });
+                
         return {
             roomCode,
             roundNumber: arenaState.roundNumber,
@@ -225,11 +254,13 @@ class ArenaStateManager {
     /**
      * Process player movement for 360 degrees
      */
-    processPlayerMovement(playerState, delta) {
+    processPlayerMovement(playerState, delta, canControl = true) {
         // Check if player is locked in an action (attacking, blocking, or taunting)
         const isLockedInAction = playerState.isAttacking || playerState.isBlocking || playerState.isTaunting;
-        
-        if (isLockedInAction) {
+
+        if (!canControl) {
+            // Stunned or flying: no input, momentum is handled by friction below
+        } else if (isLockedInAction) {
             // Slow down while locked in action (can't move)
             playerState.velocity.x *= 0.9;
             playerState.velocity.z *= 0.9;
@@ -263,31 +294,107 @@ class ArenaStateManager {
         }
         
         // Apply friction
-        // Apply less friction when being thrown to maintain momentum
-        const friction = playerState.isBeingThrown ? 0.98 : ARENA_CONFIG.FRICTION;
+        // Less friction when thrown (keep the arc) or stunned (let hit knockback push the victim)
+        const friction = playerState.isBeingThrown ? 0.98 :
+                         playerState.isStunned ? ARENA_CONFIG.STUN_FRICTION :
+                         ARENA_CONFIG.FRICTION;
         playerState.velocity.x *= friction;
         playerState.velocity.z *= friction;
-        
-        // Apply gravity if in air
-        if (playerState.position.y > ARENA_CONFIG.RING_HEIGHT) {
+
+        // Gravity applies in the air and anywhere off the ring platform (there is no floor out there)
+        const prevY = playerState.position.y;
+        if (playerState.position.y > ARENA_CONFIG.RING_HEIGHT || !this.isOverRing(playerState.position)) {
             playerState.velocity.y += ARENA_CONFIG.GRAVITY * delta;
-        } else if (playerState.velocity.y < 0) {
-            // Land on the ground
-            playerState.position.y = ARENA_CONFIG.RING_HEIGHT;
-            playerState.velocity.y = 0;
-            
-            // Reset thrown state when landing
-            if (playerState.isBeingThrown) {
-                playerState.isBeingThrown = false;
-                // Reduce stun time when landing
-                playerState.stunEndTime = Math.min(playerState.stunEndTime, Date.now() + 500);
-            }
         }
-        
+
         // Update position
         playerState.position.x += playerState.velocity.x * delta;
         playerState.position.y += playerState.velocity.y * delta;
         playerState.position.z += playerState.velocity.z * delta;
+
+        // Land on the ring only when coming from above while over the platform.
+        // Someone who already fell below the floor keeps falling (ring-out) instead of popping back up.
+        if (this.isOverRing(playerState.position) &&
+            playerState.position.y <= ARENA_CONFIG.RING_HEIGHT &&
+            prevY >= ARENA_CONFIG.RING_HEIGHT - 0.05) {
+            playerState.position.y = ARENA_CONFIG.RING_HEIGHT;
+            if (playerState.velocity.y < 0) {
+                playerState.velocity.y = 0;
+
+                // Reset thrown state when landing
+                if (playerState.isBeingThrown) {
+                    playerState.isBeingThrown = false;
+                    // Reduce stun time when landing
+                    playerState.stunEndTime = Math.min(playerState.stunEndTime, Date.now() + 500);
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether an X/Z position is above the ring platform (the floor ends at the platform edge)
+     */
+    isOverRing(position) {
+        const half = ARENA_CONFIG.RING_SIZE / 2;
+        return Math.abs(position.x) <= half && Math.abs(position.z) <= half;
+    }
+
+    /**
+     * Keep a grabbed player in the carry position (behind and above the grabber).
+     * Without this the victim's server position stays where they were grabbed,
+     * so hits miss and they teleport back on release.
+     */
+    followGrabber(arenaState, playerState) {
+        const grabber = arenaState.players.get(playerState.grabbedBy);
+        if (!grabber || grabber.isEliminated) return;
+
+        const angle = grabber.facingAngle || 0;
+        playerState.position.x = grabber.position.x - Math.sin(angle) * ARENA_CONFIG.CARRY_OFFSET;
+        playerState.position.z = grabber.position.z - Math.cos(angle) * ARENA_CONFIG.CARRY_OFFSET;
+        playerState.position.y = grabber.position.y + ARENA_CONFIG.CARRY_HEIGHT;
+        playerState.velocity = { x: 0, y: 0, z: 0 };
+    }
+
+    /**
+     * Push overlapping players apart on the ground plane.
+     * Stunned and thrown players pass through so knockback isn't absorbed by bodies.
+     */
+    resolvePlayerCollisions(players) {
+        const radius = ARENA_CONFIG.COLLISION_RADIUS;
+        const active = players.filter(p =>
+            !p.isEliminated && !p.isGrabbed && !p.isBeingThrown && !p.isStunned &&
+            p.position.y <= ARENA_CONFIG.RING_HEIGHT + 0.3
+        );
+
+        for (let i = 0; i < active.length; i++) {
+            for (let j = i + 1; j < active.length; j++) {
+                const a = active[i];
+                const b = active[j];
+                if (a.grabbing === b.id || b.grabbing === a.id) continue;
+
+                let dx = b.position.x - a.position.x;
+                let dz = b.position.z - a.position.z;
+                let dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist >= radius) continue;
+
+                if (dist < 0.0001) {
+                    // Exactly on top of each other: pick an arbitrary direction
+                    dx = 1; dz = 0; dist = 1;
+                    const push = radius / 2;
+                    a.position.x -= push;
+                    b.position.x += push;
+                    continue;
+                }
+
+                const push = (radius - dist) / 2;
+                const nx = dx / dist;
+                const nz = dz / dist;
+                a.position.x -= nx * push;
+                a.position.z -= nz * push;
+                b.position.x += nx * push;
+                b.position.z += nz * push;
+            }
+        }
     }
     
     /**
@@ -317,59 +424,40 @@ class ArenaStateManager {
     
     /**
      * Check and handle ring boundary collisions
+     * @param {object} playerState - Player state
+     * @param {{x:number, z:number}} prevPos - Position before this tick's movement
      */
-    checkRingBoundaries(arenaState, playerState) {
+    checkRingBoundaries(playerState, prevPos) {
         const ringHalf = ARENA_CONFIG.RING_SIZE / 2 - 0.8; // Rope boundary (matches client)
         const ringBounce = 0.3; // Bounce back force when hitting ropes
-        
+        const RING_OUT_SPEED = 10; // Faster than this goes through the ropes
+
         // Calculate total horizontal speed
         const speed = Math.sqrt(
-            playerState.velocity.x * playerState.velocity.x + 
+            playerState.velocity.x * playerState.velocity.x +
             playerState.velocity.z * playerState.velocity.z
         );
-        
-        // If being thrown, allow passing through ropes with less speed required
-        const RING_OUT_SPEED = playerState.isBeingThrown ? 5 : 10; // Lower threshold when thrown
-        
-        if (speed > RING_OUT_SPEED || playerState.isBeingThrown) {
-            // Check if about to exit or already outside
-            const isNearEdgeX = Math.abs(playerState.position.x) > ringHalf - 1;
-            const isNearEdgeZ = Math.abs(playerState.position.z) > ringHalf - 1;
-            
-            if (isNearEdgeX || isNearEdgeZ) {
-                console.log(`[Ring Out] ${playerState.name} near edge! Speed: ${speed.toFixed(2)}, Pos: (${playerState.position.x.toFixed(2)}, ${playerState.position.z.toFixed(2)})`);
+
+        // Off the platform (between the ring edge and the ring-out line)
+        playerState.isOutOfRing = !this.isOverRing(playerState.position);
+
+        // Thrown or very fast players fly through the ropes
+        const flying = playerState.isBeingThrown || speed > RING_OUT_SPEED;
+
+        // Ropes only stop players crossing them from the inside.
+        // Someone already outside (e.g. thrown onto the apron) isn't pulled back into the ring.
+        const prev = prevPos || playerState.position;
+        if (!flying) {
+            if (Math.abs(prev.x) <= ringHalf && Math.abs(playerState.position.x) > ringHalf) {
+                playerState.position.x = Math.sign(playerState.position.x) * ringHalf;
+                playerState.velocity.x *= -ringBounce;
             }
-            
-            // Mark as potentially out of ring
-            playerState.isOutOfRing = 
-                Math.abs(playerState.position.x) > ringHalf + ARENA_CONFIG.RING_OUT_ZONE ||
-                Math.abs(playerState.position.z) > ringHalf + ARENA_CONFIG.RING_OUT_ZONE;
-            
-            if (playerState.isOutOfRing) {
-                console.log(`[Ring Out] ${playerState.name} IS OUT OF RING!`);
+            if (Math.abs(prev.z) <= ringHalf && Math.abs(playerState.position.z) > ringHalf) {
+                playerState.position.z = Math.sign(playerState.position.z) * ringHalf;
+                playerState.velocity.z *= -ringBounce;
             }
-            
-            return; // Don't bounce, let them fly out
         }
-        
-        // Check X boundaries - bounce off ropes
-        if (playerState.position.x > ringHalf) {
-            playerState.position.x = ringHalf;
-            playerState.velocity.x *= -ringBounce;
-        } else if (playerState.position.x < -ringHalf) {
-            playerState.position.x = -ringHalf;
-            playerState.velocity.x *= -ringBounce;
-        }
-        
-        // Check Z boundaries - bounce off ropes
-        if (playerState.position.z > ringHalf) {
-            playerState.position.z = ringHalf;
-            playerState.velocity.z *= -ringBounce;
-        } else if (playerState.position.z < -ringHalf) {
-            playerState.position.z = -ringHalf;
-            playerState.velocity.z *= -ringBounce;
-        }
-        
+                
         // Set near edge flag for visual warnings
         const edgeDistance = 1.5;
         playerState.isNearEdge = 
@@ -391,11 +479,12 @@ class ArenaStateManager {
         arenaState.players.forEach((playerState, playerId) => {
             if (playerState.isEliminated) return;
             
-            // Check if player is outside ring out zone
+            // Check if player is outside ring out zone, or fell off the platform
             const isOutX = Math.abs(playerState.position.x) > ringHalf + outZone;
             const isOutZ = Math.abs(playerState.position.z) > ringHalf + outZone;
-            
-            if (isOutX || isOutZ) {
+            const fellOff = playerState.position.y < ARENA_CONFIG.RING_HEIGHT - ARENA_CONFIG.FALL_OUT_DEPTH;
+
+            if (isOutX || isOutZ || fellOff) {
                 console.log(`[Arena] RING OUT! ${playerState.name} fell out of the ring!`);
                 
                 // Eliminate the player
@@ -622,6 +711,10 @@ class ArenaStateManager {
             console.log('[Arena] Attacker already grabbing');
             return null;
         }
+        if (attacker.isGrabbed || attacker.isStunned || attacker.isBeingThrown) {
+            // A carried/stunned/flying player grabbing someone would chain carries and teleport bodies
+            return null;
+        }
         
         // Check stamina
         if (attacker.stamina < ARENA_CONFIG.GRAB_STAMINA) {
@@ -644,6 +737,9 @@ class ArenaStateManager {
             if (targetState.isGrabbed) {
                 console.log(`[Arena] Target ${targetId} already grabbed`);
                 return;
+            }
+            if (targetState.isBeingThrown || targetState.position.y > ARENA_CONFIG.RING_HEIGHT + 0.3) {
+                return; // Can't grab someone in the air
             }
             
             const dx = targetState.position.x - attacker.position.x;
@@ -710,12 +806,15 @@ class ArenaStateManager {
         // Apply throw damage and knockback
         target.health = Math.max(0, target.health - ARENA_CONFIG.THROW_DAMAGE);
         
-        const throwAngle = direction || attacker.facingAngle;
-        
+        // 0 is a valid angle (straight "down"), so only fall back to facing when no number was sent
+        const throwAngle = (typeof direction === 'number' && Number.isFinite(direction))
+            ? direction
+            : attacker.facingAngle;
+
         // IMPORTANT: Set target position to carried position BEFORE applying velocity
         // This prevents "teleport behind" - throw starts from where victim was being carried
-        const carryOffset = 0.3;
-        const carryHeight = 1.2;
+        const carryOffset = ARENA_CONFIG.CARRY_OFFSET;
+        const carryHeight = ARENA_CONFIG.CARRY_HEIGHT;
         target.position.x = attacker.position.x - Math.sin(throwAngle) * carryOffset;
         target.position.z = attacker.position.z - Math.cos(throwAngle) * carryOffset;
         target.position.y = attacker.position.y + carryHeight;
@@ -824,14 +923,31 @@ class ArenaStateManager {
         // Apply knockback and damage to grabber (they got hit by escape punch)
         const grabber = arenaState.players.get(grabberId);
         if (grabber) {
-            const angle = grabber.facingAngle || 0;
-            // Push grabber backwards hard
-            grabber.velocity.x -= Math.sin(angle) * 8;
-            grabber.velocity.z -= Math.cos(angle) * 8;
+            // Push the grabber away from the victim (the victim is carried behind the grabber,
+            // so pushing "backwards" along the facing would shove the grabber into them)
+            let awayX = grabber.position.x - target.position.x;
+            let awayZ = grabber.position.z - target.position.z;
+            const awayLen = Math.sqrt(awayX * awayX + awayZ * awayZ);
+            if (awayLen > 0.0001) {
+                awayX /= awayLen;
+                awayZ /= awayLen;
+            } else {
+                const angle = grabber.facingAngle || 0;
+                awayX = Math.sin(angle);
+                awayZ = Math.cos(angle);
+            }
+            grabber.velocity.x += awayX * 8;
+            grabber.velocity.z += awayZ * 8;
             grabber.isStunned = true;
             grabber.stunEndTime = Date.now() + 1000; // Longer stun from escape hit
             // Apply some damage from the escape punch
             grabber.health = Math.max(0, grabber.health - 10);
+        }
+
+        // The escape punch can finish the grabber off
+        let grabberElimination = null;
+        if (grabber && grabber.health <= 0) {
+            grabberElimination = this.eliminatePlayer(arenaState, grabberId);
         }
         
         // Target recovers in place
@@ -840,9 +956,12 @@ class ArenaStateManager {
         
         console.log(`[Arena] Player ${target.name} escaped from grab successfully!`);
         
-        return { 
-            success: true, 
-            grabberId: grabberId 
+        return {
+            success: true,
+            grabberId: grabberId,
+            grabberEliminated: !!grabberElimination,
+            grabberName: grabber?.name,
+            grabberNumber: grabber?.number
         };
     }
     
@@ -892,6 +1011,39 @@ class ArenaStateManager {
         };
     }
     
+    /**
+     * Remove a player who left the room mid-match.
+     * They are eliminated (releasing any grab and ending the round if only one player remains)
+     * and then dropped from the arena state so they can't be grabbed or counted as alive.
+     * @returns {object|null} Elimination info, or null if the player wasn't in the arena
+     */
+    removePlayer(roomCode, socketId) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState || !arenaState.players.has(socketId)) return null;
+
+        const playerState = arenaState.players.get(socketId);
+        const wasAlive = !playerState.isEliminated;
+        const elimination = wasAlive && arenaState.roundState === 'active'
+            ? this.eliminatePlayer(arenaState, socketId)
+            : null;
+
+        // Drop any queued attacks from the player who left
+        const pending = this.pendingAttacks.get(roomCode);
+        if (pending) {
+            this.pendingAttacks.set(roomCode, pending.filter(atk => atk.attackerId !== socketId));
+        }
+
+        arenaState.players.delete(socketId);
+
+        // If the round already ended without a recorded winner, re-check who is left
+        if (arenaState.roundState === 'finished' && arenaState.lastWinner === socketId) {
+            const alive = [...arenaState.players.values()].filter(p => !p.isEliminated);
+            arenaState.lastWinner = alive.length === 1 ? alive[0].id : null;
+        }
+
+        return elimination ? { ...elimination, reason: 'disconnect' } : null;
+    }
+
     /**
      * Check if game is over
      */
@@ -944,6 +1096,8 @@ class ArenaStateManager {
             playerState.isEliminated = false;
             playerState.grabbedBy = null;
             playerState.grabbing = null;
+            playerState.isBeingThrown = false;
+            playerState.isOutOfRing = false;
             playerState.velocity = { x: 0, y: 0, z: 0 };
             
             // Position around the ring (evenly distributed based on total players)
