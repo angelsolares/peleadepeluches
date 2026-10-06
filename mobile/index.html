@@ -183,6 +183,8 @@
                 <div class="game-info">
                     <span class="health-label">DAÑO</span>
                     <span class="health-value" id="player-damage">0%</span>
+                    <!-- Arena battle royal (3+ players): how many are still in the ring -->
+                    <span class="arena-royal hidden" id="arena-royal">QUEDAN <b id="arena-royal-count">0</b></span>
                 </div>
                 <div class="stocks-display" id="stocks-display">
                     <span class="stock">●</span>
@@ -202,7 +204,8 @@
                         <span class="guide-row"><b>GOLPE + 🕹</b> Azotón</span>
                         <span class="guide-row"><b>PATADA</b> Rodillazo</span>
                         <span class="guide-row"><b>PATADA + 🕹</b> Suplex</span>
-                        <span class="guide-row guide-wide"><b>AGARRAR</b> Cargar</span>
+                        <span class="guide-row"><b>AGARRAR</b> Cargar</span>
+                        <span class="guide-row"><b>AGARRAR + 🕹</b> Latigazo</span>
                         <span class="guide-row guide-wide guide-finisher hidden" id="arena-hud-guide-finisher"><b>★ ¡REMATE!</b> <span id="arena-hud-guide-finisher-name"></span></span>
                     </div>
                     <div class="arena-hud-count pin-count hidden" id="arena-hud-count">
@@ -405,6 +408,8 @@
             <div class="overlay-content">
                 <h2 id="game-over-title">¡JUEGO TERMINADO!</h2>
                 <p id="game-over-message">Ganador: Player 1</p>
+                <!-- Arena: who eliminated me (or how) and my final place -->
+                <p id="game-over-elim" class="elim-info hidden"></p>
                 <button id="rematch-btn" class="btn-primary rematch-btn">REVANCHA</button>
                 <p id="rematch-error" class="rematch-error" role="status" aria-live="polite"></p>
                 <button id="exit-btn" class="btn-secondary">SALIR</button>
@@ -416,6 +421,7 @@
             <div class="overlay-content">
                 <h2 class="round-title">RONDA <span id="round-num">1</span></h2>
                 <p id="round-winner-name" class="round-winner">¡GANADOR!</p>
+                <p id="round-elim-info" class="elim-info hidden"></p>
                 <div id="round-mobile-scores" class="round-scores"></div>
                 <div class="round-countdown">
                     Siguiente ronda en <span id="round-countdown">5</span>...

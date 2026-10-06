@@ -2779,3 +2779,58 @@ input, textarea {
         font-size: 1.35rem;
     }
 }
+
+/* ==================================
+   Arena ropes, running strikes and battle royal (phase 3)
+   ================================== */
+
+/* Compact one-line HUD (running hint): title and sub side by side */
+.arena-hud.compact:not(.hidden) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0 8px;
+    padding: 3px 10px 4px;
+}
+
+.arena-hud.compact .arena-hud-title {
+    font-size: 0.75rem;
+}
+
+.arena-hud.compact .arena-hud-sub {
+    font-size: 0.72rem;
+}
+
+/* "QUEDAN N" under the health value (battle royal, 3+ players) */
+.arena-royal {
+    display: block;
+    margin-top: 1px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 900;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.arena-royal b {
+    font-size: 0.8rem;
+    color: var(--accent);
+}
+
+.arena-royal.hidden {
+    display: none;
+}
+
+/* End-of-match screens: who eliminated me (or how) and my place */
+.overlay-content p.elim-info {
+    margin-top: -18px;
+    margin-bottom: 24px;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.overlay-content p.elim-info.hidden {
+    display: none;
+}

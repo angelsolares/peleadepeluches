@@ -77,6 +77,10 @@ class ArenaPlayerController {
         this.pin = null;          // { partnerId, role, count, taps, tapsNeeded }
         this.carryEscape = null;  // { taps, needed }
 
+        // Ropes (phase 3, mirrored from the server)
+        this.whip = null;           // Irish whip: { phase: 'out'|'back', attackerId }
+        this.isRopeRunning = false; // Bouncing back off the ropes at speed
+
         // Spirit meter & finisher (mirrored from the server)
         this.spirit = 0;              // 0-100
         this.isSpecial = false;       // Meter full: the signature finisher is available
@@ -462,6 +466,8 @@ class ArenaPlayerController {
         this.move = null;
         this.pin = null;
         this.carryEscape = null;
+        this.whip = null;
+        this.isRopeRunning = false;
         this.spirit = 0;
         this.isSpecial = false;
         this.specialMsLeft = 0;
@@ -497,6 +503,10 @@ class ArenaPlayerController {
         if ('pin' in state) this.pin = state.pin || null;
         if ('carryEscape' in state) this.carryEscape = state.carryEscape || null;
 
+        // Ropes: Irish whip and rope running
+        if ('whip' in state) this.whip = state.whip || null;
+        if ('isRopeRunning' in state) this.isRopeRunning = !!state.isRopeRunning;
+
         // Spirit meter & finisher
         if (typeof state.spirit === 'number') {
             this.spirit = state.spirit;
@@ -509,10 +519,10 @@ class ArenaPlayerController {
     }
 
     /**
-     * Held in place by a grapple (tie-up, move, on the mat, getting up, pin)
+     * Held in place by a grapple (tie-up, move, on the mat, getting up, pin) or whipped
      */
     isGrappleLocked() {
-        return !!(this.tieUp || this.move || this.isDown || this.isGettingUp || this.pin);
+        return !!(this.tieUp || this.move || this.isDown || this.isGettingUp || this.pin || this.whip);
     }
     
     /**

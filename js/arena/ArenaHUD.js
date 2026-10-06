@@ -21,6 +21,8 @@ class ArenaHUD {
         this.container = document.getElementById('arena-player-huds');
         this.playerHUDs = new Map();
         this.refCountTimer = null; // Auto-hide of the referee pin count overlay
+        this.feedTimers = new Set(); // Elimination feed fade-outs (cleared on reset)
+        this.battleUI = null;        // Battle royal panel (feed + "QUEDAN N"), see getBattlePanel
         
         if (!this.container) {
             console.warn('[ArenaHUD] Container not found, creating one');
@@ -98,6 +100,7 @@ class ArenaHUD {
             element: hud,
             player: player
         });
+        this.updateLayout();
         
         // Initial update
         this.updatePlayer(player);
@@ -113,7 +116,16 @@ class ArenaHUD {
         if (hudData) {
             hudData.element.remove();
             this.playerHUDs.delete(playerId);
+            this.updateLayout();
         }
+    }
+
+    /**
+     * Compact cards from 5 players up, so 8 cards stay on screen and readable
+     * (they also leave room for the battle royal panel on the right, see arena.css)
+     */
+    updateLayout() {
+        this.container?.classList.toggle('compact', this.playerHUDs.size >= 5);
     }
     
     /**
@@ -468,6 +480,145 @@ class ArenaHUD {
         document.getElementById('arena-ref-count')?.classList.add('hidden');
     }
 
+    // =================================
+    // Battle royal: elimination feed, remaining counter, banners
+    // =================================
+
+    /**
+     * Top-right panel (from arena.html, created if missing)
+     */
+    getBattlePanel() {
+        if (this.battleUI && this.battleUI.panel.isConnected) return this.battleUI;
+
+        let panel = document.getElementById('arena-br-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'arena-br-panel';
+            (document.getElementById('hud') || document.body).appendChild(panel);
+        }
+        let remaining = panel.querySelector('#arena-remaining');
+        if (!remaining) {
+            remaining = document.createElement('div');
+            remaining.id = 'arena-remaining';
+            remaining.className = 'hidden';
+            remaining.innerHTML = '<span class="arena-remaining-label">QUEDAN</span><span class="arena-remaining-count">0</span>';
+            panel.prepend(remaining);
+        }
+        let feed = panel.querySelector('#arena-elim-feed');
+        if (!feed) {
+            feed = document.createElement('div');
+            feed.id = 'arena-elim-feed';
+            panel.appendChild(feed);
+        }
+        this.battleUI = {
+            panel,
+            remaining,
+            count: remaining.querySelector('.arena-remaining-count'),
+            feed
+        };
+        return this.battleUI;
+    }
+
+    /**
+     * "QUEDAN N" counter (null/0 hides it)
+     * @param {number|null} count - Players still alive
+     */
+    setRemaining(count) {
+        const ui = this.getBattlePanel();
+        if (!Number.isFinite(count) || count < 1) {
+            ui.remaining.classList.add('hidden');
+            return;
+        }
+        const text = String(count);
+        const changed = ui.count.textContent !== text || ui.remaining.classList.contains('hidden');
+        ui.count.textContent = text;
+        ui.remaining.classList.remove('hidden');
+        ui.remaining.classList.toggle('final', count <= 2);
+        if (changed) {
+            // Restart the pop
+            ui.remaining.classList.remove('bump');
+            void ui.remaining.offsetWidth;
+            ui.remaining.classList.add('bump');
+        }
+    }
+
+    /**
+     * Elimination feed entry: "<attacker> eliminó a <victim> · RING-OUT" or
+     * "<victim> quedó fuera · ABANDONO". Newest on top, last 5 kept, each fades out.
+     * @param {object} entry
+     * @param {{name: string, color?: string}|null} entry.attacker
+     * @param {{name: string, color?: string}} entry.victim
+     * @param {string} entry.reason - 'RING-OUT' | 'KO' | 'CUENTA DE 3' | 'ABANDONO'
+     */
+    addEliminationFeed({ attacker = null, victim, reason }) {
+        const ui = this.getBattlePanel();
+        const row = document.createElement('div');
+        row.className = 'arena-feed-entry';
+
+        const nameEl = (p) => {
+            const el = document.createElement('span');
+            el.className = 'arena-feed-name';
+            el.textContent = p?.name || '???';
+            el.style.color = safeColor(p?.color);
+            return el;
+        };
+        const textEl = (text, className = 'arena-feed-text') => {
+            const el = document.createElement('span');
+            el.className = className;
+            el.textContent = text;
+            return el;
+        };
+
+        if (attacker) {
+            row.append(nameEl(attacker), textEl(' eliminó a '), nameEl(victim));
+        } else {
+            row.append(nameEl(victim), textEl(' quedó fuera'));
+        }
+        row.append(textEl(' · ', 'arena-feed-sep'), textEl(reason || 'KO', 'arena-feed-reason'));
+
+        ui.feed.prepend(row);
+        while (ui.feed.children.length > 5) ui.feed.lastElementChild.remove();
+
+        const fade = setTimeout(() => {
+            this.feedTimers.delete(fade);
+            row.classList.add('fading');
+        }, 7000);
+        const drop = setTimeout(() => {
+            this.feedTimers.delete(drop);
+            row.remove();
+        }, 7800);
+        this.feedTimers.add(fade);
+        this.feedTimers.add(drop);
+    }
+
+    /**
+     * Big battle royal banner ("¡ÚLTIMOS DOS!")
+     */
+    showBattleBanner(text, ms = 2400) {
+        const el = document.createElement('div');
+        el.className = 'arena-br-banner';
+        el.textContent = text;
+        (document.getElementById('game-container') || document.body).appendChild(el);
+        const timer = setTimeout(() => {
+            this.feedTimers.delete(timer);
+            el.remove();
+        }, ms);
+        this.feedTimers.add(timer);
+    }
+
+    /**
+     * Empty the feed, hide the counter and banners (new match / round / rematch)
+     */
+    resetBattleRoyal() {
+        this.feedTimers.forEach((timer) => clearTimeout(timer));
+        this.feedTimers.clear();
+        const ui = this.getBattlePanel();
+        ui.feed.replaceChildren();
+        ui.remaining.classList.add('hidden');
+        ui.remaining.classList.remove('final', 'bump');
+        document.querySelectorAll('.arena-br-banner').forEach((el) => el.remove());
+    }
+
     /**
      * Clear all HUDs
      */
@@ -476,6 +627,7 @@ class ArenaHUD {
             hudData.element.remove();
         });
         this.playerHUDs.clear();
+        this.updateLayout();
     }
     
     /**

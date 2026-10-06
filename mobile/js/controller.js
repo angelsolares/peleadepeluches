@@ -264,7 +264,7 @@ function connectToServer() {
 
     // Combat feedback: vibrate when THIS player gets hit
     socket.on('attack-hit', handleAttackHitHaptics);
-    socket.on('arena-attack-hit', handleAttackHitHaptics);
+    socket.on('arena-attack-hit', handleArenaAttackHit); // + lariat / dropkick knockdowns
     
     // Game events
     socket.on('player-joined', handlePlayerJoined);
@@ -302,6 +302,12 @@ function connectToServer() {
     socket.on('arena-special', handleArenaSpecial);
     socket.on('arena-special-end', handleArenaSpecialEnd);
     socket.on('arena-finisher', handleArenaFinisher);
+    // Arena ropes (Irish whip, rebounds, rope running) & battle royal eliminations
+    socket.on('arena-whip', handleArenaWhip);
+    socket.on('arena-rebound', handleArenaRebound);
+    socket.on('arena-whip-end', handleArenaWhipEnd);
+    socket.on('arena-rope-bounce', handleArenaRopeBounce);
+    socket.on('arena-elimination', handleArenaElimination);
 
     // Race mode events
     socket.on('race-state', handleRaceState);
@@ -1233,6 +1239,7 @@ function resetMatchState() {
     const tournamentOverlay = document.getElementById('tournament-end-overlay');
     if (tournamentOverlay) tournamentOverlay.classList.add('hidden');
     hideRoundEndOverlay();
+    setEliminationInfo('game-over-elim', '');
     resetRematchButtons();
     document.querySelectorAll('.race-finish-notification, .flappy-death-notification')
         .forEach(el => el.remove());
@@ -1417,6 +1424,8 @@ function updateControllerUIForMode() {
 
     // Spirit meter only in Arena; BURLA back to its normal look everywhere else
     renderSpiritUI(true);
+    // "QUEDAN N" only in an Arena battle royal
+    renderRoyalCounter(true);
 }
 
 // Setup race mode controls (left/right foot buttons)
@@ -1822,6 +1831,9 @@ function handleArenaState(data) {
         // Spirit meter, SPECIAL countdown, taunt and BURLA / ¡REMATE! button
         syncSpiritFromState(myState, data.players);
 
+        // Irish whip, rope running, running-strike hints and the battle royal counter
+        syncRopesFromState(myState, data.players);
+
         // Tie-up / grapple move / down / pin / carry escape, plus CUBRIR proximity
         syncWrestleFromState(myState, data.players);
     }
@@ -1923,8 +1935,13 @@ function handlePlayerKO(kos) {
 function handleGameOver(data) {
     console.log('[Game] Game over!', data);
 
+    // Arena: who eliminated me / my place (read it before the reset below forgets it)
+    const isArenaWinner = !!(data && data.winner && socket && data.winner.id === socket.id);
+    const elimText = gameMode === 'arena' && !isArenaWinner ? describeMyElimination(true) : '';
+
     // No mash screen / wrestling HUD left behind the end-of-match screen
     clearArenaWrestling();
+    setEliminationInfo('game-over-elim', elimText);
     
     elements.gameOverOverlay.classList.remove('hidden');
     
@@ -2304,13 +2321,17 @@ function handleAction(action, btn) {
                     }
                 });
             } else {
-                // AGARRAR = tie-up, CUBRIR = pin a downed rival, CARGAR = lift from the tie-up.
+                // AGARRAR = tie-up, CUBRIR = pin a downed rival, CARGAR = lift from the tie-up,
+                // CARGAR + stick = Irish whip into the ropes.
                 // The server picks which one; tie-up/pin UI arrives with its events and state.
                 socket.emit('arena-grab', (response) => {
                     console.log('[Arena Grab] Response:', response);
                     if (!response || !response.success) return;
                     const mode = response.grabInfo && response.grabInfo.mode;
-                    if (mode === 'carry' || !mode) {
+                    if (mode === 'whip') {
+                        // The tie-up is over: the rival is running into the ropes
+                        onWhipSent();
+                    } else if (mode === 'carry' || !mode) {
                         // Carrying: button becomes LANZAR right away
                         isGrabbing = true;
                         wrestle.tieRole = null;
@@ -2654,6 +2675,9 @@ function clearArenaWrestling() {
     // Spirit meter, SPECIAL, ¡REMATE! button and banner
     clearArenaSpirit();
 
+    // Irish whip, rope running, running-strike hints, battle royal counter / elimination
+    clearArenaRopes();
+
     // Leftovers from the old escape overlay (older builds created it on the fly)
     const oldOverlay = document.getElementById('escape-overlay');
     if (oldOverlay) oldOverlay.remove();
@@ -2733,7 +2757,8 @@ function renderMash() {
 
 /** What the small HUD above the buttons should say right now (null = hidden) */
 function getHudView() {
-    if (gameMode !== 'arena' || wrestle.eliminated) return null;
+    if (gameMode !== 'arena') return null;
+    if (wrestle.eliminated) return getEliminatedHudView();
 
     if (wrestle.tieRole === 'attacker') {
         // SPECIAL with a finisher that works from here: add it to the move guide
@@ -2764,11 +2789,24 @@ function getHudView() {
             tone: attacking ? 'good' : 'danger'
         };
     }
+    if (ropes.whipPhase) {
+        // Irish whip: I run into the ropes and come back (no control until it ends)
+        return {
+            key: `whip:${ropes.whipPhase}`,
+            title: '¡LATIGAZO!',
+            sub: ropes.whipPhase === 'back' ? '¡Rebotas! Cuidado…' : 'Vas a las cuerdas…',
+            tone: 'danger'
+        };
+    }
     if (isGrabbing) {
         return { key: 'carry', title: '¡LO CARGAS!', sub: 'Apunta con 🕹 y pulsa LANZAR', tone: 'warn' };
     }
     if (spirit.isTaunting) {
         return { key: 'taunt', title: '¡PROVOCANDO! +ÁNIMO', sub: '¡Cuidado: quedas expuesto!', tone: 'warn' };
+    }
+    if (ropes.reboundTarget) {
+        // A rival comes back from the ropes right next to me: any strike becomes a running one
+        return { key: 'rebound', title: '¡GOLPÉALO AL REBOTAR!', sub: 'GOLPE: Tendedero · PATADA: Dropkick', tone: 'good' };
     }
     if (wrestle.flash) {
         return { key: `flash:${wrestle.flash.id}`, title: wrestle.flash.title, sub: wrestle.flash.sub, tone: wrestle.flash.tone };
@@ -2781,6 +2819,9 @@ function getHudView() {
     }
     if (wrestle.coverAvailable) {
         return { key: 'cover', title: 'RIVAL EN LA LONA', sub: 'AGARRAR: Cubrir · GOLPE/PATADA: Pisotón', tone: 'good' };
+    }
+    if (ropes.running) {
+        return { key: 'run', title: 'CORRIENDO', sub: 'GOLPE: Tendedero · PATADA: Dropkick', tone: 'info', compact: true };
     }
     return null;
 }
@@ -2814,6 +2855,7 @@ function renderHud() {
         }
         const timer = wEl('arena-hud-timer');
         if (timer) timer.classList.toggle('hidden', !view.timer);
+        hud.classList.toggle('compact', !!view.compact);
         hud.dataset.tone = view.tone || '';
         hud.classList.remove('hidden');
     }
@@ -2831,7 +2873,7 @@ function renderHud() {
 function renderActionLock() {
     const locked = gameMode === 'arena' && !wrestle.eliminated && (
         wrestle.isDown || wrestle.isGettingUp || !!wrestle.moveType || !!wrestle.pinRole ||
-        wrestle.tieRole === 'defender' || isGrabbed);
+        wrestle.tieRole === 'defender' || isGrabbed || !!ropes.whipPhase);
     if (locked === wrestle.locked) return;
     wrestle.locked = locked;
     const buttons = document.querySelector('.action-buttons');
@@ -3536,6 +3578,338 @@ function handleFinisherImpact(data) {
     }
 }
 
+// =================================
+// Arena ropes, running strikes and battle royal
+// =================================
+// Same approach as the sections above: my 'arena-state' entry is the truth (whip phase,
+// rope running, eliminations), the events only make the phone react a frame early, and
+// every haptic fires on a state CHANGE so event + state never double up.
+
+const ROPES = {
+    RUNNING_MIN_SPEED: 7,       // Server ROPE_CONFIG.RUNNING_MIN_SPEED (run flag + this speed = running strikes)
+    REBOUND_HINT_RANGE: 4,      // "¡GOLPÉALO AL REBOTAR!" when a rebounding rival is this close
+    RUN_HINT_GRACE_MS: 250,     // Keep the running hint through short speed dips (no flicker)
+    BOUNCE_DEDUPE_MS: 300,      // Event + state report the same rope bounce
+    WHIP_SENT_DEDUPE_MS: 600,   // Grab callback + 'arena-whip' report the same whip
+    ROYAL_MIN_PLAYERS: 3        // "QUEDAN N" only in a battle royal
+};
+
+const ROPE_VIBRATION = {
+    whipped: [40, 30, 90],              // I'm sent into the ropes
+    whipSent: 25,                       // I sent someone into the ropes
+    rebound: [70, 25, 70],              // Bump: I hit the ropes and come back
+    ropeBounce: 12,                     // My own rope-running bounce
+    reboundTarget: 10,                  // A rebounding rival is in range
+    strikeTaken: [170, 50, 260],        // A lariat / dropkick knocks me down
+    strikeDealt: [30, 25, 30, 25, 110], // My lariat / dropkick lands
+    eliminatedRival: [40, 30, 40, 30, 160],
+    eliminated: [260, 80, 260]
+};
+
+const RUNNING_STRIKE_NAMES = {
+    lariat: '¡TENDEDERO!',
+    dropkick: '¡DROPKICK!'
+};
+
+const ELIMINATION_REASONS = {
+    ringout: 'ring-out',
+    pinfall: 'cuenta de 3',
+    knockout: 'KO',
+    disconnect: 'desconexión'
+};
+
+// MY rope situation (mirrors my 'arena-state' entry; events update it a frame early)
+const ropes = {
+    whipPhase: null,        // 'out' | 'back' | null: I'm being whipped into the ropes
+    ropeRunning: false,     // Bouncing back off the ropes at speed (my own run)
+    running: false,         // Running hint on screen
+    runSeenAt: 0,
+    reboundTarget: false,   // A rival coming back from the ropes is within range
+    lastBounceAt: 0,
+    whipSentAt: 0,
+    lastPos: null           // { x, z, t }: speed fallback when the state has no velocity
+};
+
+// Battle royal (3+ players)
+const royal = {
+    startCount: 0,          // Players in this match (eliminated ones stay in 'arena-state')
+    remaining: 0,
+    elimination: null,      // { byName, reason, remaining } once I'm out
+    view: null              // Render cache
+};
+
+// ---------- Model setters (haptics only on real changes) ----------
+
+/** @returns {boolean} whether the phase changed */
+function setWhipPhase(phase) {
+    if (ropes.whipPhase === phase) return false;
+    const prev = ropes.whipPhase;
+    ropes.whipPhase = phase;
+    if (phase === 'out' && !prev) vibrate(ROPE_VIBRATION.whipped);
+    else if (phase === 'back') vibrate(ROPE_VIBRATION.rebound);
+    return true;
+}
+
+function noteRopeBounce() {
+    const now = performance.now();
+    if (now - ropes.lastBounceAt < ROPES.BOUNCE_DEDUPE_MS) return;
+    ropes.lastBounceAt = now;
+    vibrate(ROPE_VIBRATION.ropeBounce);
+}
+
+function setRopeRunning(on) {
+    if (ropes.ropeRunning === on) return;
+    ropes.ropeRunning = on;
+    if (on) noteRopeBounce();
+}
+
+function setReboundTarget(on) {
+    if (ropes.reboundTarget === on) return;
+    ropes.reboundTarget = on;
+    if (on) vibrate(ROPE_VIBRATION.reboundTarget);
+}
+
+/** The server ignores my strikes (or won't turn them into running strikes) right now */
+function isBusyForStrikes(me) {
+    return !!(me.isEliminated || me.tieUp || me.move || me.isDown || me.isGettingUp || me.pin ||
+        me.whip || me.isGrabbed || me.isGrabbing || me.isStunned);
+}
+
+/** My horizontal speed: the state's velocity, or the change between two positions */
+function getMySpeed(me) {
+    const now = performance.now();
+    const pos = me.position;
+    const v = me.velocity;
+    let speed = v ? Math.hypot(Number(v.x) || 0, Number(v.z) || 0) : NaN;
+    if (!Number.isFinite(speed) && pos && ropes.lastPos) {
+        const dt = (now - ropes.lastPos.t) / 1000;
+        if (dt > 0.005 && dt < 0.5) speed = Math.hypot(pos.x - ropes.lastPos.x, pos.z - ropes.lastPos.z) / dt;
+    }
+    ropes.lastPos = pos ? { x: pos.x, z: pos.z, t: now } : null;
+    return Number.isFinite(speed) ? speed : 0;
+}
+
+/** A rival coming back from the ropes (whip 'back') close enough to lariat / dropkick */
+function isReboundTargetNear(me, players) {
+    if (!me.position) return false;
+    return players.some(other => other && other.id !== me.id && !other.isEliminated && other.position &&
+        other.whip && other.whip.phase === 'back' &&
+        Math.hypot(other.position.x - me.position.x, other.position.z - me.position.z) <= ROPES.REBOUND_HINT_RANGE);
+}
+
+/**
+ * Mirror my 'arena-state' entry (called every tick, before the wrestling sync that renders the HUD)
+ */
+function syncRopesFromState(me, players) {
+    const out = !!me.isEliminated;
+    const now = performance.now();
+
+    setWhipPhase(!out && me.whip ? (me.whip.phase === 'back' ? 'back' : 'out') : null);
+    setRopeRunning(!out && !!me.isRopeRunning);
+
+    // Running = my stick run flag + real speed, or bouncing off the ropes
+    const speed = getMySpeed(me);
+    const busy = isBusyForStrikes(me);
+    if (!busy && (ropes.ropeRunning || (inputState.run && speed > ROPES.RUNNING_MIN_SPEED))) {
+        ropes.runSeenAt = now;
+    }
+    ropes.running = !busy && ropes.runSeenAt > 0 && now - ropes.runSeenAt < ROPES.RUN_HINT_GRACE_MS;
+    setReboundTarget(!busy && isReboundTargetNear(me, players));
+
+    // Battle royal counter
+    royal.startCount = Math.max(royal.startCount, players.length);
+    royal.remaining = players.filter(p => p && !p.isEliminated).length;
+    renderRoyalCounter();
+}
+
+/**
+ * Forget the rope / battle royal state (rematch, next round, game over, leave).
+ * Called from clearArenaWrestling, which re-renders the HUD afterwards.
+ */
+function clearArenaRopes() {
+    Object.assign(ropes, {
+        whipPhase: null,
+        ropeRunning: false,
+        running: false,
+        runSeenAt: 0,
+        reboundTarget: false,
+        lastBounceAt: 0,
+        whipSentAt: 0,
+        lastPos: null
+    });
+    Object.assign(royal, {
+        startCount: 0,
+        remaining: 0,
+        elimination: null
+    });
+    renderRoyalCounter(true);
+}
+
+// ---------- Rendering ----------
+
+/** "QUEDAN N" under the health value (Arena with 3+ players only) */
+function renderRoyalCounter(force = false) {
+    const el = wEl('arena-royal');
+    if (!el) return;
+    const show = gameMode === 'arena' && royal.startCount >= ROPES.ROYAL_MIN_PLAYERS;
+    const key = show ? String(royal.remaining) : '';
+    if (!force && royal.view === key) return;
+    royal.view = key;
+    el.classList.toggle('hidden', !show);
+    const countEl = wEl('arena-royal-count');
+    if (countEl) countEl.textContent = key;
+}
+
+/** "Te eliminó Ana (ring-out)" / "Cuenta de 3" / "KO" */
+function getEliminationCause(elim) {
+    if (!elim) return '';
+    const reason = ELIMINATION_REASONS[elim.reason] || '';
+    if (elim.byName) {
+        return reason && elim.reason !== 'knockout' ? `Te eliminó ${elim.byName} (${reason})` : `Te eliminó ${elim.byName}`;
+    }
+    return reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : '';
+}
+
+/**
+ * How I went out, for the in-match HUD ("… · Quedan 3") or the end screens ("… · Puesto 3 de 4").
+ * Empty when I was not eliminated.
+ */
+function describeMyElimination(final = false) {
+    const elim = royal.elimination;
+    if (!elim && !wrestle.eliminated) return '';
+    const parts = [];
+    const cause = getEliminationCause(elim);
+    if (cause) parts.push(cause);
+    else if (final) parts.push('Quedaste eliminado');
+
+    if (royal.startCount >= ROPES.ROYAL_MIN_PLAYERS) {
+        if (!final) {
+            parts.push(`Quedan ${royal.remaining}`);
+        } else if (elim && elim.remaining > 0) {
+            parts.push(`Puesto ${elim.remaining + 1} de ${royal.startCount}`);
+        }
+    }
+    return parts.join(' · ');
+}
+
+function getEliminatedHudView() {
+    const sub = describeMyElimination(false);
+    return { key: `out:${sub}`, title: '¡ELIMINADO!', sub, tone: 'danger' };
+}
+
+/** Elimination line on the game-over / round-end screens (hidden when empty) */
+function setEliminationInfo(id, text) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+}
+
+// ---------- Server events ----------
+
+/** I sent my tie-up partner into the ropes (grab callback or 'arena-whip') */
+function onWhipSent() {
+    const now = performance.now();
+    if (now - ropes.whipSentAt < ROPES.WHIP_SENT_DEDUPE_MS) return;
+    ropes.whipSentAt = now;
+    setTieRole(null);
+    vibrate(ROPE_VIBRATION.whipSent);
+    flashHud('¡LATIGAZO!', 'Al rebote: GOLPE = Tendedero · PATADA = Dropkick', 'good');
+    renderWrestleUI();
+}
+
+function handleArenaWhip(data) {
+    if (!data) return;
+    if (isMe(data.attackerId)) {
+        onWhipSent();
+    } else if (isMe(data.defenderId)) {
+        // The tie-up (and its mash screen) is over: I'm running into the ropes
+        setTieRole(null);
+        if (mash.mode === 'tieup') setMash(null);
+        setWhipPhase('out');
+        renderWrestleUI();
+    }
+}
+
+function handleArenaRebound(data) {
+    if (!data || !isMe(data.playerId)) return;
+    if (setWhipPhase('back')) renderWrestleUI();
+}
+
+function handleArenaWhipEnd(data) {
+    if (!data || !isMe(data.playerId)) return;
+    if (setWhipPhase(null)) renderWrestleUI();
+}
+
+function handleArenaRopeBounce(data) {
+    if (!data || !isMe(data.playerId)) return;
+    // Every bounce buzzes (back-to-back bounces keep isRopeRunning on in the state)
+    ropes.ropeRunning = true;
+    noteRopeBounce();
+}
+
+/**
+ * 'arena-attack-hit': the usual hit haptics, plus lariat / dropkick knockdowns
+ */
+function handleArenaAttackHit(data) {
+    if (!data || !Array.isArray(data.hits) || !socket) return;
+
+    const myHit = data.hits.find(h => h && h.targetId === socket.id);
+    if (myHit && myHit.knockdown) {
+        // Knocked flat (the state confirms isDown next frame)
+        vibrate(ROPE_VIBRATION.strikeTaken);
+        setWhipPhase(null);
+        ropes.ropeRunning = false;
+        if (!myHit.eliminated) {
+            wrestle.isDown = true;
+            flashHud(RUNNING_STRIKE_NAMES[myHit.move] || '¡DERRIBADO!', '¡Te mandaron a la lona!', 'danger');
+        }
+        renderWrestleUI();
+    } else {
+        handleAttackHitHaptics(data);
+    }
+
+    if (isMe(data.attackerId)) {
+        const landed = data.hits.find(h => h && h.knockdown && h.move);
+        if (landed) {
+            vibrate(ROPE_VIBRATION.strikeDealt);
+            flashHud(RUNNING_STRIKE_NAMES[landed.move] || '¡DERRIBO!',
+                landed.eliminated ? '¡Fuera de combate!' : '¡A la lona!', 'good');
+        }
+    }
+}
+
+/**
+ * 'arena-elimination' { playerId, reason, eliminatedBy, eliminatedByName, remaining }
+ */
+function handleArenaElimination(data) {
+    if (!data || !socket || gameMode !== 'arena') return;
+    const remaining = Number(data.remaining);
+    if (Number.isFinite(remaining)) royal.remaining = remaining;
+
+    if (isMe(data.playerId)) {
+        const byOther = !!data.eliminatedBy && !isMe(data.eliminatedBy);
+        royal.elimination = {
+            byName: byOther ? (data.eliminatedByName || 'un rival') : '',
+            reason: data.reason || '',
+            remaining: Number.isFinite(remaining) ? remaining : royal.remaining
+        };
+        wrestle.eliminated = true;
+        setWhipPhase(null);
+        setReboundTarget(false);
+        ropes.running = false;
+        vibrate(ROPE_VIBRATION.eliminated);
+        renderWrestleUI();
+    } else if (isMe(data.eliminatedBy)) {
+        vibrate(ROPE_VIBRATION.eliminatedRival);
+        const name = data.playerName || 'Rival';
+        const left = royal.startCount >= ROPES.ROYAL_MIN_PLAYERS && Number.isFinite(remaining) && remaining > 1
+            ? ` · Quedan ${remaining}` : '';
+        flashHud('¡LO ELIMINASTE!', `${name}${left}`, 'good');
+    }
+    renderRoyalCounter();
+}
+
 function resetState() {
     playerData = null;
     roomCode = null;
@@ -3727,9 +4101,11 @@ function handleRoundEnded(data) {
     console.log('[Tournament] Round ended:', data);
     tournamentState.currentRound = data.currentRound;
     tournamentState.playerScores = data.playerScores || {};
+    const elimText = gameMode === 'arena' ? describeMyElimination(true) : '';
     clearArenaWrestling();
-    
+
     showRoundEndOverlay(data);
+    setEliminationInfo('round-elim-info', elimText);
 }
 
 function handleTournamentEnded(data) {

@@ -787,7 +787,7 @@ io.on('connection', (socket) => {
             
             // Check if throw killed the target
             if (throwInfo.eliminated) {
-                io.to(roomCode).emit('arena-elimination', {
+                emitArenaElimination(roomCode, {
                     playerId: throwInfo.targetId,
                     playerName: throwInfo.targetName || 'Player',
                     reason: 'knockout',
@@ -838,7 +838,7 @@ io.on('connection', (socket) => {
 
             // The escape punch can knock out the grabber
             if (result.grabberEliminated) {
-                io.to(roomCode).emit('arena-elimination', {
+                emitArenaElimination(roomCode, {
                     playerId: result.grabberId,
                     playerName: result.grabberName || 'Player',
                     playerNumber: result.grabberNumber,
@@ -1325,7 +1325,7 @@ function handleDisconnect(socket) {
             // The arena loop picks up the finished round on its next tick.
             const arenaElimination = arenaStateManager.removePlayer(result.roomCode, socket.id);
             if (arenaElimination) {
-                io.to(result.roomCode).emit('arena-elimination', {
+                emitArenaElimination(result.roomCode, {
                     playerId: socket.id,
                     playerName: arenaElimination.playerName,
                     playerNumber: arenaElimination.playerNumber,
@@ -1450,7 +1450,8 @@ function startArenaLoop(roomCode) {
 
         // Grappling events queued by the arena state (from this tick or from socket handlers)
         for (const event of arenaStateManager.drainEvents(roomCode)) {
-            io.to(roomCode).emit(event.name, event.data);
+            const data = event.name === 'arena-elimination' ? decorateArenaElimination(roomCode, event.data) : event.data;
+            io.to(roomCode).emit(event.name, data);
         }
 
         if (state) {
@@ -1468,7 +1469,7 @@ function startArenaLoop(roomCode) {
                         if (hit.eliminated) {
                             const eliminatedPlayer = state.players.find(p => p.id === hit.targetId);
                             if (eliminatedPlayer) {
-                                io.to(roomCode).emit('arena-elimination', {
+                                emitArenaElimination(roomCode, {
                                     playerId: hit.targetId,
                                     playerName: eliminatedPlayer.name,
                                     playerNumber: eliminatedPlayer.number,
@@ -1484,7 +1485,7 @@ function startArenaLoop(roomCode) {
             // Check for ring out eliminations
             const ringOuts = arenaStateManager.checkRingOuts(roomCode);
             for (const ringOut of ringOuts) {
-                io.to(roomCode).emit('arena-elimination', ringOut);
+                emitArenaElimination(roomCode, ringOut);
             }
             
             // Check for game over
@@ -1507,6 +1508,21 @@ function startArenaLoop(roomCode) {
 
     arenaLoops.set(roomCode, loop);
     console.log(`[Arena] Started arena loop for room ${roomCode}`);
+}
+
+/**
+ * Emit an Arena elimination with battle royal info: who did it and how many are left
+ */
+function emitArenaElimination(roomCode, data) {
+    io.to(roomCode).emit('arena-elimination', decorateArenaElimination(roomCode, data));
+}
+
+function decorateArenaElimination(roomCode, data) {
+    return {
+        ...data,
+        eliminatedByName: data.eliminatedBy ? arenaStateManager.playerName(roomCode, data.eliminatedBy) : null,
+        remaining: arenaStateManager.countAlive(roomCode)
+    };
 }
 
 /**

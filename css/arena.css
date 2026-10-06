@@ -821,3 +821,279 @@
         height: 7px;
     }
 }
+
+/* ==================================
+   Ropes, running strikes & battle royal (phase 3)
+   ================================== */
+
+/* Move popups: colour variants and an optional second line ("¡CONTRAATAQUE!" / "¡TENDEDERO!") */
+.arena-move-popup.with-sub {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.arena-move-popup .arena-move-sub {
+    margin-top: 2px;
+    font-size: 20px;
+}
+
+.arena-move-popup.lariat span {
+    text-shadow: 0 0 14px #ff8800, 0 0 26px #ff8800, 3px 3px 0 #000;
+}
+
+.arena-move-popup.dropkick span {
+    text-shadow: 0 0 14px #33ccff, 0 0 26px #33ccff, 3px 3px 0 #000;
+}
+
+.arena-move-popup.counter .arena-move-main {
+    color: #ffcc00;
+    text-shadow: 0 0 16px #ff3366, 0 0 30px #ff8800, 3px 3px 0 #000;
+}
+
+.arena-move-popup.counter .arena-move-sub {
+    color: #fff;
+    text-shadow: 0 0 12px #ff8800, 2px 2px 0 #000;
+}
+
+.arena-move-popup.whip span {
+    font-size: 18px;
+    color: #00ffcc;
+    text-shadow: 0 0 10px rgba(0, 255, 204, 0.8), 2px 2px 0 #000;
+}
+
+/* Battle royal panel (top right): "QUEDAN N" + elimination feed */
+#arena-br-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 12;
+    width: min(270px, 40vw);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    pointer-events: none;
+    user-select: none;
+    font-family: 'Orbitron', sans-serif;
+}
+
+/* Below the tournament HUD when a tournament is running */
+#tournament-hud:not(.hidden) ~ #arena-br-panel {
+    top: 160px;
+}
+
+#arena-remaining {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.75);
+    border: 2px solid #ffcc00;
+    border-radius: 10px;
+    box-shadow: 0 0 14px rgba(255, 204, 0, 0.35);
+}
+
+#arena-remaining.hidden {
+    display: none;
+}
+
+.arena-remaining-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.arena-remaining-count {
+    font-size: 1.6rem;
+    font-weight: 900;
+    line-height: 1;
+    color: #ffcc00;
+    text-shadow: 0 0 10px rgba(255, 204, 0, 0.7);
+}
+
+#arena-remaining.final {
+    border-color: #ff3366;
+    box-shadow: 0 0 18px rgba(255, 51, 102, 0.6);
+}
+
+#arena-remaining.final .arena-remaining-count {
+    color: #ff3366;
+    text-shadow: 0 0 12px rgba(255, 51, 102, 0.9);
+}
+
+#arena-remaining.bump {
+    animation: remaining-bump 0.5s ease-out;
+}
+
+@keyframes remaining-bump {
+    0% { transform: scale(1.35); }
+    100% { transform: scale(1); }
+}
+
+#arena-elim-feed {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.arena-feed-entry {
+    max-width: 100%;
+    padding: 4px 10px 4px 22px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.85);
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.8) 22%);
+    border-right: 3px solid #ff3366;
+    border-radius: 4px;
+    overflow-wrap: anywhere;
+    animation: feed-in 0.35s ease-out;
+    transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.arena-feed-entry.fading {
+    opacity: 0;
+    transform: translateX(20px);
+}
+
+.arena-feed-name {
+    font-weight: 900;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+.arena-feed-text {
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.arena-feed-sep {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.arena-feed-reason {
+    font-weight: 900;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    color: #ff3366;
+}
+
+@keyframes feed-in {
+    from { opacity: 0; transform: translateX(30px); }
+    to { opacity: 1; transform: none; }
+}
+
+/* "¡ÚLTIMOS DOS!" */
+.arena-br-banner {
+    position: absolute;
+    top: 30%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 56;
+    pointer-events: none;
+    user-select: none;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(2.2rem, 8vw, 5rem);
+    font-weight: 900;
+    white-space: nowrap;
+    color: #fff;
+    -webkit-text-stroke: 2px #000;
+    text-shadow: 0 0 24px #ff3366, 0 0 48px #ffcc00, 5px 5px 0 #000;
+    animation: br-banner 2.4s ease-out forwards;
+}
+
+@keyframes br-banner {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(2.5) rotate(-4deg); }
+    15% { opacity: 1; transform: translate(-50%, -50%) scale(0.95) rotate(-4deg); }
+    25% { transform: translate(-50%, -50%) scale(1) rotate(-3deg); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -60%) scale(1) rotate(-3deg); }
+}
+
+/* 5-8 players: compact cards (ArenaHUD.updateLayout) so they fit and stay readable */
+#arena-player-huds.compact {
+    gap: 8px;
+    padding: 0 8px;
+}
+
+#arena-player-huds.compact .arena-player-hud {
+    min-width: 118px;
+    max-width: 152px;
+    flex: 1 1 118px;
+    padding: 6px 8px;
+    border-radius: 10px;
+}
+
+#arena-player-huds.compact .arena-hud-header {
+    gap: 5px;
+    margin-bottom: 4px;
+}
+
+#arena-player-huds.compact .arena-player-badge {
+    width: 22px;
+    height: 22px;
+    font-size: 0.6rem;
+}
+
+#arena-player-huds.compact .arena-player-name {
+    font-size: 0.68rem;
+}
+
+#arena-player-huds.compact .arena-health-label,
+#arena-player-huds.compact .arena-stamina-label,
+#arena-player-huds.compact .arena-spirit-label {
+    font-size: 0.55rem;
+    margin-bottom: 2px;
+}
+
+#arena-player-huds.compact .arena-health-container {
+    margin-bottom: 4px;
+}
+
+#arena-player-huds.compact .arena-health-bar {
+    height: 10px;
+}
+
+#arena-player-huds.compact .arena-stamina-bar,
+#arena-player-huds.compact .arena-spirit-bar {
+    height: 6px;
+}
+
+#arena-player-huds.compact .arena-spirit-container {
+    margin-top: 4px;
+}
+
+#arena-player-huds.compact .arena-spirit-container.special .arena-spirit-bar {
+    height: 8px;
+}
+
+#arena-player-huds.compact .eliminated-overlay {
+    font-size: 0.7rem !important;
+}
+
+#arena-player-huds.compact .arena-status-indicator {
+    font-size: 0.65rem;
+    padding: 3px 8px;
+}
+
+/* Wide screens: the compact card row leaves the top-right corner to the battle royal panel */
+@media (min-width: 1000px) {
+    #arena-player-huds.compact {
+        right: 290px;
+    }
+}
+
+/* Narrow screens: battle royal panel in the bottom-right corner instead */
+@media (max-width: 999px) {
+    #arena-br-panel,
+    #tournament-hud:not(.hidden) ~ #arena-br-panel {
+        top: auto;
+        bottom: 110px;
+        right: 10px;
+        width: min(240px, 60vw);
+    }
+}

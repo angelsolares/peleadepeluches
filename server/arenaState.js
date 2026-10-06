@@ -85,6 +85,22 @@ const ARENA_CONFIG = {
     }
 };
 
+// ---- Ropes, running strikes & battle royal (phase 3) ----
+const ROPE_CONFIG = {
+    RUNNING_MIN_SPEED: 7,       // Horizontal speed that counts as running (walk ~5, run ~8.5)
+    WHIP_SPEED: 9,              // Irish whip: the defender runs at this speed toward the ropes
+    WHIP_STAMINA: 15,
+    WHIP_BACK_DURATION: 1100,   // ms the defender keeps running back after the rebound
+    WHIP_MAX_OUT: 2500,         // Safety: whip ends if no rope was reached
+    ROPE_RUN_SPEED: 11,         // Running into the ropes yourself bounces you back faster
+    ROPE_RUN_DURATION: 700,
+    LAST_ATTACKER_WINDOW: 6000, // A ring-out within this time is credited to the last attacker
+    STRIKES: {
+        lariat:   { damage: 14, stamina: 22, range: 1.8, down: 2500, spirit: 9 },
+        dropkick: { damage: 16, stamina: 28, range: 1.9, down: 2500, spirit: 10, selfDown: 800 }
+    }
+};
+
 // ---- Spirit meter & finishers (phase 2) ----
 const SPIRIT_CONFIG = {
     MAX: 100,
@@ -200,6 +216,12 @@ class ArenaStateManager {
             spirit: 0,
             specialUntil: 0,    // > now while SPECIAL (finisher available)
             pendingDown: 0,     // ms to stay down when a launched player lands (superkick)
+            whip: null,         // { dx, dz, phase: 'out'|'back', startedAt, backUntil, attackerId }
+            ropeRunUntil: 0,    // > now while bouncing back off the ropes at speed
+            ropeDir: null,
+            selfDownAt: 0,      // Dropkick: the attacker lands on their back
+            lastAttackerId: null,
+            lastAttackedAt: 0,
                         
             // Position (3D) - positioned around the ring
             position: { x: initialX, y: ARENA_CONFIG.RING_HEIGHT, z: initialZ },
@@ -265,6 +287,7 @@ class ArenaStateManager {
         // and a fixed 1/60 step would slow the whole match down
         const delta = Math.min(0.05, Math.max(0.001, (now - (arenaState.lastTickAt || (now - 1000 / 60))) / 1000));
         arenaState.lastTickAt = now;
+        this._tickArena = arenaState; // used by checkRingBoundaries to queue rope events
         // Per-tick factors (friction) were tuned at 60 FPS: scale them to the real step
         this.frameScale = delta * 60;
         const room = this.lobbyManager.rooms.get(roomCode);
@@ -327,12 +350,23 @@ class ArenaStateManager {
             // so knockback and throws actually move them. They just can't steer.
             if (!playerState.isGrabbed) {
                 const locked = this.isLocked(playerState);
-                if (locked) {
+                if (playerState.whip) {
+                    // Irish whip: forced run toward (and back from) the ropes
+                    playerState.velocity.x = playerState.whip.dx * ROPE_CONFIG.WHIP_SPEED;
+                    playerState.velocity.z = playerState.whip.dz * ROPE_CONFIG.WHIP_SPEED;
+                    playerState.facingAngle = Math.atan2(playerState.whip.dx, playerState.whip.dz);
+                } else if (playerState.ropeRunUntil > now && playerState.ropeDir) {
+                    // Bouncing back off the ropes at speed
+                    playerState.velocity.x = playerState.ropeDir.x * ROPE_CONFIG.ROPE_RUN_SPEED;
+                    playerState.velocity.z = playerState.ropeDir.z * ROPE_CONFIG.ROPE_RUN_SPEED;
+                    playerState.facingAngle = Math.atan2(playerState.ropeDir.x, playerState.ropeDir.z);
+                } else if (locked) {
                     // Grapples, downs and pins hold players in place
                     playerState.velocity.x = 0;
                     playerState.velocity.z = 0;
                 }
-                const canControl = !playerState.isStunned && !playerState.isBeingThrown && !locked;
+                const ropeRunning = playerState.ropeRunUntil > now;
+                const canControl = !playerState.isStunned && !playerState.isBeingThrown && !locked && !ropeRunning;
                 this.processPlayerMovement(playerState, delta, canControl);
             }
 
@@ -492,7 +526,7 @@ class ArenaStateManager {
         const radius = ARENA_CONFIG.COLLISION_RADIUS;
         const active = players.filter(p =>
             !p.isEliminated && !p.isGrabbed && !p.isBeingThrown && !p.isStunned &&
-            !p.move && !p.isDown && !p.pin && !p.tieUp &&
+            !p.move && !p.isDown && !p.pin && !p.tieUp && !p.whip && !(p.ropeRunUntil > Date.now()) &&
             p.position.y <= ARENA_CONFIG.RING_HEIGHT + 0.3
         );
 
@@ -577,6 +611,56 @@ class ArenaStateManager {
         // Ropes only stop players crossing them from the inside.
         // Someone already outside (e.g. thrown onto the apron) isn't pulled back into the ring.
         const prev = prevPos || playerState.position;
+        const crossX = Math.abs(prev.x) <= ringHalf && Math.abs(playerState.position.x) > ringHalf;
+        const crossZ = Math.abs(prev.z) <= ringHalf && Math.abs(playerState.position.z) > ringHalf;
+        const arenaState = this._tickArena;
+
+        // Irish whip: rebound off the ropes and run back
+        if (playerState.whip && (crossX || crossZ)) {
+            if (crossX) { playerState.position.x = Math.sign(playerState.position.x) * ringHalf; playerState.whip.dx *= -1; }
+            if (crossZ) { playerState.position.z = Math.sign(playerState.position.z) * ringHalf; playerState.whip.dz *= -1; }
+            if (playerState.whip.phase === 'out') {
+                playerState.whip.phase = 'back';
+                // Come back toward whoever whipped you (classic rebound into a lariat),
+                // running long enough to reach them
+                let backMs = ROPE_CONFIG.WHIP_BACK_DURATION;
+                const whipper = arenaState?.players.get(playerState.whip.attackerId);
+                if (whipper && !whipper.isEliminated) {
+                    const tx = whipper.position.x - playerState.position.x;
+                    const tz = whipper.position.z - playerState.position.z;
+                    const dist = Math.hypot(tx, tz);
+                    if (dist > 0.5) {
+                        playerState.whip.dx = tx / dist;
+                        playerState.whip.dz = tz / dist;
+                        const effectiveSpeed = ROPE_CONFIG.WHIP_SPEED * 0.85;
+                        backMs = Math.min(3000, Math.max(ROPE_CONFIG.WHIP_BACK_DURATION, (dist / effectiveSpeed) * 1000 + 450));
+                    }
+                }
+                playerState.whip.backUntil = Date.now() + backMs;
+                if (arenaState) this.pushEvent(arenaState, 'arena-rebound', { playerId: playerState.id });
+            }
+            playerState.velocity.x = playerState.whip.dx * ROPE_CONFIG.WHIP_SPEED;
+            playerState.velocity.z = playerState.whip.dz * ROPE_CONFIG.WHIP_SPEED;
+            return;
+        }
+
+        // Running into the ropes yourself: bounce back at speed (rope running)
+        const isRunning = !flying && speed > ROPE_CONFIG.RUNNING_MIN_SPEED * 0.8 &&
+            (playerState.input?.run || playerState.ropeRunUntil > Date.now()) &&
+            !playerState.isStunned && !this.isLocked(playerState) && !playerState.isGrabbing;
+        if (isRunning && (crossX || crossZ)) {
+            const dir = { x: playerState.velocity.x / speed, z: playerState.velocity.z / speed };
+            if (crossX) { playerState.position.x = Math.sign(playerState.position.x) * ringHalf; dir.x *= -1; }
+            if (crossZ) { playerState.position.z = Math.sign(playerState.position.z) * ringHalf; dir.z *= -1; }
+            playerState.ropeDir = dir;
+            playerState.ropeRunUntil = Date.now() + ROPE_CONFIG.ROPE_RUN_DURATION;
+            playerState.velocity.x = dir.x * ROPE_CONFIG.ROPE_RUN_SPEED;
+            playerState.velocity.z = dir.z * ROPE_CONFIG.ROPE_RUN_SPEED;
+            playerState.facingAngle = Math.atan2(dir.x, dir.z);
+            if (arenaState) this.pushEvent(arenaState, 'arena-rope-bounce', { playerId: playerState.id });
+            return;
+        }
+
         if (!flying) {
             if (Math.abs(prev.x) <= ringHalf && Math.abs(playerState.position.x) > ringHalf) {
                 playerState.position.x = Math.sign(playerState.position.x) * ringHalf;
@@ -626,6 +710,8 @@ class ArenaStateManager {
                         playerName: playerState.name,
                         playerNumber: playerState.number,
                         reason: 'ringout',
+                        eliminatedBy: (playerState.lastAttackerId && Date.now() - playerState.lastAttackedAt < ROPE_CONFIG.LAST_ATTACKER_WINDOW)
+                            ? playerState.lastAttackerId : null,
                         position: elimInfo.position
                     });
                 }
@@ -673,11 +759,19 @@ class ArenaStateManager {
             });
             if (downedNear && !standingNear) attackType = 'stomp';
         }
+
+        // Running (or bouncing off the ropes): PUNCH = lariat, KICK = dropkick
+        if (attackType === 'punch' || attackType === 'kick') {
+            const hSpeed = Math.hypot(playerState.velocity.x, playerState.velocity.z);
+            const running = (playerState.input?.run && hSpeed > ROPE_CONFIG.RUNNING_MIN_SPEED) || playerState.ropeRunUntil > now;
+            if (running) attackType = attackType === 'punch' ? 'lariat' : 'dropkick';
+        }
         
         // Check stamina
         const staminaCost = attackType === 'punch' ? ARENA_CONFIG.PUNCH_STAMINA :
                           attackType === 'kick' ? ARENA_CONFIG.KICK_STAMINA :
                           attackType === 'stomp' ? ARENA_CONFIG.STOMP_STAMINA :
+                          ROPE_CONFIG.STRIKES[attackType] ? ROPE_CONFIG.STRIKES[attackType].stamina :
                           ARENA_CONFIG.GRAB_STAMINA;
         
         if (playerState.stamina < staminaCost) {
@@ -688,6 +782,11 @@ class ArenaStateManager {
         playerState.stamina -= staminaCost;
         playerState.isAttacking = true;
         playerState.lastAttackTime = now;
+
+        // A dropkick puts the attacker on their back too (hit or miss)
+        if (attackType === 'dropkick') {
+            playerState.selfDownAt = now + ARENA_CONFIG.ACTIVE_FRAME_DELAY + 150;
+        }
         
         // Queue attack for active frame processing
         const attackInfo = {
@@ -748,13 +847,20 @@ class ArenaStateManager {
         if (!attacker || attacker.isEliminated) return null;
         
         const isStomp = attack.attackType === 'stomp';
+        const runningStrike = ROPE_CONFIG.STRIKES[attack.attackType] || null;
 
-        const range = attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_RANGE :
+        // Running strikes connect from where the attacker is now (they keep moving)
+        const origin = runningStrike ? attacker.position : attack.position;
+        const facing = runningStrike ? attacker.facingAngle : attack.facingAngle;
+
+        const range = runningStrike ? runningStrike.range :
+                     attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_RANGE :
                      attack.attackType === 'kick' ? ARENA_CONFIG.KICK_RANGE :
                      isStomp ? ARENA_CONFIG.STOMP_RANGE :
                      ARENA_CONFIG.GRAB_RANGE;
 
-        const damage = attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_DAMAGE :
+        const damage = runningStrike ? runningStrike.damage :
+                      attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_DAMAGE :
                       attack.attackType === 'kick' ? ARENA_CONFIG.KICK_DAMAGE :
                       isStomp ? ARENA_CONFIG.STOMP_DAMAGE : 0;
 
@@ -772,16 +878,23 @@ class ArenaStateManager {
             if (isStomp !== !!targetState.isDown) return;
             if (targetState.move || targetState.isGettingUp) return;
 
+            // A plain strike on someone coming back from the ropes becomes a lariat/dropkick
+            const rebounding = targetState.whip && targetState.whip.phase === 'back';
+            const strike = runningStrike || (rebounding && (attack.attackType === 'punch' || attack.attackType === 'kick')
+                ? ROPE_CONFIG.STRIKES[attack.attackType === 'punch' ? 'lariat' : 'dropkick'] : null);
+            const strikeName = strike === ROPE_CONFIG.STRIKES.lariat ? 'lariat' : strike ? 'dropkick' : null;
+            const reach = strike ? Math.max(range, strike.range) : range;
+
             // Calculate distance
-            const dx = targetState.position.x - attack.position.x;
-            const dz = targetState.position.z - attack.position.z;
+            const dx = targetState.position.x - origin.x;
+            const dz = targetState.position.z - origin.z;
             const distance = Math.sqrt(dx * dx + dz * dz);
 
             // Check if in range
-            if (distance <= range) {
+            if (distance <= reach) {
                 // Check if in attack arc (roughly 120 degrees in front; stomps hit all around)
                 const angleToTarget = Math.atan2(dx, dz);
-                let angleDiff = angleToTarget - attack.facingAngle;
+                let angleDiff = angleToTarget - facing;
 
                 // Normalize angle difference
                 while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -792,17 +905,30 @@ class ArenaStateManager {
                     if (targetState.tieUp) this.breakTieUp(arenaState, targetState, 'interrupted');
                     if (targetState.pin && targetState.pin.role === 'pinner') this.endPin(arenaState, targetState, 'interrupted');
                     // Hit!
-                    const blocked = targetState.isBlocking;
-                    const actualDamage = blocked ? damage * 0.2 : damage;
-                    const actualKnockback = blocked ? knockback * 0.3 : knockback;
-                    
+                    const blocked = targetState.isBlocking && !rebounding;
+                    const baseDamage = strike ? strike.damage : damage;
+                    const actualDamage = blocked ? baseDamage * 0.2 : baseDamage;
+                    const actualKnockback = strike ? 0 : (blocked ? knockback * 0.3 : knockback);
+
                     // Apply damage
                     targetState.health = Math.max(0, targetState.health - actualDamage);
+                    this.markAttacked(targetState, attacker.id);
 
                     // Spirit: the attacker gains, the target loses a little
                     if (!blocked) {
-                        this.addSpirit(arenaState, attacker, SPIRIT_CONFIG.GAIN[attack.attackType] || 0);
+                        this.addSpirit(arenaState, attacker, strike ? strike.spirit : (SPIRIT_CONFIG.GAIN[attack.attackType] || 0));
                         this.loseSpirit(targetState);
+                    }
+
+                    // Lariat / dropkick: knocked flat on the mat
+                    const knockdown = !!strike && !blocked;
+                    if (knockdown) {
+                        if (targetState.whip) this.endWhip(arenaState, targetState, 'hit');
+                        targetState.ropeRunUntil = 0;
+                        targetState.velocity.x = 0;
+                        targetState.velocity.z = 0;
+                        targetState.isDown = true;
+                        targetState.downUntil = Date.now() + strike.down;
                     }
                     
                     // Apply knockback (away from attacker)
@@ -810,8 +936,8 @@ class ArenaStateManager {
                     targetState.velocity.x += Math.sin(knockbackAngle) * actualKnockback;
                     targetState.velocity.z += Math.cos(knockbackAngle) * actualKnockback;
                     
-                    // Apply stun if not blocked (a stomped player is already on the mat)
-                    if (!blocked && !isStomp) {
+                    // Apply stun if not blocked (a stomped/knocked-down player is already on the mat)
+                    if (!blocked && !isStomp && !knockdown) {
                         targetState.isStunned = true;
                         targetState.stunEndTime = Date.now() + ARENA_CONFIG.STUN_DURATION;
                     }
@@ -825,6 +951,8 @@ class ArenaStateManager {
                         targetId,
                         damage: actualDamage,
                         blocked,
+                        knockdown,
+                        move: strikeName,
                         knockback: { x: Math.sin(knockbackAngle) * actualKnockback, z: Math.cos(knockbackAngle) * actualKnockback },
                         newHealth: targetState.health,
                         eliminated: targetState.isEliminated
@@ -881,6 +1009,10 @@ class ArenaStateManager {
 
         // GRAB while holding someone in a tie-up: lift them into the carry
         if (attacker.tieUp && attacker.tieUp.role === 'attacker') {
+            // With a stick direction: Irish whip into the ropes; without: lift into the carry
+            const input = attacker.input || {};
+            const dir = { x: (input.right ? 1 : 0) - (input.left ? 1 : 0), z: (input.down ? 1 : 0) - (input.up ? 1 : 0) };
+            if (dir.x || dir.z) return this.startWhip(arenaState, attacker, dir);
             return this.liftFromTieUp(arenaState, attacker);
         }
 
@@ -980,6 +1112,7 @@ class ArenaStateManager {
         // Apply throw damage and knockback
         target.health = Math.max(0, target.health - ARENA_CONFIG.THROW_DAMAGE);
         this.addSpirit(arenaState, attacker, SPIRIT_CONFIG.GAIN.throw);
+        this.markAttacked(target, attacker.id);
         this.loseSpirit(target);
         
         // 0 is a valid angle (straight "down"), so only fall back to facing when no number was sent
@@ -1318,6 +1451,12 @@ class ArenaStateManager {
             playerState.specialUntil = 0;
             playerState.pendingDown = 0;
             playerState.isTaunting = false;
+            playerState.whip = null;
+            playerState.ropeRunUntil = 0;
+            playerState.ropeDir = null;
+            playerState.selfDownAt = 0;
+            playerState.lastAttackerId = null;
+            playerState.lastAttackedAt = 0;
             playerState.tieUp = null;
             playerState.move = null;
             playerState.isDown = false;
@@ -1363,6 +1502,10 @@ class ArenaStateManager {
             isGrabbed: playerState.isGrabbed,
             isStunned: playerState.isStunned,
             isEliminated: playerState.isEliminated,
+
+            // Ropes
+            whip: playerState.whip ? { phase: playerState.whip.phase, attackerId: playerState.whip.attackerId } : null,
+            isRopeRunning: (playerState.ropeRunUntil || 0) > Date.now(),
 
             // Spirit & finisher
             spirit: Math.round(playerState.spirit || 0),
@@ -1497,6 +1640,7 @@ class ArenaStateManager {
         attacker.tieUp = null;
         defender.tieUp = null;
         if (defender.pin) this.endPin(arenaState, defender, 'interrupted');
+        this.markAttacked(defender, attacker.id);
         const base = { type: 'finisher', finisher: fin.type, startedAt: now, impactAt: now + cfg.impact, endAt: now + cfg.duration, impactDone: false, landing };
         attacker.move = { ...base, role: 'attacker', partnerId: defender.id };
         defender.move = { ...base, role: 'defender', partnerId: attacker.id };
@@ -1629,7 +1773,63 @@ class ArenaStateManager {
 
     /** Player can't move or act on their own */
     isLocked(p) {
-        return !!(p.tieUp || p.move || p.isDown || p.isGettingUp || p.pin);
+        return !!(p.tieUp || p.move || p.isDown || p.isGettingUp || p.pin || p.whip);
+    }
+
+    /** Remember who hit this player last (ring-outs get credited to them) */
+    markAttacked(target, attackerId) {
+        if (!target || !attackerId || target.id === attackerId) return;
+        target.lastAttackerId = attackerId;
+        target.lastAttackedAt = Date.now();
+    }
+
+    /** Alive players in a room (battle royal counter) */
+    countAlive(roomCode) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState) return 0;
+        let alive = 0;
+        arenaState.players.forEach(p => { if (!p.isEliminated) alive++; });
+        return alive;
+    }
+
+    playerName(roomCode, playerId) {
+        return this.arenaStates.get(roomCode)?.players.get(playerId)?.name || null;
+    }
+
+    // =====================================================================
+    // Ropes: Irish whip, rebounds, rope running
+    // =====================================================================
+
+    /** GRAB + stick in a tie-up: send the defender running into the ropes */
+    startWhip(arenaState, attacker, dir) {
+        const defender = arenaState.players.get(attacker.tieUp.partnerId);
+        if (!defender || attacker.stamina < ROPE_CONFIG.WHIP_STAMINA) return null;
+        attacker.stamina -= ROPE_CONFIG.WHIP_STAMINA;
+        attacker.tieUp = null;
+        defender.tieUp = null;
+
+        const len = Math.hypot(dir.x, dir.z) || 1;
+        const dx = dir.x / len, dz = dir.z / len;
+        defender.whip = { dx, dz, phase: 'out', startedAt: Date.now(), backUntil: 0, attackerId: attacker.id };
+        defender.facingAngle = Math.atan2(dx, dz);
+        defender.isBlocking = false;
+        defender.isTaunting = false;
+        attacker.facingAngle = Math.atan2(dx, dz);
+        this.markAttacked(defender, attacker.id);
+
+        const info = { mode: 'whip', attackerId: attacker.id, defenderId: defender.id, dir: { x: dx, z: dz } };
+        this.pushEvent(arenaState, 'arena-whip', info);
+        return info;
+    }
+
+    endWhip(arenaState, p, reason = 'done') {
+        if (!p.whip) return;
+        p.whip = null;
+        if (reason === 'done') {
+            p.isStunned = true;
+            p.stunEndTime = Date.now() + 250;
+        }
+        this.pushEvent(arenaState, 'arena-whip-end', { playerId: p.id, reason });
     }
 
     angleTo(from, to) {
@@ -1761,6 +1961,7 @@ class ArenaStateManager {
             });
         }
 
+        this.markAttacked(defender, attacker.id);
         const base = { type, startedAt: now, impactAt: now + cfg.impact, endAt: now + cfg.duration, impactDone: false, landing };
         attacker.tieUp = null;
         defender.tieUp = null;
@@ -1918,6 +2119,26 @@ class ArenaStateManager {
 
     /** Per-tick grappling timers for one player */
     updateGrappleTimers(arenaState, p, now) {
+        // Irish whip: comes back from the ropes for a moment, then recovers
+        if (p.whip) {
+            if (p.whip.phase === 'back' && now >= p.whip.backUntil) this.endWhip(arenaState, p, 'done');
+            else if (p.whip.phase === 'out' && now - p.whip.startedAt > ROPE_CONFIG.WHIP_MAX_OUT) this.endWhip(arenaState, p, 'done');
+        }
+        if (p.ropeRunUntil && now >= p.ropeRunUntil) {
+            p.ropeRunUntil = 0;
+            p.ropeDir = null;
+        }
+        // Dropkick: the attacker lands on their back
+        if (p.selfDownAt && now >= p.selfDownAt) {
+            p.selfDownAt = 0;
+            if (!p.isEliminated && !p.isDown) {
+                p.isDown = true;
+                p.downUntil = now + ROPE_CONFIG.STRIKES.dropkick.selfDown;
+                p.velocity.x = 0;
+                p.velocity.z = 0;
+            }
+        }
+
         // Tie-up timeout (handled once, from the attacker's side)
         if (p.tieUp && p.tieUp.role === 'attacker' && now >= p.tieUp.until) {
             this.breakTieUp(arenaState, p, 'timeout');
@@ -2003,6 +2224,9 @@ class ArenaStateManager {
         }
         p.isDown = false;
         p.isGettingUp = false;
+        p.whip = null;
+        p.ropeRunUntil = 0;
+        p.selfDownAt = 0;
     }
     
     /**

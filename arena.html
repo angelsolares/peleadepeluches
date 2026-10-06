@@ -28,6 +28,15 @@
                 </div>
             </div>
             
+            <!-- Battle royal (top right): "QUEDAN N" + elimination feed. Must follow #tournament-hud
+                 (arena.css moves it below the tournament HUD when that one is visible) -->
+            <div id="arena-br-panel" aria-live="polite">
+                <div id="arena-remaining" class="hidden">
+                    <span class="arena-remaining-label">QUEDAN</span><span class="arena-remaining-count">0</span>
+                </div>
+                <div id="arena-elim-feed"></div>
+            </div>
+
             <!-- Player HUD Bars (Health + Stamina) -->
             <div id="arena-player-huds">
                 <!-- Dynamic player HUDs will be inserted here -->

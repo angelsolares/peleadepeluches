@@ -217,6 +217,50 @@ const WRESTLE_CONFIG = {
     LANDING_HOLD_MS: 600         // Keep the landing spot until the server position catches up
 };
 
+// =================================
+// Ropes, running strikes & battle royal (phase 3)
+// =================================
+
+const ROPE_CONFIG = {
+    POST_INSET: 0.3,             // Ropes run between the corner posts (RING_SIZE / 2 - inset)
+    SEGMENTS: 40,                // Segments along each rope, so a contact can bend it
+    LEVEL_PUSH: [0.75, 1, 0.85], // Push per rope level (bottom, middle, top)
+    PUSH_MS: 90,                 // Rope stretched out by the body
+    SPRING_MS: 260,              // Period of the spring-back wobble
+    DAMP_MS: 210,                // Decay of the wobble
+    LIFE_MS: 1000,
+    WIDTH: 1.6,                  // Width (world units) of the pushed part of the rope
+    REBOUND_PUSH: 0.55,          // Whipped player hitting the ropes
+    BOUNCE_PUSH: 0.45,           // Player running into the ropes
+    LEAN_MS: 300,                // Player sinks into the ropes and is flung back
+    LEAN_ANGLE: 0.38,
+    LEAN_SINK: 0.35,
+    RUN_TIMESCALE: 1.35,         // Run clip speed while whipped
+    WHIP_FLING_MS: 520,          // Attacker's fling (throw clip)
+    SOUND_GUARD_MS: 400          // No generic rope "bonk" right after a rebound/bounce sound
+};
+
+const STRIKE_CONFIG = {
+    ACTIVE_FRAME_MS: 150,        // Server ACTIVE_FRAME_DELAY: when a running strike connects
+    LARIAT_SWING_MS: 560,
+    DROPKICK_MS: 700,            // Flying kick one-shot (the server lays the kicker down at ~300 ms)
+    DROPKICK_HOP: 0.45,
+    DROPKICK_HOP_MS: 320,
+    KNOCK_LARIAT_MS: 540,        // Victim turned inside out: legs fly up past flat, back on the mat
+    KNOCK_LARIAT_OVER: 0.6,
+    KNOCK_LARIAT_HEIGHT: 0.55,
+    KNOCK_DROPKICK_MS: 420,      // Victim knocked straight back
+    KNOCK_DROPKICK_HEIGHT: 0.3,
+    KNOCK_SELF_MS: 260,          // Dropkicker drops onto their back
+    SELF_FALL_WINDOW_MS: 1500
+};
+
+const STRIKE_NAMES = { lariat: '¡TENDEDERO!', dropkick: '¡DROPKICK!' };
+const STRIKE_COLORS = { lariat: 0xff8800, dropkick: 0x33ccff };
+
+// Battle royal elimination feed
+const ELIMINATION_REASONS = { ringout: 'RING-OUT', knockout: 'KO', pinfall: 'CUENTA DE 3', disconnect: 'ABANDONO' };
+
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
 const IDENTITY_QUAT = new THREE.Quaternion();
 // Tips an upright model onto its back (head towards local -Z): only used if the lying clip doesn't lie down
@@ -252,6 +296,18 @@ function easeInOut(t) {
 
 function easeOut(t) {
     return 1 - (1 - t) * (1 - t);
+}
+
+/**
+ * Rope displacement over time for one contact (1 = fully pushed out): stretched out by the
+ * body, then springs back with a damped wobble
+ */
+function ropeImpulseAmp(t) {
+    if (t < 0) return 0;
+    const push = ROPE_CONFIG.PUSH_MS;
+    if (t < push) return easeOut(t / push);
+    const k = t - push;
+    return Math.exp(-k / ROPE_CONFIG.DAMP_MS) * Math.cos((2 * Math.PI * k) / ROPE_CONFIG.SPRING_MS);
 }
 
 // =================================
@@ -297,6 +353,14 @@ class ArenaPlayerEntity {
         this.launch = null;       // Superkick victim: tips back flat while the server flies them
         this.bounce = null;       // Splash victim: short jolt on the mat
         this.celebrating = false; // Match winner: victory clip, grapple sync ignored
+
+        // Ropes & running strikes (phase 3)
+        this.knock = null;        // Lariat/dropkick: procedural tip from upright onto the back
+        this.hop = null;          // Dropkick: small vertical hop
+        this.ropeLean = null;     // Sinking into the ropes on a rebound
+        this.leanApplied = false; // The lean tilted the model this frame (undone next frame)
+        this.leanBaseYaw = 0;
+        this.selfFallUntil = 0;   // Dropkicker: the next isDown is them landing on their back
 
         // Arena-specific controller (360 movement)
         this.controller = new ArenaPlayerController(id, number, color);
@@ -549,6 +613,25 @@ class ArenaPlayerEntity {
         const now = performance.now();
         this.timedAnim = { name, start: now, until: now + ms, yaw, cancelOnMove };
         return true;
+    }
+
+    /**
+     * Timed one-shot (see playTimed) where clip time `keySec` (a kick connecting) is shown
+     * `keyMs` from now. Unlike playSynced it isn't a grapple lock, so the arena-state sync
+     * doesn't cancel it while the player keeps running.
+     */
+    playTimedSynced(name, keySec, keyMs, ms, maxTimeScale = FINISHER_CONFIG.KICK_MAX_TIMESCALE) {
+        if (!this.animController.actions[name]) return false;
+        const duration = this.clipDuration(name);
+        const key = Math.max(0, Math.min(Number.isFinite(keySec) ? keySec : duration * 0.5, duration));
+        const keyS = Math.max(0.05, keyMs / 1000);
+        let timeScale = key > 0.01 ? key / keyS : 1;
+        let from = 0;
+        if (timeScale > maxTimeScale) {
+            timeScale = maxTimeScale;
+            from = key - timeScale * keyS;
+        }
+        return this.playTimed(name, ms, { cancelOnMove: false, timeScale, from });
     }
 
     /**
@@ -959,6 +1042,135 @@ class ArenaPlayerEntity {
     }
 
     /**
+     * Running strike knockdown (lariat / dropkick victim, or the dropkicker landing): the body
+     * plays the lying clip and is tipped from upright onto its back at the server position,
+     * head towards `angle`. Ends lying ('down' lock), like a superkick landing.
+     * @param {object} opts
+     * @param {number} opts.angle - World direction of the head once on the mat
+     * @param {'lariat'|'dropkick'|'self'} opts.style
+     * @param {Function} [opts.onLand] - Called when the back hits the mat
+     */
+    startKnockdown({ angle, style = 'dropkick', onLand = null }) {
+        const lie = this.getLieInfo();
+        const yaw = angle - lie.alpha;
+        const qFinal = new THREE.Quaternion().setFromAxisAngle(UP_AXIS, yaw).multiply(lie.local);
+        const ms = style === 'lariat' ? STRIKE_CONFIG.KNOCK_LARIAT_MS
+            : style === 'self' ? STRIKE_CONFIG.KNOCK_SELF_MS
+            : STRIKE_CONFIG.KNOCK_DROPKICK_MS;
+        this.flight = null;
+        this.launch = null;
+        this.hop = null;
+        this.ropeLean = null;
+        this.selfFallUntil = 0;
+        this.knock = {
+            style,
+            yaw,
+            qFinal,
+            axis: new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle)), // up x head direction
+            points: lie.points,
+            minYFinal: minPointY(qFinal, lie.points),
+            start: performance.now(),
+            ms,
+            onLand
+        };
+        this.poseYaw = yaw;
+        this.setLock('down', { loop: true, fade: 0.1 });
+    }
+
+    /**
+     * @returns {boolean} True while the knockdown drives the model transform
+     */
+    updateKnock(now) {
+        const k = this.knock;
+        if (!k) return false;
+
+        const t = now - k.start;
+        if (t >= k.ms) {
+            this.knock = null;
+            this.poseYaw = k.yaw;
+            k.onLand?.(this);
+            return false;
+        }
+
+        // Position from the server (or a landing hold); the rotation is replaced below
+        this.updateModelTransform(now);
+
+        // rot: 0 = flat on the back, -PI/2 = upright, > 0 = past flat (legs up)
+        const PI = Math.PI;
+        const s = t / k.ms;
+        let rot;
+        let height;
+        if (k.style === 'lariat') {
+            const over = STRIKE_CONFIG.KNOCK_LARIAT_OVER;
+            const turn = 0.62;
+            rot = s < turn
+                ? -PI / 2 + (PI / 2 + over) * easeOut(s / turn)
+                : over * (1 - easeInOut((s - turn) / (1 - turn)));
+            height = STRIKE_CONFIG.KNOCK_LARIAT_HEIGHT * Math.sin(PI * Math.min(1, s / 0.8));
+        } else if (k.style === 'self') {
+            rot = -PI / 2 * (1 - easeOut(s));
+            height = STRIKE_CONFIG.DROPKICK_HOP * 0.8 * (1 - s * s);
+        } else {
+            rot = -PI / 2 * (1 - s * s);
+            height = STRIKE_CONFIG.KNOCK_DROPKICK_HEIGHT * Math.sin(PI * s);
+        }
+
+        _qAxis.setFromAxisAngle(k.axis, rot);
+        _qPose.copy(_qAxis).multiply(k.qFinal);
+        this.model.position.y += height + (k.minYFinal - minPointY(_qPose, k.points));
+        this.model.quaternion.copy(_qPose);
+        return true;
+    }
+
+    /**
+     * Small vertical hop on top of the server position (dropkick takeoff)
+     */
+    startHop(height, ms) {
+        this.hop = { start: performance.now(), height, ms };
+    }
+
+    applyHop(now) {
+        const hop = this.hop;
+        if (!hop) return;
+        const s = (now - hop.start) / hop.ms;
+        if (s >= 1) {
+            this.hop = null;
+            return;
+        }
+        this.model.position.y += hop.height * Math.sin(Math.PI * s);
+    }
+
+    /**
+     * Sink into the ropes and get flung back: the body tilts (top towards `normal`, out of
+     * the ring) and moves a little into the ropes
+     * @param {THREE.Vector3} normal - Horizontal unit vector pointing out of the ring
+     */
+    startRopeLean(normal) {
+        this.ropeLean = {
+            start: performance.now(),
+            normal: normal.clone(),
+            axis: new THREE.Vector3().crossVectors(UP_AXIS, normal).normalize()
+        };
+    }
+
+    applyRopeLean(now) {
+        const lean = this.ropeLean;
+        if (!lean) return;
+        const s = (now - lean.start) / ROPE_CONFIG.LEAN_MS;
+        if (s >= 1 || this.lockAnim === 'down' || this.poseYaw !== null) {
+            this.ropeLean = null;
+            return;
+        }
+        // Fast in, slower out
+        const k = Math.sin(Math.PI * Math.pow(s, 0.6));
+        this.leanBaseYaw = this.model.rotation.y;
+        _qAxis.setFromAxisAngle(lean.axis, ROPE_CONFIG.LEAN_ANGLE * k);
+        this.model.quaternion.premultiply(_qAxis);
+        this.model.position.addScaledVector(lean.normal, ROPE_CONFIG.LEAN_SINK * k);
+        this.leanApplied = true;
+    }
+
+    /**
      * Drop every grapple visual (new round / rematch)
      */
     resetWrestleVisuals() {
@@ -973,6 +1185,11 @@ class ArenaPlayerEntity {
         this.launch = null;
         this.bounce = null;
         this.celebrating = false;
+        this.knock = null;
+        this.hop = null;
+        this.ropeLean = null;
+        this.leanApplied = false;
+        this.selfFallUntil = 0;
     }
 
     /**
@@ -1040,7 +1257,9 @@ class ArenaPlayerEntity {
      */
     updateLocomotion(isMoving) {
         const ac = this.animController;
-        const isRunning = isMoving && this.controller.input.run;
+        const c = this.controller;
+        // Players bouncing off the ropes or whipped run even without the run button
+        const isRunning = isMoving && (c.input.run || c.isRopeRunning || !!c.whip);
 
         // No guard-stance clip: keep the original behaviour
         if (!ac.actions.idle) {
@@ -1068,11 +1287,19 @@ class ArenaPlayerEntity {
         this.controller.update(delta);
         const isMoving = this.controller.velocity.length() > 0.5;
 
-        // Procedural motion (slam/suplex/finisher flight, superkick launch, splash leap) owns
-        // the transform; otherwise follow the controller
-        if (!this.updateFlight(now) && !this.updateLaunch(now) && !this.updateLeap(now)) {
+        // Undo last frame's rope lean before anything reads the yaw
+        if (this.leanApplied) {
+            this.model.rotation.set(0, this.leanBaseYaw, 0);
+            this.leanApplied = false;
+        }
+
+        // Procedural motion (slam/suplex/finisher flight, superkick launch, splash leap,
+        // lariat/dropkick knockdown) owns the transform; otherwise follow the controller
+        if (!this.updateFlight(now) && !this.updateLaunch(now) && !this.updateLeap(now) && !this.updateKnock(now)) {
             this.updateModelTransform(now);
             this.applyBounce(now);
+            this.applyHop(now);
+            this.applyRopeLean(now);
         }
 
         // Animation priority: grapple lock > timed one-shot > locomotion
@@ -1145,6 +1372,12 @@ class ArenaGame {
         this.specialAuras = new Map();     // playerId -> glowing aura while SPECIAL
         this.finisherCam = null;           // Camera punch-in during a finisher
         this.finisherTimers = new Set();   // Cinematic/impact timers (cleared on reset)
+
+        // Ropes & battle royal (phase 3)
+        this.ropes = [];                   // Bendable rope meshes (see pushRopesAt / updateRopes)
+        this.matchStartCount = 0;          // Players at the start of the match
+        this.feedEliminated = new Set();   // Eliminations already in the feed (no duplicates)
+        this.lastTwoShown = false;
 
         // Networking
         this.socket = null;
@@ -1433,6 +1666,8 @@ class ArenaGame {
         });
         
         // === ROPES ===
+        // Segmented along their length so rebounds can bend them (pushRopesAt / updateRopes)
+        this.ropes = [];
         const ropeLevels = [0.4, 0.7, 1.0].map(h => h * ropeHeight + ringHeight);
         const ropeColors = [0xffffff, 0xff3366, 0xffcc00];
         
@@ -1455,17 +1690,31 @@ class ArenaGame {
                         : side.end[1] - side.start[1]
                 );
                 
-                const ropeGeometry = new THREE.CylinderGeometry(0.04, 0.04, length, 8);
+                const ropeGeometry = new THREE.CylinderGeometry(0.04, 0.04, length, 8, ROPE_CONFIG.SEGMENTS);
                 ropeGeometry.rotateZ(Math.PI / 2);
                 if (side.axis === 'z') ropeGeometry.rotateY(Math.PI / 2);
-                
+
                 const rope = new THREE.Mesh(ropeGeometry, ropeMaterial);
                 rope.position.set(
                     (side.start[0] + side.end[0]) / 2,
                     y,
                     (side.start[1] + side.end[1]) / 2
                 );
+                rope.frustumCulled = false; // The bent rope leaves its original bounds
                 this.scene.add(rope);
+
+                // Ropes along X sit at z = +-edge, ropes along Z at x = +-edge. The mesh isn't
+                // rotated, so local vertex coordinates line up with the world axes.
+                this.ropes.push({
+                    mesh: rope,
+                    axis: side.axis,
+                    fixed: side.axis === 'x' ? rope.position.z : rope.position.x,
+                    level: levelIndex,
+                    length,
+                    base: Float32Array.from(ropeGeometry.attributes.position.array),
+                    impulses: [],
+                    dirty: false
+                });
             });
         });
         
@@ -1722,6 +1971,8 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             if (base.hit) this.sharedGrappleClips.hitReact = base.hit.clone();     // Headbutt/knee victim
             if (base.fall) this.sharedGrappleClips.ko = base.fall.clone();         // Eliminated: fall and stay down
             if (base.taunt) this.sharedGrappleClips.tauntDance = base.taunt.clone(); // Hip-hop taunt (timed)
+            if (base.run) this.sharedGrappleClips.ropeRun = base.run.clone();       // Whipped into the ropes
+            if (base.punch) this.sharedGrappleClips.lariatSwing = base.punch.clone(); // Lariat (timed)
         }
         return this.sharedGrappleClips;
     }
@@ -2181,6 +2432,12 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         this.socket.on('arena-special-end', (data) => this.handleArenaSpecialEnd(data));
         this.socket.on('arena-finisher', (data) => this.handleArenaFinisher(data));
 
+        // Ropes: Irish whip, rebounds, rope running
+        this.socket.on('arena-whip', (data) => this.handleArenaWhip(data));
+        this.socket.on('arena-rebound', (data) => this.handleArenaRebound(data));
+        this.socket.on('arena-whip-end', (data) => this.handleArenaWhipEnd(data));
+        this.socket.on('arena-rope-bounce', (data) => this.handleArenaRopeBounce(data));
+
         // Tournament events - listen for round transitions
         this.socket.on('round-starting', (data) => {
             console.log('[Arena] Round starting:', data);
@@ -2418,6 +2675,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
                 this.addPlayer(playerData, index, total);
             }
         });
+
+        // Battle royal: fresh feed, "QUEDAN N" from 3 players up
+        this.startBattleRoyal(total);
     }
     
     handlePlayerInput(data) {
@@ -2486,6 +2746,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
     handleArenaAttackStarted(data) {
         console.log('[Arena] Attack started:', data);
         const player = this.players.get(data.attackerId);
+        if (player && (data.attackType === 'lariat' || data.attackType === 'dropkick')) {
+            this.playRunningStrike(player, data.attackType);
+            return;
+        }
         if (player && data.attackType === 'stomp') {
             // Strike on a downed opponent
             player.playTimed('stomp', WRESTLE_CONFIG.STOMP_MS);
@@ -2527,7 +2791,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             for (const hit of data.hits) {
                 const target = this.players.get(hit.targetId);
                 
-                if (target && !target.controller.isEliminated) {
+                if (target && !target.controller.isEliminated && hit.knockdown && !hit.blocked) {
+                    // Lariat / dropkick (or a plain strike countering a rebound): flat on the mat
+                    this.playStrikeKnockdown(attacker, target, hit, data);
+                } else if (target && !target.controller.isEliminated) {
                     // A clean hit breaks a tie-up or knocks a pinner off the cover
                     if (!hit.blocked && (target.lockAnim === 'tieup' || target.lockAnim === 'kneel')) {
                         target.clearLock();
@@ -2838,7 +3105,10 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
     handleArenaElimination(data) {
         console.log('[Arena] Elimination event received:', data);
         const player = this.players.get(data.playerId);
-        
+
+        // Battle royal feed + "QUEDAN N" counter
+        this.recordElimination(data, player);
+
         if (player) {
             console.log(`[Arena] Marking ${data.playerName} as eliminated`);
             
@@ -2855,11 +3125,14 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             // No more SPECIAL for them
             this.removeSpecialAura(data.playerId);
             player.leap = null;
+            player.hop = null;
+            player.ropeLean = null;
+            player.selfFallUntil = 0;
 
-            // Already on the mat (pinned, stomped, mid slam/suplex/finisher, superkicked):
-            // stay lying down. Otherwise fall and stay down (the plain 'fall' one-shot used to
-            // pop back to idle).
-            const midAir = player.flight || player.launch;
+            // Already on the mat (pinned, stomped, mid slam/suplex/finisher, superkicked,
+            // lariat/dropkick): stay lying down. Otherwise fall and stay down (the plain 'fall'
+            // one-shot used to pop back to idle).
+            const midAir = player.flight || player.launch || player.knock;
             const onTheMat = midAir || player.lockAnim === 'down' || data.reason === 'pinfall';
             if (onTheMat) {
                 if (!midAir) player.enterDown();
@@ -2999,6 +3272,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
     showVictoryScreen(winner) {
         // Game is over
         this.gameState = 'finished';
+
+        // The "QUEDAN N" counter has done its job
+        this.hud?.setRemaining?.(null);
 
         // Play victory animation (Mixamo celebration, looped)
         if (winner?.player) this.playVictory(winner.player);
@@ -3360,6 +3636,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         document.getElementById('room-code-overlay')?.classList.add('hidden');
         document.querySelectorAll('.elimination-announcement, .grab-indicator').forEach(el => el.remove());
         this.clearGrappleOverlays();
+        this.clearRopeWobble();
         this.setRematchButtonsPending(false);
 
         if (data.rematch) {
@@ -3381,6 +3658,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             this.resetPlayerVisuals(player, getSpawnPosition(index, total));
             this.hud?.resetPlayer?.(player.id);
         });
+
+        // Battle royal: empty feed, counter back to full ('game-started' re-syncs it)
+        this.startBattleRoyal(total);
 
         // Show round announcement
         this.showRoundAnnouncement(data.rematch ? '¡REVANCHA!' : `¡RONDA ${data.round}!`);
@@ -3618,7 +3898,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
      */
     syncGrappleVisuals(player) {
         const c = player.controller;
-        if (c.isEliminated || player.flight || player.launch || player.leap || player.celebrating) return;
+        if (c.isEliminated || player.flight || player.launch || player.leap || player.knock || player.celebrating) return;
         if (!c.move) player.moveVisual = null;
 
         if (c.pin) {
@@ -3628,7 +3908,16 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
                 player.enterDown();
             }
         } else if (c.isDown) {
-            player.enterDown();
+            if (player.selfFallUntil > performance.now() && player.lockAnim !== 'down') {
+                // Dropkick: the kicker drops onto their back (head away from the kick)
+                player.startKnockdown({
+                    angle: player.model.rotation.y + Math.PI,
+                    style: 'self',
+                    onLand: (p) => this.playKnockLanding(p, 0.6)
+                });
+            } else {
+                player.enterDown();
+            }
         } else if (c.isGettingUp) {
             player.enterGetUp();
         } else if (c.move) {
@@ -3643,6 +3932,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
                     player.setLock('tieup', { loop: true });
                 }
             }
+        } else if (c.whip) {
+            // Irish whip: forced run into the ropes and back (facing follows the server)
+            player.setLock('ropeRun', { loop: true, fade: 0.12, timeScale: ROPE_CONFIG.RUN_TIMESCALE });
         } else if (c.tieUp) {
             player.setLock('tieup', { loop: true, fade: 0.15 });
         } else if (player.lockAnim && player.lockAnim !== 'ko') {
@@ -3822,7 +4114,8 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
     handleArenaGetUp(data) {
         const player = this.players.get(data.playerId);
-        if (!player || player.controller.isEliminated || player.flight || player.launch) return;
+        // Mid knockdown: the arena-state sync starts the get-up once the back is on the mat
+        if (!player || player.controller.isEliminated || player.flight || player.launch || player.knock) return;
         player.enterGetUp();
     }
 
@@ -3948,6 +4241,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         player.launch = null;
         player.leap = null;
         player.bounce = null;
+        player.knock = null;
+        player.hop = null;
+        player.ropeLean = null;
         player.clearLock();
         player.timedAnim = null;
         player.poseYaw = null;
@@ -4687,13 +4983,27 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
     /**
      * Big move name over the impact point ("¡SUPLEX!")
+     * @param {string} text
+     * @param {THREE.Vector3} worldPos
+     * @param {object} [opts]
+     * @param {string} [opts.sub] - Second, smaller line ("¡CONTRAATAQUE!" + "¡TENDEDERO!")
+     * @param {string} [opts.variant] - Extra class for the colour ('lariat', 'dropkick', 'counter', 'whip')
      */
-    showMovePopup(text, worldPos) {
+    showMovePopup(text, worldPos, { sub = null, variant = null } = {}) {
         const el = document.createElement('div');
         el.className = 'arena-move-popup';
+        if (variant) el.classList.add(variant);
         const inner = document.createElement('span');
+        inner.className = 'arena-move-main';
         inner.textContent = text;
         el.appendChild(inner);
+        if (sub) {
+            el.classList.add('with-sub');
+            const subEl = document.createElement('span');
+            subEl.className = 'arena-move-sub';
+            subEl.textContent = sub;
+            el.appendChild(subEl);
+        }
 
         const label = new CSS2DObject(el);
         label.position.copy(worldPos);
@@ -4772,6 +5082,368 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         }
     }
     
+    // =================================
+    // Ropes, running strikes & battle royal (phase 3)
+    // =================================
+
+    /**
+     * Irish whip: the attacker flings, the defender runs into the ropes
+     * (the run itself follows the server whip state, see syncGrappleVisuals)
+     */
+    handleArenaWhip(data) {
+        const attacker = this.players.get(data.attackerId);
+        const defender = this.players.get(data.defenderId);
+        this.removeTieUpIndicator(data.attackerId);
+
+        const dir = data.dir || {};
+        const hasDir = Number.isFinite(dir.x) && Number.isFinite(dir.z) && (dir.x !== 0 || dir.z !== 0);
+        const angle = hasDir ? Math.atan2(dir.x, dir.z) : null;
+
+        if (attacker && !attacker.controller.isEliminated) {
+            attacker.controller.tieUp = null;
+            if (angle !== null) attacker.controller.facingAngle = angle;
+            if (attacker.lockAnim === 'tieup') attacker.clearLock();
+            // Fast fling: the release part of the throw clip
+            const from = attacker.clipDuration('slamThrow') * 0.25;
+            const flung = attacker.playTimed('slamThrow', ROPE_CONFIG.WHIP_FLING_MS, {
+                from,
+                timeScale: Math.max(0.5, (attacker.clipDuration('slamThrow') - from) / (ROPE_CONFIG.WHIP_FLING_MS / 1000))
+            });
+            if (!flung) attacker.playAnimation('throw');
+        }
+
+        if (defender && !defender.controller.isEliminated) {
+            const c = defender.controller;
+            c.tieUp = null;
+            c.whip = { phase: 'out', attackerId: data.attackerId };
+            if (angle !== null) c.facingAngle = angle;
+            defender.timedAnim = null;
+            defender.setLock('ropeRun', { loop: true, fade: 0.12, timeScale: ROPE_CONFIG.RUN_TIMESCALE });
+
+            const head = defender.model.position.clone();
+            head.y += 1.2;
+            this.showMovePopup('¡A LAS CUERDAS!', head, { variant: 'whip' });
+            if (this.vfxManager) {
+                const pos = defender.model.position.clone();
+                pos.y += 1.1;
+                this.vfxManager.createHitSparks?.(pos, 0x00ffcc, 1.0);
+            }
+        }
+
+        this.sfxManager?.playKickWhoosh?.();
+        this.sfxManager?.playBlock?.();
+        this.shakeScreen(0.15, 120);
+    }
+
+    /**
+     * The whipped player hit the ropes: ropes bend, they bounce back running
+     */
+    handleArenaRebound(data) {
+        const player = this.players.get(data.playerId);
+        if (!player || player.controller.isEliminated) return;
+        if (player.controller.whip) player.controller.whip.phase = 'back';
+        this.playRopeContact(player, ROPE_CONFIG.REBOUND_PUSH);
+    }
+
+    /**
+     * A running player bounced off the ropes and comes back at speed
+     */
+    handleArenaRopeBounce(data) {
+        const player = this.players.get(data.playerId);
+        if (!player || player.controller.isEliminated) return;
+        player.controller.isRopeRunning = true;
+        this.playRopeContact(player, ROPE_CONFIG.BOUNCE_PUSH);
+    }
+
+    handleArenaWhipEnd(data) {
+        const player = this.players.get(data.playerId);
+        if (!player) return;
+        player.controller.whip = null;
+        if (player.lockAnim === 'ropeRun') player.clearLock();
+        // Ran out of steam: short stagger (the server stuns them for a moment)
+        if (data.reason === 'done' && !player.controller.isEliminated && !player.knock && !player.lockAnim) {
+            player.playTimed('hitReact', 320);
+        }
+    }
+
+    /**
+     * Rope contact: bend the ropes there, lean the player into them, thud + dust
+     */
+    playRopeContact(player, push) {
+        const pos = player.controller.position;
+        const contact = this.pushRopesAt(pos, push);
+        player.lastRopeFxAt = performance.now();
+        if (!contact) return;
+
+        if (!player.lockAnim || player.lockAnim === 'ropeRun') player.startRopeLean(contact.normal);
+
+        if (this.vfxManager) {
+            const feet = new THREE.Vector3(pos.x, ARENA_CONFIG.RING_HEIGHT + 0.05, pos.z);
+            this.vfxManager.createDustCloud?.(feet, Math.sign(contact.normal.x) || 1); // Kicked back into the ring
+            const rope = contact.point.clone().addScaledVector(contact.normal, push * 0.6);
+            this.vfxManager.createHitSparks?.(rope, 0xffffff, 0.6);
+        }
+        this.sfxManager?.playLand?.(1);
+        this.sfxManager?.play?.('block', 0.5);
+        this.shakeScreen(0.18, 140);
+    }
+
+    /**
+     * Bend the ropes on the side nearest to `pos` around the contact point
+     * @returns {{normal: THREE.Vector3, point: THREE.Vector3}|null} Outward normal and contact point
+     */
+    pushRopesAt(pos, strength) {
+        if (!this.ropes.length || !pos) return null;
+        const edge = ARENA_CONFIG.RING_SIZE / 2 - ROPE_CONFIG.POST_INSET;
+        // Ropes along Z (sides x = +-edge) or along X (sides z = +-edge): the closest side
+        const alongZ = edge - Math.abs(pos.x) < edge - Math.abs(pos.z);
+        const sign = (alongZ ? Math.sign(pos.x) : Math.sign(pos.z)) || 1;
+        const axis = alongZ ? 'z' : 'x';
+        const u0 = THREE.MathUtils.clamp(alongZ ? pos.z : pos.x, -edge, edge);
+        const now = performance.now();
+
+        this.ropes.forEach((rope) => {
+            if (rope.axis !== axis || (Math.sign(rope.fixed) || 1) !== sign) return;
+            rope.impulses.push({ u0, start: now, amp: strength * (ROPE_CONFIG.LEVEL_PUSH[rope.level] ?? 1) });
+            if (rope.impulses.length > 4) rope.impulses.shift();
+        });
+
+        const y = ARENA_CONFIG.RING_HEIGHT + ARENA_CONFIG.ROPE_HEIGHT * 0.7;
+        return {
+            normal: alongZ ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign),
+            point: alongZ ? new THREE.Vector3(sign * edge, y, u0) : new THREE.Vector3(u0, y, sign * edge)
+        };
+    }
+
+    /**
+     * Per frame: bend the ropes that have active contacts (pushed out, then springing back)
+     */
+    updateRopes(now) {
+        const width = ROPE_CONFIG.WIDTH;
+        this.ropes.forEach((rope) => {
+            if (rope.impulses.length) {
+                rope.impulses = rope.impulses.filter((imp) => now - imp.start < ROPE_CONFIG.LIFE_MS);
+            }
+            if (!rope.impulses.length) {
+                if (rope.dirty) this.restoreRope(rope);
+                return;
+            }
+
+            const active = rope.impulses.map((imp) => ({ u0: imp.u0, a: imp.amp * ropeImpulseAmp(now - imp.start) }));
+            const attr = rope.mesh.geometry.attributes.position;
+            const arr = attr.array;
+            const base = rope.base;
+            const along = rope.axis === 'x' ? 0 : 2; // Vertex component along the rope
+            const out = rope.axis === 'x' ? 2 : 0;   // Component pointing out of the ring
+            const sign = Math.sign(rope.fixed) || 1;
+            const len = rope.length;
+            const half = len / 2;
+
+            for (let i = 0; i < arr.length; i += 3) {
+                const u = base[i + along];
+                // Ends stay tied to the posts
+                const taper = Math.sin(Math.PI * THREE.MathUtils.clamp((u + half) / len, 0, 1));
+                let d = 0;
+                for (const imp of active) {
+                    const x = (u - imp.u0) / width;
+                    d += imp.a * Math.exp(-x * x);
+                }
+                arr[i] = base[i];
+                arr[i + 1] = base[i + 1];
+                arr[i + 2] = base[i + 2];
+                arr[i + out] += sign * d * taper;
+            }
+            attr.needsUpdate = true;
+            rope.dirty = true;
+        });
+    }
+
+    restoreRope(rope) {
+        const attr = rope.mesh.geometry.attributes.position;
+        attr.array.set(rope.base);
+        attr.needsUpdate = true;
+        rope.dirty = false;
+    }
+
+    /**
+     * Straighten every rope (new round / rematch)
+     */
+    clearRopeWobble() {
+        this.ropes.forEach((rope) => {
+            rope.impulses = [];
+            this.restoreRope(rope);
+        });
+    }
+
+    /**
+     * Lariat / dropkick wind-up on the attacker (the hit comes ~150 ms later)
+     */
+    playRunningStrike(player, type) {
+        if (player.controller.isEliminated) return;
+
+        if (type === 'lariat') {
+            // Arm swung through the opponent at full speed: the uppercut clip, peak on the hit
+            const swing = player.playTimedSynced(
+                'lariatSwing',
+                player.clipDuration('lariatSwing') * 0.5,
+                STRIKE_CONFIG.ACTIVE_FRAME_MS + 60,
+                STRIKE_CONFIG.LARIAT_SWING_MS,
+                3
+            );
+            if (!swing) player.playAnimation('punch');
+            this.sfxManager?.playPunchWhoosh?.();
+        } else {
+            // Flying kick, feet connect on the hit; the server then lays the kicker down
+            const meta = player.wrestleMeta || {};
+            const actions = player.animController.actions;
+            const clip = actions.kickFlying ? 'kickFlying' : (actions.kickMma ? 'kickMma' : null);
+            const key = clip && !player.isFallbackClip(clip) ? meta.kickHit?.[clip] : null;
+            const kicked = clip && player.playTimedSynced(
+                clip,
+                Number.isFinite(key) ? key : player.clipDuration(clip) * 0.5,
+                STRIKE_CONFIG.ACTIVE_FRAME_MS,
+                STRIKE_CONFIG.DROPKICK_MS
+            );
+            if (!kicked) player.playAnimation('kick');
+            player.startHop(STRIKE_CONFIG.DROPKICK_HOP, STRIKE_CONFIG.DROPKICK_HOP_MS);
+            player.selfFallUntil = performance.now() + STRIKE_CONFIG.SELF_FALL_WINDOW_MS;
+            this.sfxManager?.playKickWhoosh?.();
+            this.sfxManager?.playJump?.();
+        }
+
+        if (this.vfxManager && player.model) {
+            const color = STRIKE_COLORS[type];
+            const pos = player.model.position.clone();
+            pos.y += 1;
+            const direction = Math.sign(Math.sin(player.controller.facingAngle || 0)) || 1;
+            this.vfxManager.createAttackTrail?.(pos, type === 'lariat' ? 'punch' : 'kick', direction, color);
+            this.vfxManager.createChargeGlow?.(player.model, color);
+        }
+    }
+
+    /**
+     * Lariat / dropkick hit (or a plain strike upgraded because the target was coming back
+     * from the ropes): the target is knocked flat, then the usual down / get-up flow
+     */
+    playStrikeKnockdown(attacker, target, hit, data) {
+        const move = hit.move === 'lariat' ? 'lariat' : 'dropkick';
+        const counter = data.attackType !== 'lariat' && data.attackType !== 'dropkick';
+        const color = STRIKE_COLORS[move];
+        if (typeof hit.newHealth === 'number') target.controller.health = hit.newHealth;
+
+        // Head away from the attacker
+        const to = target.model.position;
+        const from = attacker?.model.position;
+        const dx = from ? to.x - from.x : 0;
+        const dz = from ? to.z - from.z : 0;
+        const angle = dx * dx + dz * dz > 1e-4 ? Math.atan2(dx, dz) : target.model.rotation.y + Math.PI;
+
+        if (!target.flight && !target.launch && !target.leap) {
+            target.controller.whip = null;
+            target.startKnockdown({
+                angle,
+                style: move,
+                onLand: (p) => this.playKnockLanding(p, move === 'lariat' ? 0.9 : 0.7)
+            });
+        }
+
+        const hitPos = target.model.position.clone();
+        hitPos.y = Math.max(hitPos.y, ARENA_CONFIG.RING_HEIGHT) + (move === 'lariat' ? 1.5 : 1.1);
+
+        if (this.vfxManager) {
+            this.vfxManager.createHitSparks?.(hitPos, color, counter ? 2.8 : 2.2);
+            this.vfxManager.createHitSparks?.(hitPos, 0xffffff, 1.0);
+            this.vfxManager.createImpactRing?.(hitPos, color);
+            this.vfxManager.createDamageNumber?.(hitPos, hit.damage, color);
+            this.vfxManager.createCharacterFlash?.(target.model, 140);
+        }
+
+        if (this.sfxManager) {
+            if (counter) this.sfxManager.play?.('heavyHit', 0.9);
+            else if (move === 'lariat') this.sfxManager.playPunchHit?.(25);
+            else this.sfxManager.playKickHit?.(30);
+        }
+
+        this.shakeScreen(counter ? 0.75 : 0.6, counter ? 380 : 320);
+
+        if (this.hud) {
+            this.hud.updatePlayer(target);
+            this.hud.showDamage(hit.targetId, hit.damage, false);
+            if (!hit.eliminated) this.hud.showStatus(hit.targetId, '¡A LA LONA!');
+        }
+
+        if (counter) {
+            this.showMovePopup('¡CONTRAATAQUE!', hitPos, { sub: STRIKE_NAMES[move], variant: 'counter' });
+        } else {
+            this.showMovePopup(STRIKE_NAMES[move], hitPos, { variant: move });
+        }
+    }
+
+    /**
+     * Back hits the mat after a knockdown
+     */
+    playKnockLanding(player, intensity = 0.7) {
+        if (!player.model.parent) return;
+        if (this.vfxManager) {
+            const pos = player.model.position.clone();
+            pos.y = ARENA_CONFIG.RING_HEIGHT + 0.05;
+            this.vfxManager.createDustCloud?.(pos, 1);
+            this.vfxManager.createDustCloud?.(pos, -1);
+            this.vfxManager.createImpactRing?.(pos, 0xffffff);
+            this.vfxManager.createLandingImpact?.(pos, 1.2 * intensity);
+        }
+        this.sfxManager?.playLand?.(1);
+        this.shakeScreen(0.35 * intensity, 200);
+    }
+
+    /**
+     * New match / round: empty the elimination feed, "QUEDAN N" when 3+ players started
+     */
+    startBattleRoyal(total) {
+        this.matchStartCount = total || 0;
+        this.feedEliminated.clear();
+        this.lastTwoShown = false;
+        this.hud?.resetBattleRoyal?.();
+        if (this.matchStartCount >= 3) this.hud?.setRemaining?.(this.matchStartCount);
+    }
+
+    /**
+     * Elimination feed entry ("<attacker> eliminó a <victim> · RING-OUT"), remaining counter
+     * and the "¡ÚLTIMOS DOS!" banner
+     */
+    recordElimination(data, player) {
+        if (!data?.playerId || this.feedEliminated.has(data.playerId)) return;
+        this.feedEliminated.add(data.playerId);
+
+        const killerId = data.eliminatedBy && data.eliminatedBy !== data.playerId ? data.eliminatedBy : null;
+        const killer = killerId ? this.players.get(killerId) : null;
+        const killerName = killerId ? (data.eliminatedByName || killer?.name || null) : null;
+        this.hud?.addEliminationFeed?.({
+            attacker: killerName ? { name: killerName, color: killer?.color } : null,
+            victim: { name: data.playerName || player?.name || 'Luchador', color: player?.color },
+            reason: ELIMINATION_REASONS[data.reason] || 'KO'
+        });
+
+        let remaining = Number.isFinite(data.remaining) ? data.remaining : null;
+        if (remaining === null) {
+            remaining = 0;
+            this.players.forEach((p, id) => {
+                if (id !== data.playerId && id !== 'local' && !p.controller.isEliminated) remaining++;
+            });
+        }
+
+        if (this.matchStartCount >= 3 && this.gameState !== 'finished') {
+            this.hud?.setRemaining?.(remaining);
+            if (remaining === 2 && !this.lastTwoShown) {
+                this.lastTwoShown = true;
+                // After the elimination announcement (center screen, 2 s)
+                this.addFinisherTimer(() => {
+                    if (this.gameState !== 'finished') this.hud?.showBattleBanner?.('¡ÚLTIMOS DOS!');
+                }, 1700);
+            }
+        }
+    }
+
     removePlayer(playerId) {
         this.pendingPlayerLoads?.delete(playerId); // cancel an in-flight addPlayer
         const player = this.players.get(playerId);
@@ -4923,7 +5595,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
                 const bouncedX = Math.abs(Math.abs(pos.x) - ringHalf) < 0.01 && vel.x * Math.sign(pos.x) < -2;
                 const bouncedZ = Math.abs(Math.abs(pos.z) - ringHalf) < 0.01 && vel.z * Math.sign(pos.z) < -2;
                 const bounced = bouncedX || bouncedZ;
-                if (bounced && !player.ropeSoundPlayed && this.sfxManager) {
+                // Rebounds/rope runs already played their own rope sound
+                const ropeFxRecent = performance.now() - (player.lastRopeFxAt || 0) < ROPE_CONFIG.SOUND_GUARD_MS;
+                if (bounced && !player.ropeSoundPlayed && !ropeFxRecent && this.sfxManager) {
                     this.sfxManager.playBlock();
                 }
                 player.ropeSoundPlayed = bounced;
@@ -4992,7 +5666,8 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
                 const isMoving = player.controller.velocity && 
                     (Math.abs(player.controller.velocity.x) > 0.5 || 
                      Math.abs(player.controller.velocity.z) > 0.5);
-                const isRunning = isMoving && player.controller.input?.run;
+                const c = player.controller;
+                const isRunning = isMoving && (c.input?.run || c.isRopeRunning || !!c.whip);
                 
                 if (isRunning && this.lastDustTime > 0.15) {
                     const footPos = player.model.position.clone();
@@ -5018,6 +5693,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
         // SPECIAL auras follow their player and pulse
         this.updateSpecialAuras(performance.now());
+
+        // Ropes bent by rebounds spring back
+        this.updateRopes(performance.now());
 
         // Check collisions
         this.checkPlayerCollisions();
