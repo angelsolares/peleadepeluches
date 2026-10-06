@@ -5,6 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pelea de Peluches - 3D Fighter</title>
     <link rel="stylesheet" href="css/style.css">
+
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <!-- Fetch the Three.js modules in parallel instead of discovering them import by import -->
+    <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/build/three.module.js">
+    <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/loaders/FBXLoader.js">
+    <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/libs/fflate.module.js">
+    <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/curves/NURBSCurve.js">
+    <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/curves/NURBSUtils.js">
+
+    <script>
+        // Start downloading what the lobby needs while the JS modules load: the preview
+        // character and the animation clips (same files js/main.js requests through
+        // js/assets/AssetLoader.js, so the browser reuses these responses).
+        (function () {
+            var baby = location.search.indexOf('mode=baby_shower') !== -1;
+            var files = [baby ? 'assets/bebe.fbx' : 'assets/Edgar_Model.fbx'];
+            ['Walking', 'Running', 'Left_Uppercut_from_Guard', 'Boxing_Guard_Right_Straight_Kick',
+             'Hit_Reaction_1', 'Shot_and_Slow_Fall_Backward', 'Block3', 'Hip_Hop_Dance'].forEach(function (name) {
+                files.push('assets/anims/Meshy_AI_Animation_' + name + '_withSkin.json');
+            });
+            if (baby) files.push('assets/anims/Crawling.json');
+            files.forEach(function (href) {
+                var link = document.createElement('link');
+                link.rel = 'preload';
+                link.as = 'fetch';
+                link.crossOrigin = 'anonymous';
+                link.href = href;
+                document.head.appendChild(link);
+            });
+        })();
+    </script>
 </head>
 <body>
     <div id="game-container">
@@ -90,7 +130,7 @@
         <div id="loading-screen">
             <div class="loader-content">
                 <div class="spinner"></div>
-                <p id="loading-text">Cargando modelo...</p>
+                <p id="loading-text">Cargando...</p>
                 <div class="progress-bar">
                     <div id="progress-fill"></div>
                 </div>
@@ -98,16 +138,6 @@
         </div>
     </div>
 
-    <!-- Import maps for Three.js -->
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-        }
-    }
-    </script>
-    
     <script type="module" src="js/main.js"></script>
 </body>
 </html>

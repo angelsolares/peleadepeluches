@@ -4,11 +4,11 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationController.js';
+import { loadClips, loadModel } from '../assets/AssetLoader.js';
 
 const TUG_CONFIG = {
     ROPE_LENGTH: 30, // Reduced from 40
@@ -33,14 +33,20 @@ const CHARACTER_MODELS = {
     lidia: { name: 'Lidia', file: 'Lidia.fbx' },
     fabian: { name: 'Fabian', file: 'Fabian.fbx' },
     marile: { name: 'Marile', file: 'Marile.fbx' },
-    gabriel: { name: 'Gabriel', file: 'Gabriel.fbx' }
+    gabriel: { name: 'Gabriel', file: 'Gabriel.fbx' },
+    baby: { name: 'Bebé', file: 'bebe.fbx' } // Baby shower only (see characterIdFor)
 };
 
+// Loaded as small animation-only JSON clips by AssetLoader
 const ANIMATION_FILES = {
     idle: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
     pull: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx', // Effort/Pulling
     win: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
-    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
+    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+};
+
+// Baby shower only
+const BABY_ANIMATION_FILES = {
     crawling: 'Crawling.fbx'
 };
 
@@ -91,14 +97,21 @@ class TugPlayerEntity {
     
     applyColorTint(color) {
         const tintColor = new THREE.Color(color);
+        // Materials can be arrays on some FBX meshes (e.g. bebe.fbx)
+        const cloneMat = (m) => {
+            const mat = m.clone();
+            if (mat.emissive) {
+                mat.emissive = tintColor;
+                mat.emissiveIntensity = 0.2;
+            }
+            return mat;
+        };
         this.model.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
-                child.material = child.material.clone();
-                if (child.material.emissive) {
-                    child.material.emissive = tintColor;
-                    child.material.emissiveIntensity = 0.2;
-                }
+                child.material = Array.isArray(child.material)
+                    ? child.material.map(cloneMat)
+                    : cloneMat(child.material);
             }
         });
     }
@@ -175,9 +188,17 @@ class TugGame {
         this.roomCode = null;
         this.gameStarted = false;
         
-        this.baseModels = {};
+        this.isBabyShower = window.location.search.includes('mode=baby_shower');
+        this.defaultCharacterId = this.isBabyShower ? 'baby' : 'edgar';
+        this.baseModels = {};      // characterId -> loaded base model (only the ones requested)
         this.baseAnimations = {};
-        
+
+        // Players whose character model is still downloading when the match starts.
+        // setupGeneration invalidates loads from a previous setup (rematch, lost session).
+        this.pendingPlayers = new Map();   // id -> player data
+        this.setupGeneration = 0;
+        this.finalWinnerTeam = null;       // 'left' / 'right' / 'draw' once the match is over
+
         this.rope = null;
         this.marker = null;
         this.markerPos = 0;
@@ -190,7 +211,7 @@ class TugGame {
 
     async init() {
         // Apply baby theme if needed
-        if (window.location.search.includes('mode=baby_shower')) {
+        if (this.isBabyShower) {
             document.documentElement.classList.add('baby-theme');
             const gameTitle = document.querySelector('.game-title');
             if (gameTitle) gameTitle.innerHTML = 'GUERRA DE BIBERONES';
@@ -462,35 +483,71 @@ class TugGame {
         this.scene.add(this.marker);
     }
 
+    /**
+     * Startup assets: only the animation clips (small JSON, in parallel) block the loading
+     * screen. The default character starts downloading in the background; every other
+     * character is fetched when a player joins/selects it (see prefetchCharacters).
+     */
     async loadAssets() {
-        const loader = new FBXLoader();
-        
-        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        const fill = document.getElementById('progress-fill');
+        const files = this.isBabyShower
+            ? { ...ANIMATION_FILES, ...BABY_ANIMATION_FILES }
+            : ANIMATION_FILES;
 
-        // Load only needed character models
-        const charactersToLoad = isBabyShower ? [['baby', CHARACTER_MODELS['baby']]] : Object.entries(CHARACTER_MODELS);
-        
-        const modelPromises = charactersToLoad.map(async ([id, data]) => {
-            try {
-                const model = await loader.loadAsync(`assets/${data.file}`);
-                this.baseModels[id] = model;
-            } catch (e) {
-                console.warn(`Failed to load model ${id}:`, e);
-            }
+        // Fallback model + most common pick; never blocks room creation
+        this.prefetchCharacters([this.defaultCharacterId]);
+
+        this.baseAnimations = await loadClips(files, (loaded, total) => {
+            if (fill) fill.style.width = `${(loaded / total) * 100}%`;
         });
-        
-        await Promise.all(modelPromises);
-        
-        for (const [name, file] of Object.entries(ANIMATION_FILES)) {
-            try {
-                const anim = await loader.loadAsync(`assets/${file}`);
-                this.baseAnimations[name] = anim.animations[0];
-            } catch (e) {
-                console.warn(`Failed to load animation ${name}:`, e);
-            }
-        }
 
         document.getElementById('loading-screen')?.classList.add('hidden');
+    }
+
+    // =================================
+    // Character models (loaded on demand, cached by AssetLoader)
+    // =================================
+
+    /** Known character id for this page (unknown ids and baby outside baby shower -> default) */
+    characterIdFor(characterId) {
+        if (characterId === 'baby' && !this.isBabyShower) return this.defaultCharacterId;
+        return CHARACTER_MODELS[characterId] ? characterId : this.defaultCharacterId;
+    }
+
+    /** Download (or reuse) a character model; resolves with the shared base model */
+    loadCharacter(characterId) {
+        const id = this.characterIdFor(characterId);
+        return loadModel(CHARACTER_MODELS[id].file).then(model => {
+            this.baseModels[id] = model;
+            return model;
+        });
+    }
+
+    /** Fire-and-forget download of the given characters (lobby: joins and selections) */
+    prefetchCharacters(characterIds) {
+        new Set(characterIds.filter(Boolean).map(id => this.characterIdFor(id))).forEach(id => {
+            if (this.baseModels[id]) return;
+            this.loadCharacter(id).catch(err => console.warn(`[Tug] Could not preload ${id}:`, err));
+        });
+    }
+
+    /** Model for a character, falling back to the default (or any loaded) model. Never rejects. */
+    async resolveCharacterModel(characterId) {
+        const id = this.characterIdFor(characterId);
+        if (this.baseModels[id]) return this.baseModels[id];
+        try {
+            return await this.loadCharacter(id);
+        } catch (err) {
+            console.warn(`[Tug] Model ${id} failed, using default:`, err);
+        }
+        if (id !== this.defaultCharacterId) {
+            try {
+                return await this.loadCharacter(this.defaultCharacterId);
+            } catch (err) {
+                console.warn('[Tug] Default model failed too:', err);
+            }
+        }
+        return Object.values(this.baseModels)[0] || null;
     }
 
     connectToServer() {
@@ -528,8 +585,15 @@ class TugGame {
             // Lobby counters (registered once, not per room UI)
             this.socket.on('player-joined', (data) => {
                 this.updateLobbyCount(data?.room?.playerCount ?? this.players.size);
+                // Download characters already known during the lobby (baby shower auto-assigns)
+                const roomPlayers = data?.room?.players || [data?.player];
+                this.prefetchCharacters(roomPlayers.map(p => p?.character));
+            });
+            this.socket.on('character-selected', (data) => {
+                this.prefetchCharacters([data?.character]);
             });
             this.socket.on('player-left', (data) => {
+                this.pendingPlayers.delete(data?.playerId);
                 this.updateLobbyCount(data?.room ? data.room.playerCount : this.players.size);
             });
 
@@ -537,6 +601,7 @@ class TugGame {
             this.socket.on('round-starting', (data) => {
                 console.log('[Tug] Round starting', data);
                 this.hideRematchPanel();
+                this.finalWinnerTeam = null;
                 this.ropeTargetX = 0;
                 this.players.forEach(entity => entity.clearFinalAnim());
                 const status = document.getElementById('tug-game-status');
@@ -625,6 +690,11 @@ class TugGame {
         this.players.clear();
         this.hideRematchPanel();
 
+        // Drop entities still waiting for their model (they belong to the old setup)
+        this.setupGeneration++;
+        this.pendingPlayers.clear();
+        this.finalWinnerTeam = null;
+
         // Clear existing UI elements to prevent overlap
         const elementsToRemove = [
             '.rhythm-hud',
@@ -657,26 +727,57 @@ class TugGame {
             return playerWithTeam;
         });
 
-        assignedPlayers.forEach((p) => {
-            const team = p.team;
-            const characterId = p.character || 'edgar';
-            const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
-            const entity = new TugPlayerEntity(p.id, p.number, p.color, team, baseModel, this.baseAnimations);
-            entity.setName(p.name);
-            
-            this.players.set(p.id, entity);
-            this.scene.add(entity.model);
+        const generation = this.setupGeneration;
 
-            // Position based on team and index
-            const teamPlayers = teams[team];
+        assignedPlayers.forEach((p) => {
+            // Position based on team and index (fixed even if the model arrives later)
+            const teamPlayers = teams[p.team];
             const pIdx = teamPlayers.findIndex(tp => tp.id === p.id);
-            const x = (team === 'left' ? -1 : 1) * (TUG_CONFIG.SIDE_OFFSET + pIdx * TUG_CONFIG.PLAYER_SPACING);
+            const x = (p.team === 'left' ? -1 : 1) * (TUG_CONFIG.SIDE_OFFSET + pIdx * TUG_CONFIG.PLAYER_SPACING);
             const z = (pIdx % 2 === 0 ? 1 : -1) * 0.8; // Closer to the rope
-            entity.homeX = x; // Teams slide with the rope from this offset (see animate)
-            entity.model.position.set(x + this.ropeX, 0.8, z); // Raised even more to align hands perfectly with rope at 1.2
-            // Swapped signs: Left team faces X+, Right team faces X-
-            entity.model.rotation.y = (team === 'left' ? -1 : 1) * Math.PI / 2;
+
+            const readyModel = this.baseModels[this.characterIdFor(p.character)];
+            if (readyModel) {
+                this.createPlayerEntity(p, x, z, readyModel);
+                return;
+            }
+
+            // Model still downloading: create the entity as soon as it arrives
+            this.pendingPlayers.set(p.id, p);
+            this.resolveCharacterModel(p.character).then(model => {
+                // Stale (rematch, lost session) or the player left meanwhile
+                if (generation !== this.setupGeneration || this.pendingPlayers.get(p.id) !== p) return;
+                this.pendingPlayers.delete(p.id);
+                if (!model) {
+                    console.error(`[Tug] No model available for player ${p.name}`);
+                    return;
+                }
+                const entity = this.createPlayerEntity(p, x, z, model);
+                if (this.finalWinnerTeam) {
+                    entity.setFinalAnim(this.finalAnimFor(entity));
+                }
+            });
         });
+    }
+
+    createPlayerEntity(p, x, z, baseModel) {
+        const entity = new TugPlayerEntity(p.id, p.number, p.color, p.team, baseModel, this.baseAnimations);
+        entity.setName(p.name);
+
+        this.players.set(p.id, entity);
+        this.scene.add(entity.model);
+
+        entity.homeX = x; // Teams slide with the rope from this offset (see animate)
+        entity.model.position.set(x + this.ropeX, 0.8, z); // Raised even more to align hands perfectly with rope at 1.2
+        // Swapped signs: Left team faces X+, Right team faces X-
+        entity.model.rotation.y = (p.team === 'left' ? -1 : 1) * Math.PI / 2;
+        return entity;
+    }
+
+    /** Final animation for an entity once the match is over */
+    finalAnimFor(entity) {
+        if (this.finalWinnerTeam === 'draw') return 'idle';
+        return entity.team === this.finalWinnerTeam ? 'win' : 'lose';
     }
 
     setupRhythmHUD() {
@@ -790,14 +891,10 @@ class TugGame {
         const timer = document.getElementById('tug-timer');
         if (timer) timer.style.display = 'none';
         
-        // Final animations (kept alive by the render loop; draw = both teams idle)
-        this.players.forEach(entity => {
-            if (data.winnerTeam === 'draw') {
-                entity.setFinalAnim('idle');
-            } else {
-                entity.setFinalAnim(entity.team === data.winnerTeam ? 'win' : 'lose');
-            }
-        });
+        // Final animations (kept alive by the render loop; draw = both teams idle).
+        // Entities whose model is still loading pick it up on arrival.
+        this.finalWinnerTeam = data.winnerTeam === 'left' || data.winnerTeam === 'right' ? data.winnerTeam : 'draw';
+        this.players.forEach(entity => entity.setFinalAnim(this.finalAnimFor(entity)));
 
         this.showRematchPanel();
     }

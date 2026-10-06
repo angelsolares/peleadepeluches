@@ -5,13 +5,13 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from './config.js';
 import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animation/AnimationController.js';
 import ModeSelector, { GAME_MODES } from './modes/ModeSelector.js';
 import TournamentManager from './tournament/TournamentManager.js';
+import { loadClips, loadModel } from './assets/AssetLoader.js';
 
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
@@ -21,7 +21,8 @@ let selectedGameMode = GAME_MODES.SMASH;
 let selectedCharacter = 'edgar';
 
 // Apply baby theme if needed
-if (window.location.search.includes('mode=baby_shower')) {
+const IS_BABY_SHOWER = window.location.search.includes('mode=baby_shower');
+if (IS_BABY_SHOWER) {
     document.documentElement.classList.add('baby-theme');
     CONFIG.BABY_SHOWER_MODE = true;
     selectedCharacter = 'baby'; // Force baby model in Baby Shower mode
@@ -593,8 +594,9 @@ class PlayerEntity {
             }
         }
         
+        // Only the per-entity cloned materials are disposed: the geometry is shared with the
+        // cached character model (SkeletonUtils.clone), which is reused for later players/rematches
         this.model.traverse((child) => {
-            if (child.geometry) child.geometry.dispose();
             if (child.material) {
                 const materials = Array.isArray(child.material) ? child.material : [child.material];
                 materials.forEach(m => m.dispose());
@@ -646,7 +648,8 @@ const ANIMATION_FILES = {
     fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
     block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
     taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
-    crawling: 'Crawling.fbx'
+    // Babies crawl instead of walking/running: only needed (and downloaded) in baby shower mode
+    ...(IS_BABY_SHOWER ? { crawling: 'Crawling.fbx' } : {})
 };
 
 // Available character models
@@ -731,8 +734,26 @@ const CHARACTER_MODELS = {
 // Currently selected character (initialized at top)
 // selectedCharacter is defined at the beginning of the file
 
-// Cache of loaded character models (for multiplayer with different characters)
+// Character shown as the local preview player at startup ('baby' in baby shower mode).
+// Also used for players without a character and as fallback when a model fails to load.
+const DEFAULT_CHARACTER = selectedCharacter;
+
+// characterId -> loaded model (shared, never added to the scene: PlayerEntity clones it)
 const characterModelCache = {};
+
+// Promise of the default character's model (see loadDefaultModel)
+let defaultModelPromise = null;
+
+// Resolves with baseAnimations once the animation clips are loaded (set in loadCharacterWithAnimations)
+let animationsReady = Promise.resolve(baseAnimations);
+
+// Players whose entity is waiting for its model: playerId -> { token, characterId, promise }.
+// Removing the entry (player left, new match) cancels that add when the model arrives.
+const pendingPlayerAdds = new Map();
+let playerAddToken = 0;
+
+// Players that left the room (so a still-running 'game-started' loop does not recreate them)
+const departedPlayerIds = new Set();
 
 // Player colors
 const PLAYER_COLORS = ['#ff3366', '#00ffcc', '#ffcc00', '#9966ff'];
@@ -788,38 +809,36 @@ async function init() {
 
     // No OrbitControls - camera follows players automatically (side-view)
 
-    // Load and initialize VFX Manager
-    await loadVFXManager();
-    
-    // Load and initialize SFX Manager
-    await loadSFXManager();
-    
-    // Load and initialize BGM Manager
-    await loadBGMManager();
-    
+    // Start downloading the animations + preview character right away, in parallel with
+    // everything below. The loading screen hides itself once they are ready.
+    const assetsLoaded = loadCharacterWithAnimations();
+
+    // Load and initialize VFX / SFX / BGM managers (independent scripts, loaded in parallel)
+    await Promise.all([loadVFXManager(), loadSFXManager(), loadBGMManager()]);
+
     // Create mute button
     createMuteButton();
 
     // Add lights
     setupLights();
-    
+
     // Add arena (side-view platform stage)
     createArena();
-    
-    // Load character and animations
-    await loadCharacterWithAnimations();
-    
+
     // Setup keyboard controls for local testing
     setupKeyboardControls();
-    
-    // Connect to server
+
+    // Connect to server now: the room is created while models are still downloading.
+    // Players that join early get their entity as soon as their character's model is ready.
     connectToServer();
-    
+
     // Handle window resize
     window.addEventListener('resize', onWindowResize);
-    
+
     // Start render loop
     animate();
+
+    await assetsLoaded;
 }
 
 /**
@@ -1222,72 +1241,63 @@ function createArena() {
 // Character & Animation Loading
 // =================================
 
-async function loadCharacterWithAnimations(characterId = null) {
-    const loader = new FBXLoader();
-    const totalFiles = Object.keys(ANIMATION_FILES).length + 1; // +1 for character model
-    let loadedCount = 0;
-    
-    // Use provided character or selected one
-    const charId = characterId || selectedCharacter;
-    const characterConfig = CHARACTER_MODELS[charId];
-    
-    if (!characterConfig) {
-        console.error(`Character ${charId} not found!`);
-        return;
-    }
-    
-    try {
-        updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
-        
-        // Load selected character model
-        baseModel = await loadFBX(loader, `assets/${characterConfig.file}`);
-        console.log(`=== MODELO CARGADO: ${characterConfig.name} ===`);
-        loadedCount++;
-        
-        // Store in cache
-        characterModelCache[charId] = baseModel;
-        
-        // Load all animations
-        console.log('=== CARGANDO ANIMACIONES ===');
-        for (const [actionName, fileName] of Object.entries(ANIMATION_FILES)) {
-            updateLoadingProgress(
-                (loadedCount / totalFiles) * 100,
-                `Cargando animación: ${actionName}...`
-            );
-            
-            try {
-                const animationModel = await loadFBX(loader, `assets/${fileName}`);
-                
-                if (animationModel.animations && animationModel.animations.length > 0) {
-                    const clip = animationModel.animations[0];
-                    console.log(`${actionName}: ${clip.name} (duration: ${clip.duration.toFixed(2)}s)`);
-                    baseAnimations[actionName] = clip;
-                }
-                
-                disposeModel(animationModel);
-            } catch (error) {
-                console.error(`Error loading animation ${actionName}:`, error);
-            }
-            
-            loadedCount++;
+/**
+ * Startup loading: only what the lobby needs, all in parallel:
+ * the animation clips (small JSON files) and the preview/default character model.
+ * Every other character is loaded on demand (loadCharacterModel) as soon as a player picks it.
+ */
+async function loadCharacterWithAnimations() {
+    const characterConfig = CHARACTER_MODELS[DEFAULT_CHARACTER];
+    const clipCount = Object.keys(ANIMATION_FILES).length;
+    let modelFraction = 0;
+    let clipsLoaded = 0;
+    // The model is almost all of the bytes; the animation clips are 20-110 KB each
+    const refreshProgress = () => updateLoadingProgress(
+        Math.round(modelFraction * 85 + (clipsLoaded / clipCount) * 15)
+    );
+
+    updateLoadingProgress(0, `Cargando ${characterConfig.name}...`);
+
+    animationsReady = loadClips(ANIMATION_FILES, (loaded) => {
+        clipsLoaded = loaded;
+        refreshProgress();
+    }).then((clips) => {
+        Object.assign(baseAnimations, clips);
+        console.log(`[Assets] Animaciones cargadas: ${Object.keys(clips).join(', ')}`);
+        return baseAnimations;
+    });
+
+    const modelPromise = loadDefaultModel((xhr) => {
+        if (xhr.lengthComputable && xhr.total > 0) {
+            modelFraction = xhr.loaded / xhr.total;
+            refreshProgress();
         }
-        
-        console.log('=== FIN DE CARGA ===');
-        
-        // Create local player for testing
-        createLocalPlayer();
-        
+    });
+
+    try {
+        const [model] = await Promise.all([modelPromise, animationsReady]);
+        baseModel = model;
+        console.log(`=== MODELO CARGADO: ${characterConfig.name} ===`);
+
+        // Local test player (not if a match already started while we were loading)
+        if (gameState === 'loading' || gameState === 'lobby') {
+            createLocalPlayer();
+        }
+
         updateLoadingProgress(100, '¡Listo!');
-        
+
         setTimeout(() => {
             loadingScreen.classList.add('hidden');
-            updateAnimationDisplay('Conectando al servidor...');
-            gameState = 'lobby';
-            
+            if (gameState === 'loading') {
+                gameState = 'lobby';
+                // The room may already exist (we connect while loading): keep its status text
+                if (!roomCode) updateAnimationDisplay('Conectando al servidor...');
+            }
+
             // Create character selector UI
             createCharacterSelector();
         }, 500);
-        
+
     } catch (error) {
         console.error('Error loading character:', error);
         loadingText.textContent = 'Error al cargar el modelo';
@@ -1295,61 +1305,56 @@ async function loadCharacterWithAnimations(characterId = null) {
 }
 
 /**
- * Load a character model (async, for players with different characters)
+ * Model of the default character (also the fallback for unknown/failed characters).
+ * Downloaded once; the first caller may pass a progress callback.
  */
-async function loadCharacterModel(characterId) {
-    // Check cache first
-    if (characterModelCache[characterId]) {
-        return characterModelCache[characterId];
+function loadDefaultModel(onProgress) {
+    if (!defaultModelPromise) {
+        defaultModelPromise = loadModel(CHARACTER_MODELS[DEFAULT_CHARACTER].file, onProgress)
+            .then((model) => {
+                characterModelCache[DEFAULT_CHARACTER] = model;
+                return model;
+            });
     }
-    
+    return defaultModelPromise;
+}
+
+/**
+ * Get a character's model, downloading it if needed. AssetLoader caches by URL and shares
+ * in-flight downloads, so calling this repeatedly (join, character-selected, game-started)
+ * costs nothing extra. Unknown or failed characters fall back to the default model.
+ */
+function loadCharacterModel(characterId) {
+    if (characterModelCache[characterId]) {
+        return Promise.resolve(characterModelCache[characterId]);
+    }
+
     const characterConfig = CHARACTER_MODELS[characterId];
     if (!characterConfig) {
-        console.error(`Character ${characterId} not found!`);
-        return baseModel; // Fallback to base model
+        console.warn(`[Character] Unknown character "${characterId}", using ${DEFAULT_CHARACTER}`);
+        return loadDefaultModel();
     }
-    
+    if (characterId === DEFAULT_CHARACTER) {
+        return loadDefaultModel();
+    }
+
     console.log(`[Character] Loading model for ${characterId}...`);
-    
-    const loader = new FBXLoader();
-    const model = await loadFBX(loader, `assets/${characterConfig.file}`);
-    
-    // Store in cache
-    characterModelCache[characterId] = model;
-    
-    console.log(`[Character] Model ${characterId} loaded and cached`);
-    
-    return model;
+    return loadModel(characterConfig.file)
+        .then((model) => {
+            characterModelCache[characterId] = model;
+            console.log(`[Character] Model ${characterId} loaded and cached`);
+            return model;
+        })
+        .catch((error) => {
+            console.error(`[Character] Could not load ${characterId}, using ${DEFAULT_CHARACTER}`, error);
+            return loadDefaultModel();
+        });
 }
 
-function loadFBX(loader, path) {
-    return new Promise((resolve, reject) => {
-        loader.load(
-            path,
-            (object) => resolve(object),
-            (xhr) => {
-                if (xhr.lengthComputable) {
-                    const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
-                    console.log(`Loading ${path}: ${percent}%`);
-                }
-            },
-            (error) => reject(error)
-        );
-    });
-}
-
-function disposeModel(model) {
-    model.traverse((child) => {
-        if (child.isSkinnedMesh) child.skeleton?.dispose();
-        if (child.material) {
-            const materials = Array.isArray(child.material) ? child.material : [child.material];
-            materials.forEach(material => {
-                if (material.map) material.map.dispose();
-                material.dispose();
-            });
-        }
-        if (child.geometry) child.geometry.dispose();
-    });
+/** Start downloading a character in the background (as soon as a player picks it) */
+function preloadCharacter(characterId) {
+    if (!characterId || characterModelCache[characterId]) return;
+    loadCharacterModel(characterId).catch(() => {}); // failures are already logged
 }
 
 // =================================
@@ -1370,8 +1375,11 @@ function createLocalPlayer() {
     players.set('local', localPlayer);
 }
 
+// Bumped on every character change; an older (slower) load never overrides a newer pick
+let characterChangeToken = 0;
+
 /**
- * Change character model - reloads the model and recreates local player
+ * Change character model - loads the model (cached) and recreates local player
  */
 async function changeCharacter(characterId) {
     if (!CHARACTER_MODELS[characterId]) {
@@ -1386,79 +1394,56 @@ async function changeCharacter(characterId) {
     
     console.log(`[Game] Changing character to: ${characterId}`);
     selectedCharacter = characterId;
-    
-    // Show loading indicator
-    const loadingOverlay = document.createElement('div');
-    loadingOverlay.id = 'character-loading';
-    loadingOverlay.innerHTML = `
-        <div style="
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(10, 10, 21, 0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            color: #00ffcc;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 1.5rem;
-        ">
-            <div>Cargando ${CHARACTER_MODELS[characterId].name}...</div>
-        </div>
-    `;
-    document.body.appendChild(loadingOverlay);
-    
-    // Remove existing local player
-    if (localPlayer) {
-        scene.remove(localPlayer.model);
-        localPlayer.dispose();
-        players.delete('local');
-        localPlayer = null;
+    const token = ++characterChangeToken;
+    updateCharacterSelector();
+
+    // Show loading indicator (only when the model still has to be downloaded)
+    let loadingOverlay = null;
+    if (!characterModelCache[characterId]) {
+        loadingOverlay = document.createElement('div');
+        loadingOverlay.id = 'character-loading';
+        loadingOverlay.innerHTML = `
+            <div style="
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(10, 10, 21, 0.9);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 9999;
+                color: #00ffcc;
+                font-family: 'Orbitron', sans-serif;
+                font-size: 1.5rem;
+            ">
+                <div>Cargando ${CHARACTER_MODELS[characterId].name}...</div>
+            </div>
+        `;
+        document.body.appendChild(loadingOverlay);
     }
-    
-    // Dispose old base model
-    if (baseModel) {
-        disposeModel(baseModel);
-        baseModel = null;
-    }
-    
-    // Clear animations
-    Object.keys(baseAnimations).forEach(key => delete baseAnimations[key]);
-    
-    // Load new character
-    const loader = new FBXLoader();
-    const characterConfig = CHARACTER_MODELS[characterId];
-    
+
     try {
-        // Load new model
-        baseModel = await loadFBX(loader, `assets/${characterConfig.file}`);
-        
-        // Load animations
-        for (const [actionName, fileName] of Object.entries(ANIMATION_FILES)) {
-            try {
-                const animationModel = await loadFBX(loader, `assets/${fileName}`);
-                if (animationModel.animations && animationModel.animations.length > 0) {
-                    baseAnimations[actionName] = animationModel.animations[0];
-                }
-                disposeModel(animationModel);
-            } catch (error) {
-                console.error(`Error loading animation ${actionName}:`, error);
-            }
+        // Models are cached and shared (never disposed); animations are already loaded
+        const [model] = await Promise.all([loadCharacterModel(characterId), animationsReady]);
+
+        // A newer pick won, or a match started meanwhile (no local test player during matches)
+        if (token !== characterChangeToken || gameState !== 'lobby') return;
+
+        // Replace the local test player
+        if (localPlayer) {
+            scene.remove(localPlayer.model);
+            localPlayer.dispose();
+            players.delete('local');
+            localPlayer = null;
         }
-        
-        // Recreate local player
+        baseModel = model;
         createLocalPlayer();
-        
-        // Update UI
-        updateCharacterSelector();
-        
-        console.log(`[Game] Character changed to: ${characterConfig.name}`);
+
+        console.log(`[Game] Character changed to: ${CHARACTER_MODELS[characterId].name}`);
     } catch (error) {
         console.error('Error changing character:', error);
+    } finally {
+        loadingOverlay?.remove();
     }
-    
-    // Remove loading overlay
-    loadingOverlay.remove();
 }
 
 /**
@@ -1577,25 +1562,53 @@ function createCharacterSelector() {
     }
 }
 
-async function addPlayer(playerData) {
+/**
+ * Add a player entity. The model may still be downloading: the entity is created when it
+ * arrives. Safe to call several times (one entity per player) and cancelled if the player
+ * leaves or a new match starts meanwhile (removePlayer / handleGameStarted).
+ * @returns {Promise<PlayerEntity|null>}
+ */
+function addPlayer(playerData) {
     if (players.has(playerData.id)) {
         console.log(`[Game] Player ${playerData.id} already exists`);
-        return players.get(playerData.id);
+        return Promise.resolve(players.get(playerData.id));
     }
-    
-    const characterId = playerData.character || 'edgar';
+    if (departedPlayerIds.has(playerData.id)) {
+        return Promise.resolve(null);
+    }
+
+    const characterId = playerData.character || DEFAULT_CHARACTER;
+    const pending = pendingPlayerAdds.get(playerData.id);
+    if (pending && pending.characterId === characterId) {
+        return pending.promise; // same player already being added
+    }
+
+    // New add (an older pending one for another character is superseded)
+    const token = ++playerAddToken;
+    const promise = createPlayerEntity(playerData, characterId, token);
+    pendingPlayerAdds.set(playerData.id, { token, characterId, promise });
+    return promise;
+}
+
+async function createPlayerEntity(playerData, characterId, token) {
     console.log(`[Game] Adding player: ${playerData.name} (${playerData.id}) with character: ${characterId}`);
-    
-    // Get the correct model for this player's character
-    let playerModel = characterModelCache[characterId];
-    
-    // If model not in cache, load it
-    if (!playerModel) {
-        playerModel = await loadCharacterModel(characterId);
-        // Another call may have added this player while the model was loading
-        if (players.has(playerData.id)) {
-            return players.get(playerData.id);
-        }
+
+    let playerModel = null;
+    try {
+        [playerModel] = await Promise.all([loadCharacterModel(characterId), animationsReady]);
+    } catch (error) {
+        console.error(`[Game] Could not load a model for player ${playerData.id}`, error);
+    }
+
+    // Cancelled while loading (player left, superseded, or a new match recreated everyone)
+    if (pendingPlayerAdds.get(playerData.id)?.token !== token) {
+        return players.get(playerData.id) || null;
+    }
+    pendingPlayerAdds.delete(playerData.id);
+
+    if (!playerModel) return null;
+    if (players.has(playerData.id)) {
+        return players.get(playerData.id);
     }
 
     const player = new PlayerEntity(
@@ -1644,6 +1657,7 @@ async function addPlayer(playerData) {
 }
 
 function removePlayer(playerId) {
+    pendingPlayerAdds.delete(playerId); // cancel an add still waiting for its model
     const player = players.get(playerId);
     
     if (player) {
@@ -1730,6 +1744,7 @@ function initializeSocket() {
     // Game events
     socket.on('player-joined', handlePlayerJoined);
     socket.on('player-left', handlePlayerLeft);
+    socket.on('character-selected', (data) => preloadCharacter(data?.character));
     socket.on('player-ready-changed', handleReadyChanged);
     socket.on('game-started', handleGameStarted);
     socket.on('player-input-update', handlePlayerInput);
@@ -1983,12 +1998,15 @@ function startGame() {
 
 async function handlePlayerJoined(data) {
     console.log('[Game] Player joined:', data.player);
-    await addPlayer(data.player);
+    departedPlayerIds.delete(data.player.id);
+    // Update the lobby right away; the entity appears when its model is ready
     updateRoomOverlay(data.room.playerCount);
+    await addPlayer(data.player);
 }
 
 function handlePlayerLeft(data) {
     console.log('[Game] Player left:', data.playerId);
+    departedPlayerIds.add(data.playerId);
     removePlayer(data.playerId);
     updateRoomOverlay(data.room?.playerCount || 0);
 }
@@ -2022,11 +2040,21 @@ async function handleGameStarted(data) {
         }
     }
     
+    // Adds still waiting for a model (lobby joins) are recreated below with the final characters
+    pendingPlayerAdds.clear();
+
     // Clear existing HUDs
     playerHudsContainer.innerHTML = '';
-    
+
+    // The server's list is authoritative: download every missing character in parallel
+    // (usually already cached from the lobby)
+    data.players.forEach(playerData => {
+        departedPlayerIds.delete(playerData.id);
+        preloadCharacter(playerData.character);
+    });
+
     // Add all players from server with their selected characters
-    // Use for...of to properly await async calls
+    // Use for...of to properly await async calls (keeps HUD order)
     for (const playerData of data.players) {
         console.log(`[Game] Creating player ${playerData.name} with character: ${playerData.character}`);
         const player = await addPlayer(playerData);

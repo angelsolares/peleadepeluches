@@ -1,0 +1,9 @@
+{
+  "name": "pelea-de-peluches-tools",
+  "private": true,
+  "type": "module",
+  "description": "Offline asset tools (convert animation FBX files to animation-only JSON clips)",
+  "dependencies": {
+    "three": "0.160.0"
+  }
+}

@@ -4,11 +4,11 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController } from '../animation/AnimationController.js';
+import { loadClips, loadModel } from '../assets/AssetLoader.js';
 import { SFXManager } from '../audio/SFXManager.js';
 import VFXManager from '../effects/VFXManager.js';
 
@@ -41,9 +41,13 @@ const ANIMATION_FILES = {
     idle: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx',
     pump: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx',
     win: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
-    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
+    lose: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+};
+// Baby-shower-only assets (only downloaded in that mode)
+const BABY_ANIMATION_FILES = {
     crawling: 'Crawling.fbx'
 };
+const BABY_MODEL_FILE = 'bebe.fbx';
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -280,9 +284,18 @@ class BalloonGame {
         this.sfxManager = new SFXManager();
         this.vfxManager = null;
         
-        this.baseModels = {};
+        this.isBabyShower = window.location.search.includes('mode=baby_shower');
+        this.baseModels = {};             // characterId -> loaded base model (to clone)
+        this.modelLoads = new Map();      // characterId -> Promise<base model> (in flight or done)
         this.baseAnimations = {};
-        
+        this.animationsReady = false;
+        this.assetsPromise = null;
+
+        // Players whose model was still downloading at 'game-started': id -> setup generation
+        this.pendingPlayers = new Map();
+        this.setupGeneration = 0;
+        this.finishData = null;           // last game-over data (for players created afterwards)
+
         this.init();
     }
 
@@ -337,11 +350,14 @@ class BalloonGame {
         this.setupLights();
         this.createArena();
         
-        await this.loadAssets();
+        // Animations are small JSON clips and character models load on demand (requestCharacter),
+        // so the room is created right away instead of after downloading every character
+        this.assetsPromise = this.loadAssets();
         this.connectToServer();
         this.animate();
-        
+
         window.addEventListener('resize', () => this.onWindowResize());
+        await this.assetsPromise;
     }
 
     setupLights() {
@@ -380,35 +396,70 @@ class BalloonGame {
         this.scene.add(grid);
     }
 
+    /**
+     * Startup assets: only the animation clips (parallel, animation-only JSON).
+     * Character models are requested per player (lobby / 'game-started') via requestCharacter().
+     */
     async loadAssets() {
-        const loader = new FBXLoader();
-        
-        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        // Baby shower: everyone is the baby, so start that model now (not awaited)
+        if (this.isBabyShower) this.requestCharacter('baby');
 
-        // Load only needed character models
-        const charactersToLoad = isBabyShower ? [['baby', CHARACTER_MODELS['baby']]] : Object.entries(CHARACTER_MODELS);
-        
-        const modelPromises = charactersToLoad.map(async ([id, data]) => {
-            try {
-                const model = await loader.loadAsync(`assets/${data.file}`);
-                this.baseModels[id] = model;
-            } catch (e) {
-                console.warn(`Failed to load model ${id}:`, e);
-            }
+        const files = this.isBabyShower ? { ...ANIMATION_FILES, ...BABY_ANIMATION_FILES } : ANIMATION_FILES;
+        const progressFill = document.getElementById('progress-fill');
+        this.baseAnimations = await loadClips(files, (loaded, total) => {
+            if (progressFill) progressFill.style.width = `${Math.round((loaded / total) * 100)}%`;
         });
-        
-        await Promise.all(modelPromises);
-        
-        for (const [name, file] of Object.entries(ANIMATION_FILES)) {
-            try {
-                const anim = await loader.loadAsync(`assets/${file}`);
-                this.baseAnimations[name] = anim.animations[0];
-            } catch (e) {
-                console.warn(`Failed to load animation ${name}:`, e);
-            }
-        }
+        this.animationsReady = true;
 
         document.getElementById('loading-screen')?.classList.add('hidden');
+    }
+
+    /** Character used when a player has none (or theirs cannot be loaded) */
+    get defaultCharacter() {
+        return this.isBabyShower ? 'baby' : 'edgar';
+    }
+
+    getCharacterFile(characterId) {
+        if (characterId === 'baby') return this.isBabyShower ? BABY_MODEL_FILE : null;
+        return CHARACTER_MODELS[characterId]?.file || null;
+    }
+
+    /**
+     * Start (or reuse) the download of a character's model. Cached per character, so it can be
+     * called from every event. Resolves with the base model to clone; an unknown or failed
+     * character resolves with the default model (baby shower: baby), and that with Edgar.
+     */
+    requestCharacter(characterId) {
+        const id = characterId || this.defaultCharacter;
+        let promise = this.modelLoads.get(id);
+        if (promise) return promise;
+
+        const file = this.getCharacterFile(id);
+        const fallback = id === 'edgar' ? null : (id === this.defaultCharacter ? 'edgar' : this.defaultCharacter);
+        promise = (file ? loadModel(file) : Promise.reject(new Error(`no model file for "${id}"`)))
+            .catch(err => {
+                if (!fallback) throw err;
+                console.warn(`[Balloon] Model "${id}" unavailable, using "${fallback}"`, err);
+                return this.requestCharacter(fallback);
+            })
+            .then(model => {
+                this.baseModels[id] = model;
+                return model;
+            });
+        promise.catch(err => {
+            console.error(`[Balloon] Could not load a model for "${id}"`, err);
+            this.modelLoads.delete(id); // allow a retry on the next request
+        });
+        this.modelLoads.set(id, promise);
+        return promise;
+    }
+
+    /** Start downloading the characters of a player list (lobby room info) */
+    preloadCharacters(players) {
+        if (!Array.isArray(players)) return;
+        players.forEach(p => {
+            if (p && p.character) this.requestCharacter(p.character);
+        });
     }
 
     connectToServer() {
@@ -455,7 +506,14 @@ class BalloonGame {
                 console.log('[Balloon] Player joined event received:', data);
                 if (data && data.room) {
                     this.updatePlayerCountUI(data.room);
+                    // Download the characters already chosen while the lobby is open
+                    this.preloadCharacters(data.room.players);
                 }
+            });
+
+            this.socket.on('character-selected', (data) => {
+                // Start this character's model download during the lobby
+                if (data && data.character) this.requestCharacter(data.character);
             });
 
             this.socket.on('player-left', (data) => {
@@ -568,25 +626,52 @@ class BalloonGame {
         // LIMPIEZA: Eliminar jugadores anteriores de la escena (incluye etiquetas CSS2D)
         this.players.forEach(entity => entity.dispose(this.scene));
         this.players.clear();
+        this.pendingPlayers.clear();
         this.lastState = null;
+        this.finishData = null;
+        // Late model loads from a previous setup (rematch / next round) must not add players
+        const generation = ++this.setupGeneration;
 
-        const total = playersData.length;
+        const list = Array.isArray(playersData) ? playersData : [];
+        const total = list.length;
         const startX = -(total - 1) * BALLOON_CONFIG.PLAYER_SPACING / 2;
-        
-        playersData.forEach((p, idx) => {
-            const characterId = p.character || 'edgar';
-            const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
-            const entity = new BalloonPlayerEntity(p.id, p.name, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager, this.vfxManager);
-            
-            this.players.set(p.id, entity);
-            this.scene.add(entity.model);
 
+        list.forEach((p, idx) => {
+            const characterId = p.character || this.defaultCharacter;
             const x = startX + idx * BALLOON_CONFIG.PLAYER_SPACING;
-            entity.model.position.set(x, 0, 0);
+            const baseModel = this.baseModels[characterId];
+            if (baseModel && this.animationsReady) {
+                this.addPlayerEntity(p, baseModel, x);
+                return;
+            }
+
+            // Model still downloading: add the player as soon as it (and the clips) arrive
+            this.pendingPlayers.set(p.id, generation);
+            Promise.all([this.requestCharacter(characterId), this.assetsPromise])
+                .then(([model]) => {
+                    // Rebuilt meanwhile (rematch / next round), or the player left
+                    if (generation !== this.setupGeneration || this.pendingPlayers.get(p.id) !== generation) return;
+                    this.pendingPlayers.delete(p.id);
+                    const entity = this.addPlayerEntity(p, model, x);
+                    // Catch up with the match so far
+                    const current = this.lastState?.players?.find(s => s.id === p.id);
+                    if (current) entity.lastServerState = current;
+                    if (this.finishData) this.applyFinishAnimation(entity, this.finishData);
+                })
+                .catch(err => console.error(`[Balloon] Could not create player ${p.id}`, err));
         });
     }
 
+    addPlayerEntity(p, baseModel, x) {
+        const entity = new BalloonPlayerEntity(p.id, p.name, p.number, p.color, baseModel, this.baseAnimations, this.sfxManager, this.vfxManager);
+        this.players.set(p.id, entity);
+        this.scene.add(entity.model);
+        entity.model.position.set(x, 0, 0);
+        return entity;
+    }
+
     removePlayer(playerId) {
+        this.pendingPlayers.delete(playerId);
         const entity = this.players.get(playerId);
         if (!entity) return;
         entity.dispose(this.scene);
@@ -599,6 +684,7 @@ class BalloonGame {
     resetMatchUI() {
         document.getElementById('game-over-status')?.remove();
         this.lastState = null;
+        this.finishData = null;
         if (this.timerElement) {
             this.timerElement.style.display = 'none';
             this.timerElement.textContent = '';
@@ -713,19 +799,8 @@ class BalloonGame {
 
         document.body.appendChild(status);
 
-        this.players.forEach(entity => {
-            // A balloon that burst on the very last tick still has to pop
-            if (entity.lastServerState?.isDQ && !entity.isPopped) entity.pop();
-            entity.isFinished = true;
-            const isWinner = data.winner && entity.id === data.winner.id;
-            if (isWinner) {
-                // Winner celebrates and balloon stays intact
-                entity.animController.play('win', 0.2);
-            } else {
-                // Losers or everyone if no winner
-                entity.animController.play('lose', 0.2);
-            }
-        });
+        this.finishData = data;
+        this.players.forEach(entity => this.applyFinishAnimation(entity, data));
 
         // Add CSS animation for popIn
         if (!document.getElementById('balloon-animations')) {
@@ -738,6 +813,21 @@ class BalloonGame {
                 }
             `;
             document.head.appendChild(style);
+        }
+    }
+
+    /** End of match: pop a last-tick burst and play the win/lose animation */
+    applyFinishAnimation(entity, data) {
+        // A balloon that burst on the very last tick still has to pop
+        if (entity.lastServerState?.isDQ && !entity.isPopped) entity.pop();
+        entity.isFinished = true;
+        const isWinner = data.winner && entity.id === data.winner.id;
+        if (isWinner) {
+            // Winner celebrates and balloon stays intact
+            entity.animController.play('win', 0.2);
+        } else {
+            // Losers or everyone if no winner
+            entity.animController.play('lose', 0.2);
         }
     }
 

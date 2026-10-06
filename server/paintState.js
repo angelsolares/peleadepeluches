@@ -68,7 +68,10 @@ class PaintStateManager {
             startTime: Date.now() + PAINT_CONFIG.COUNTDOWN_DURATION,
             endTime: Date.now() + PAINT_CONFIG.COUNTDOWN_DURATION + PAINT_CONFIG.ROUND_DURATION,
             roundState: 'countdown', // 'countdown', 'active', 'finished'
-            lastScoreUpdate: 0
+            lastScoreUpdate: 0,
+            pendingChanges: [],   // [index, playerNumber, ...] painted since the last tick
+            lastKeyframe: 0,      // Last time the full grid was sent
+            lastTickAt: 0
         };
 
         this.paintStates.set(roomCode, paintState);
@@ -83,7 +86,10 @@ class PaintStateManager {
         if (!state) return null;
 
         const now = Date.now();
-        const delta = 1 / 60;
+        // Real elapsed time (setInterval can run well below 60 Hz, e.g. ~36 Hz on Windows)
+        const delta = Math.min(0.05, Math.max(0.001, (now - (state.lastTickAt || now - 1000 / 60)) / 1000));
+        state.lastTickAt = now;
+        this.frameScale = delta * 60;
 
         if (state.roundState === 'countdown') {
             if (now >= state.startTime) {
@@ -125,18 +131,27 @@ class PaintStateManager {
                 name: p.name,
                 number: p.number,
                 character: p.character,
-                position: p.position,
-                facingAngle: p.facingAngle,
+                // Rounded: plenty of precision for rendering, much smaller JSON
+                position: { x: Math.round(p.position.x * 100) / 100, y: Math.round((p.position.y || 0) * 100) / 100, z: Math.round(p.position.z * 100) / 100 },
+                facingAngle: Math.round(p.facingAngle * 100) / 100,
                 score: p.score,
                 color: p.color,
                 isMoving: Math.abs(p.velocity.x) > 0.1 || Math.abs(p.velocity.z) > 0.1
             })),
-            // We only send grid updates when cells change, or in a compressed format if needed.
-            // For now, let's keep it simple and send grid changes via a different mechanism if possible,
-            // or just include it in the tick if it's small enough. 
-            // 60x60 = 3600 bytes, which is fine for a few players.
-            grid: Array.from(state.grid)
+            // Network: only the cells painted since the last tick ([index, playerNumber, ...]),
+            // plus the full grid once per second (late joiners, reconnects, dropped packets)
+            ...this.takeGridPayload(state, now)
         };
+    }
+    
+    takeGridPayload(state, now) {
+        const gridChanges = state.pendingChanges;
+        state.pendingChanges = [];
+        if (now - state.lastKeyframe >= 1000) {
+            state.lastKeyframe = now;
+            return { grid: Array.from(state.grid), gridChanges };
+        }
+        return { gridChanges };
     }
 
     updatePlayerMovement(player, delta) {
@@ -156,8 +171,9 @@ class PaintStateManager {
             player.facingAngle = Math.atan2(dirX, dirZ);
         }
 
-        player.velocity.x *= PAINT_CONFIG.FRICTION;
-        player.velocity.z *= PAINT_CONFIG.FRICTION;
+        const friction = Math.pow(PAINT_CONFIG.FRICTION, this.frameScale || 1);
+        player.velocity.x *= friction;
+        player.velocity.z *= friction;
 
         player.position.x += player.velocity.x * delta;
         player.position.z += player.velocity.z * delta;
@@ -183,7 +199,10 @@ class PaintStateManager {
                 
                 if (nx >= 0 && nx < PAINT_CONFIG.GRID_SIZE && nz >= 0 && nz < PAINT_CONFIG.GRID_SIZE) {
                     const index = nz * PAINT_CONFIG.GRID_SIZE + nx;
-                    state.grid[index] = player.number;
+                    if (state.grid[index] !== player.number) {
+                        state.grid[index] = player.number;
+                        state.pendingChanges.push(index, player.number);
+                    }
                 }
             }
         }

@@ -5,7 +5,6 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from '../config.js';
@@ -14,6 +13,7 @@ import ArenaPlayerController from './ArenaPlayerController.js';
 import ArenaHUD from './ArenaHUD.js';
 import TournamentManager from '../tournament/TournamentManager.js';
 import { retargetMixamoClip } from '../animation/MixamoRetarget.js';
+import { loadClips, loadModel } from '../assets/AssetLoader.js';
 
 // =================================
 // Configuration
@@ -73,7 +73,7 @@ const CHARACTER_MODELS = {
     gabriel: { name: 'Gabriel', file: 'Gabriel.fbx', thumbnail: '👼' }
 };
 
-// Animation files
+// Animation files (loaded in parallel through AssetLoader: animation-only JSON clips)
 const ANIMATION_FILES = {
     walk: 'Meshy_AI_Animation_Walking_withSkin.fbx',
     run: 'Meshy_AI_Animation_Running_withSkin.fbx',
@@ -84,11 +84,19 @@ const ANIMATION_FILES = {
     block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
     taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
     grab: 'Meshy_AI_Animation_Grab_Held_withSkin.fbx',
-    throw: 'Meshy_AI_Animation_Throw_withSkin.fbx',
-    crawling: 'Crawling.fbx',
-    // Additional animations for escape sequence
-    uppercut: 'Meshy_AI_Animation_Left_Uppercut_from_Guard_withSkin.fbx',
-    knockdown: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx'
+    throw: 'Meshy_AI_Animation_Throw_withSkin.fbx'
+};
+
+// Baby shower only: walk/run are mapped to crawling (see AnimationController.play)
+const BABY_ANIMATION_FILES = {
+    crawling: 'Crawling.fbx'
+};
+
+// Extra keys that reuse an already loaded clip (escape sequence). Each one gets its own
+// copy so it keeps its own mixer action, exactly like when the file was loaded twice.
+const ANIMATION_ALIASES = {
+    uppercut: 'punch',
+    knockdown: 'fall'
 };
 
 // One color per player slot (rooms support up to 8 players)
@@ -1357,8 +1365,10 @@ class ArenaGame {
         // Base assets
         this.baseModel = null;
         this.baseAnimations = {};
-        this.characterModelCache = {};
+        this.baseClipsPromise = null;      // Meshy clips (shared by every character), loaded once
+        this.characterModelCache = {};     // characterId -> loaded model (shared, cloned per entity)
         this.characterAnimCache = {};      // characterId -> Promise<{animations, meta}> (Meshy + retargeted Mixamo clips)
+        this.characterAssetCache = {};     // characterId -> Promise<{characterId, model, grapple}> (model + clips, on demand)
         this.mixamoSourcesPromise = null;  // Mixamo grapple FBX files, loaded once
         this.sharedGrappleClips = null;
         this.selectedCharacter = 'edgar'; // Default character
@@ -1417,6 +1427,10 @@ class ArenaGame {
             this.selectedCharacter = 'edgar';
         }
 
+        // Start downloading right away (all in parallel): the preview model, the Meshy clips and
+        // the Mixamo grapple clips. Other characters are loaded on demand when a player picks them.
+        const startupAssets = this.loadCharacterWithAnimations();
+
         // Create scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0a0a15);
@@ -1457,26 +1471,27 @@ class ArenaGame {
         // Create the ring
         this.createRing();
         
-        // Load managers
-        await this.loadManagers();
-        
-        // Load character and animations
-        await this.loadCharacterWithAnimations();
-        
+        // Initialize HUD (before connecting: players can join while assets are still loading)
+        this.hud = new ArenaHUD();
+
         // Setup controls
         this.setupKeyboardControls();
-        
-        // Connect to server
-        this.connectToServer();
-        
-        // Initialize HUD
-        this.hud = new ArenaHUD();
-        
+
         // Handle resize
         window.addEventListener('resize', () => this.onWindowResize());
-        
+
+        // Load managers (small scripts, downloaded while the models/clips keep loading)
+        await this.loadManagers();
+
+        // Connect to server: the room is created without waiting for the character assets.
+        // Players that join early get their entity as soon as their model is ready (addPlayer).
+        this.connectToServer();
+
         // Start game loop
         this.animate();
+
+        // Preview model + clips (hides the loading screen when done)
+        await startupAssets;
     }
     
     setupCamera() {
@@ -1874,84 +1889,161 @@ class ArenaGame {
         document.body.appendChild(muteBtn);
     }
     
+    /**
+     * Startup assets, all downloaded in parallel: the preview character's model, the shared
+     * Meshy clips (animation-only JSON) and the Mixamo grapple clips. Every other character is
+     * loaded on demand when a player picks it (loadCharacterAssets), so the loading screen
+     * only waits for what the lobby preview needs.
+     */
     async loadCharacterWithAnimations(characterId = null) {
-        const loader = new FBXLoader();
-        const totalFiles = Object.keys(ANIMATION_FILES).length + 1;
-        let loadedCount = 0;
-        
-        const charId = characterId || this.selectedCharacter;
+        const requested = characterId || this.selectedCharacter;
+        const charId = CHARACTER_MODELS[requested] ? requested : 'edgar';
         const characterConfig = CHARACTER_MODELS[charId];
 
-        // Grapple clips (Mixamo) load in parallel with everything else
-        const mixamoPromise = this.loadMixamoSources();
+        // Progress: model bytes + clip files done (weights add up to 95, the rest is retargeting)
+        const progress = { model: 0, clips: 0, mixamo: 0 };
+        const stageText = () => {
+            if (progress.model < 1) return `Cargando luchador: ${characterConfig.name}...`;
+            if (progress.clips < 1 || progress.mixamo < 1) return 'Cargando animaciones...';
+            return 'Preparando llaves de lucha...';
+        };
+        const render = () => {
+            const percent = progress.model * 50 + progress.clips * 15 + progress.mixamo * 30;
+            this.updateLoadingProgress(Math.min(97, percent), stageText());
+        };
+        render();
+
+        this.loadBaseClips((done, total) => {
+            progress.clips = done / total;
+            render();
+        });
+        this.loadMixamoSources((done, total) => {
+            progress.mixamo = done / total;
+            render();
+        });
 
         try {
-this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
-            
-            // Load character model
-            this.baseModel = await this.loadFBX(loader, `assets/${characterConfig.file}`);
-            this.characterModelCache[charId] = this.baseModel;
-            loadedCount++;
-            
-            // Load animations
-            for (const [actionName, fileName] of Object.entries(ANIMATION_FILES)) {
-                this.updateLoadingProgress(
-                    (loadedCount / totalFiles) * 100,
-                    `Cargando animación: ${actionName}...`
-                );
-                
-                try {
-                    const animModel = await this.loadFBX(loader, `assets/${fileName}`);
-                    if (animModel.animations && animModel.animations.length > 0) {
-                        this.baseAnimations[actionName] = animModel.animations[0];
+            const { characterId: loadedId, model, grapple } = await this.loadCharacterAssets(charId, {
+                onProgress: (event) => {
+                    if (event?.lengthComputable && event.total > 0) {
+                        progress.model = Math.min(0.99, event.loaded / event.total);
+                        render();
                     }
-                    this.disposeModel(animModel);
-                } catch (e) {
-                    console.error(`Error loading animation ${actionName}:`, e);
+                },
+                onModel: () => {
+                    progress.model = 1;
+                    render();
                 }
-                
-                loadedCount++;
-            }
-            
-            // Retarget the grapple clips onto this character
-            this.updateLoadingProgress(97, 'Preparando llaves de lucha...');
-            await mixamoPromise;
-            const grapple = await this.getCharacterAnimations(charId);
+            });
+            this.baseModel = model;
+            this.previewCharacter = loadedId;
 
-            // Create local player
-            this.createLocalPlayer(grapple);
+            // Lobby preview player (not if the host already started the match meanwhile)
+            if (this.gameState === 'loading' && !this.players.has('local')) {
+                this.createLocalPlayer(grapple);
+            }
 
             this.updateLoadingProgress(100, '¡Arena lista!');
-            
+
             setTimeout(() => {
                 this.loadingScreen.classList.add('hidden');
                 // The socket may have created the room while models were loading: don't overwrite its status
                 if (!this.roomCode) {
                     this.updateAnimationDisplay('Conectando al servidor...');
                 }
-                this.gameState = 'lobby';
-            }, 500);
-            
+                if (this.gameState === 'loading') this.gameState = 'lobby';
+            }, 300);
+
         } catch (error) {
             console.error('Error loading character:', error);
             this.loadingText.textContent = 'Error al cargar el modelo';
         }
     }
-    
+
     /**
-     * Load every Mixamo grapple clip in parallel, once (failed files resolve to null)
+     * Shared Meshy clips, loaded once in parallel (AssetLoader uses the small JSON clips).
+     * Crawling is only needed in baby shower mode.
+     * @param {(done:number,total:number)=>void} [onEach]
+     * @returns {Promise<Object<string, THREE.AnimationClip>>}
+     */
+    loadBaseClips(onEach) {
+        if (!this.baseClipsPromise) {
+            const isBabyShower = document.documentElement.classList.contains('baby-theme');
+            const files = isBabyShower ? { ...ANIMATION_FILES, ...BABY_ANIMATION_FILES } : ANIMATION_FILES;
+            this.baseClipsPromise = loadClips(files, onEach).then((clips) => {
+                Object.entries(ANIMATION_ALIASES).forEach(([alias, key]) => {
+                    if (!clips[key]) return;
+                    clips[alias] = clips[key].clone();
+                    clips[alias].name = alias;
+                });
+                this.baseAnimations = clips;
+                return clips;
+            });
+        }
+        return this.baseClipsPromise;
+    }
+
+    /**
+     * Model + clips of a character (shared Meshy clips and Mixamo clips retargeted onto its
+     * skeleton), loaded on demand and cached: the first call starts the download, later calls
+     * (player-joined, character-selected, game-started, rematch) share it.
+     * If the model can't be loaded, the preview/default character is used instead.
+     * @param {string} characterId
+     * @param {{onProgress?: Function, onModel?: Function, noFallback?: boolean}} [options]
+     * @returns {Promise<{characterId: string, model: THREE.Object3D, grapple: {animations: object, meta: object|null}}>}
+     */
+    loadCharacterAssets(characterId, options = {}) {
+        const id = CHARACTER_MODELS[characterId] ? characterId : 'edgar';
+        if (!this.characterAssetCache[id]) {
+            const promise = (async () => {
+                let model;
+                try {
+                    model = await loadModel(CHARACTER_MODELS[id].file, options.onProgress);
+                } catch (err) {
+                    const fallbackId = options.noFallback
+                        ? null
+                        : [this.previewCharacter, this.selectedCharacter, 'edgar'].find((c) => c && c !== id && CHARACTER_MODELS[c]);
+                    if (!fallbackId) throw err;
+                    console.warn(`[Arena] Model for ${id} failed, using ${fallbackId} instead:`, err);
+                    // Not cached under this id: a later request retries the download
+                    delete this.characterAssetCache[id];
+                    return this.loadCharacterAssets(fallbackId, { noFallback: true });
+                }
+                this.characterModelCache[id] = model;
+                options.onModel?.(id);
+
+                // Grapple clips retargeted to this character (once per character, cached)
+                const grapple = await this.getCharacterAnimations(id);
+                return { characterId: id, model, grapple };
+            })();
+            this.characterAssetCache[id] = promise;
+            promise.catch(() => {
+                if (this.characterAssetCache[id] === promise) delete this.characterAssetCache[id];
+            });
+        }
+        return this.characterAssetCache[id];
+    }
+
+    /**
+     * Load every Mixamo grapple clip in parallel, once (failed files resolve to null).
+     * Goes through the shared AssetLoader cache (small skinless FBX files).
+     * @param {(done:number,total:number)=>void} [onEach]
      * @returns {Promise<Object<string, THREE.Object3D|null>>} file name -> loaded FBX
      */
-    loadMixamoSources() {
+    loadMixamoSources(onEach) {
         if (!this.mixamoSourcesPromise) {
-            const loader = new FBXLoader();
             const files = [...new Set(Object.values(MIXAMO_FILES))];
+            let done = 0;
             this.mixamoSourcesPromise = Promise.all(files.map((file) =>
-                this.loadFBX(loader, `assets/mixamo/${file}`)
+                loadModel(`mixamo/${file}`)
                     .then((fbx) => [file, fbx])
                     .catch((err) => {
                         console.warn(`[Arena] Mixamo clip ${file} not loaded:`, err);
                         return [file, null];
+                    })
+                    .finally(() => {
+                        done++;
+                        onEach?.(done, files.length);
                     })
             )).then((entries) => Object.fromEntries(entries));
         }
@@ -1985,8 +2077,9 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
     getCharacterAnimations(characterId) {
         if (!this.characterAnimCache[characterId]) {
             this.characterAnimCache[characterId] = this.buildCharacterAnimations(characterId)
-                .catch((err) => {
+                .catch(async (err) => {
                     console.error(`[Arena] Grapple clips failed for ${characterId}:`, err);
+                    await this.loadBaseClips();
                     return { animations: { ...this.baseAnimations, ...this.getSharedGrappleClips() }, meta: null };
                 });
         }
@@ -1995,6 +2088,8 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
 
     async buildCharacterAnimations(characterId) {
         const model = this.characterModelCache[characterId];
+        // Shared Meshy clips first (getSharedGrappleClips copies them), then the Mixamo sources
+        await this.loadBaseClips();
         const sources = await this.loadMixamoSources();
         const animations = { ...this.baseAnimations, ...this.getSharedGrappleClips() };
         const fallback = new Set();
@@ -2208,26 +2303,6 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         }
     }
 
-    loadFBX(loader, path) {
-        return new Promise((resolve, reject) => {
-            loader.load(path, resolve, undefined, reject);
-        });
-    }
-    
-    disposeModel(model) {
-        model.traverse((child) => {
-            if (child.isSkinnedMesh) child.skeleton?.dispose();
-            if (child.material) {
-                const materials = Array.isArray(child.material) ? child.material : [child.material];
-                materials.forEach(mat => {
-                    if (mat.map) mat.map.dispose();
-                    mat.dispose();
-                });
-            }
-            if (child.geometry) child.geometry.dispose();
-        });
-    }
-    
     createLocalPlayer(grapple = null) {
         this.localPlayer = new ArenaPlayerEntity(
             'local',
@@ -2239,18 +2314,14 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         );
         
         // Set name based on selected character
-        const characterName = CHARACTER_MODELS[this.selectedCharacter]?.name || 'Player 1';
+        const characterName = CHARACTER_MODELS[this.previewCharacter || this.selectedCharacter]?.name || 'Player 1';
         this.localPlayer.setName(characterName);
         
         // Start at center of ring
         this.localPlayer.controller.position.set(0, ARENA_CONFIG.RING_HEIGHT, 0);
         this.scene.add(this.localPlayer.model);
         this.players.set('local', this.localPlayer);
-        
-        // Add to HUD
-        if (this.hud) {
-            this.hud.addPlayer(this.localPlayer);
-        }
+        // No HUD bar for the lobby preview (it is removed when the match starts)
     }
     
     setupKeyboardControls() {
@@ -2401,6 +2472,7 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         // Game events (similar to main game)
         this.socket.on('player-joined', (data) => this.handlePlayerJoined(data));
         this.socket.on('player-left', (data) => this.handlePlayerLeft(data));
+        this.socket.on('character-selected', (data) => this.handleCharacterSelected(data));
         this.socket.on('game-started', (data) => this.handleGameStarted(data));
         this.socket.on('player-input-update', (data) => this.handlePlayerInput(data));
         this.socket.on('game-state', (data) => this.handleGameState(data));
@@ -2638,6 +2710,19 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         const index = this.players.size;
         this.addPlayer(data.player, index, Math.max(index + 1, data.room?.playerCount || 0));
         this.updateRoomOverlay(data.room.playerCount);
+    }
+    
+    /**
+     * A phone picked a character: start downloading its model (and retargeting its grapple
+     * clips) while the lobby is still open, so the entity is ready when the match starts.
+     * The entity itself is (re)created with the new character on 'game-started'.
+     */
+    handleCharacterSelected(data) {
+        const characterId = data?.character;
+        if (!CHARACTER_MODELS[characterId]) return;
+        this.loadCharacterAssets(characterId).catch((err) => {
+            console.warn(`[Arena] Preload of ${characterId} failed:`, err);
+        });
     }
     
     handlePlayerLeft(data) {
@@ -5040,19 +5125,20 @@ this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
         this.pendingPlayerLoads.set(playerData.id, loadToken);
         
         const characterId = CHARACTER_MODELS[playerData.character] ? playerData.character : 'edgar';
-        let playerModel = this.characterModelCache[characterId];
-        
-        if (!playerModel) {
-            const loader = new FBXLoader();
-            const config = CHARACTER_MODELS[characterId];
-            playerModel = await this.loadFBX(loader, `assets/${config.file}`);
-            this.characterModelCache[characterId] = playerModel;
+
+        // Model + grapple clips retargeted to this character (downloaded on demand, cached;
+        // falls back to the default model if this one can't be loaded)
+        let assets;
+        try {
+            assets = await this.loadCharacterAssets(characterId);
+        } catch (err) {
+            console.error(`[Arena] No model available for player ${playerData.id} (${characterId}):`, err);
+            if (this.pendingPlayerLoads.get(playerData.id) === loadToken) this.pendingPlayerLoads.delete(playerData.id);
+            return;
         }
+        const { model: playerModel, grapple } = assets;
 
-        // Grapple clips retargeted to this character (cached)
-        const grapple = await this.getCharacterAnimations(characterId);
-
-        // Supersededby a newer addPlayer, removed meanwhile, or already created
+        // Superseded by a newer addPlayer, removed meanwhile, or already created
         if (this.pendingPlayerLoads.get(playerData.id) !== loadToken) return;
         this.pendingPlayerLoads.delete(playerData.id);
         if (this.players.has(playerData.id)) return;

@@ -121,9 +121,11 @@
             animation: bounce 0.5s infinite alternate;
         }
 
+        /* Uses the independent "translate" property: animating "transform" would override the
+           inline transform CSS2DRenderer uses to place the label over the player */
         @keyframes bounce {
-            from { transform: translateY(0); }
-            to { transform: translateY(-10px); }
+            from { translate: 0 0; }
+            to { translate: 0 -10px; }
         }
 
         /* Tag feedback: announcement pop when someone gets tagged */

@@ -4,11 +4,11 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController } from '../animation/AnimationController.js';
+import { loadClips, loadModel } from '../assets/AssetLoader.js';
 import PaintHUD from './PaintHUD.js';
 
 const PAINT_CONFIG = {
@@ -33,6 +33,17 @@ const CHARACTER_MODELS = {
     fabian: { name: 'Fabian', file: 'Fabian.fbx' },
     marile: { name: 'Marile', file: 'Marile.fbx' },
     gabriel: { name: 'Gabriel', file: 'Gabriel.fbx' }
+};
+
+// Baby shower: every player is the baby (bebe.fbx is only downloaded in that mode)
+const BABY_MODEL_FILE = 'bebe.fbx';
+
+const ANIMATION_FILES = {
+    walk: 'Meshy_AI_Animation_Walking_withSkin.fbx',
+    run: 'Meshy_AI_Animation_Running_withSkin.fbx'
+};
+const BABY_ANIMATION_FILES = {
+    crawling: 'Crawling.fbx'
 };
 
 class PaintGame {
@@ -60,9 +71,12 @@ class PaintGame {
         this.numberRgbMap = new Map();    // player number -> [r, g, b]
         this.floorBaseRgb = [26, 26, 46];
 
-        this.baseModels = {};
+        this.isBabyShower = window.location.search.includes('mode=baby_shower');
+        this.baseModels = {};             // characterId -> loaded base model (to clone)
+        this.modelLoads = new Map();      // characterId -> Promise<base model> (in flight or done)
         this.baseAnimations = {};
-        
+        this.animationsReady = false;
+
         this.init();
     }
 
@@ -98,13 +112,16 @@ class PaintGame {
         
         this.setupLights();
         this.createFloor();
-        
-        await this.loadAssets();
+
+        // Animations are small JSON clips and character models load on demand (requestCharacter),
+        // so the room is created right away instead of after downloading every character
+        const assetsPromise = this.loadAssets();
         this.setupRematchButton();
         this.connectToServer();
-        
+
         window.addEventListener('resize', () => this.onWindowResize());
         this.animate();
+        await assetsPromise;
     }
 
     setupLights() {
@@ -157,38 +174,71 @@ class PaintGame {
         this.scene.add(gridHelper);
     }
 
+    /**
+     * Startup assets: only the animation clips (parallel, animation-only JSON).
+     * Character models are requested per player (lobby / 'game-started') via requestCharacter().
+     */
     async loadAssets() {
-        const loader = new FBXLoader();
-        
-        const isBabyShower = document.documentElement.classList.contains('baby-theme');
+        // Baby shower: everyone is the baby, so start that model now (not awaited)
+        if (this.isBabyShower) this.requestCharacter('baby');
 
-        // Load only needed character models
-        const charactersToLoad = isBabyShower ? [['baby', CHARACTER_MODELS['baby']]] : Object.entries(CHARACTER_MODELS);
-        
-        const modelPromises = charactersToLoad.map(async ([id, data]) => {
-            try {
-                const model = await loader.loadAsync(`assets/${data.file}`);
-                this.baseModels[id] = model;
-            } catch (e) {
-                console.warn(`Failed to load model ${id}:`, e);
-            }
+        const files = this.isBabyShower ? { ...ANIMATION_FILES, ...BABY_ANIMATION_FILES } : ANIMATION_FILES;
+        const progressFill = document.getElementById('progress-fill');
+        this.baseAnimations = await loadClips(files, (loaded, total) => {
+            if (progressFill) progressFill.style.width = `${Math.round((loaded / total) * 100)}%`;
         });
-        
-        await Promise.all(modelPromises);
-        
-        // Load animations
-        const animFiles = {
-            walk: 'assets/Meshy_AI_Animation_Walking_withSkin.fbx',
-            run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx',
-            crawling: 'assets/Crawling.fbx'
-        };
+        this.animationsReady = true;
 
-        for (const [name, path] of Object.entries(animFiles)) {
-            const anim = await loader.loadAsync(path);
-            this.baseAnimations[name] = anim.animations[0];
-        }
+        document.getElementById('loading-screen')?.classList.add('hidden');
+    }
 
-        document.getElementById('loading-screen').classList.add('hidden');
+    /** Character used when a player has none (or theirs cannot be loaded) */
+    get defaultCharacter() {
+        return this.isBabyShower ? 'baby' : 'edgar';
+    }
+
+    getCharacterFile(characterId) {
+        if (characterId === 'baby') return this.isBabyShower ? BABY_MODEL_FILE : null;
+        return CHARACTER_MODELS[characterId]?.file || null;
+    }
+
+    /**
+     * Start (or reuse) the download of a character's model. Cached per character, so it can be
+     * called on every event/tick. Resolves with the base model to clone; an unknown or failed
+     * character resolves with the default model (baby shower: baby), and that with Edgar.
+     */
+    requestCharacter(characterId) {
+        const id = characterId || this.defaultCharacter;
+        let promise = this.modelLoads.get(id);
+        if (promise) return promise;
+
+        const file = this.getCharacterFile(id);
+        const fallback = id === 'edgar' ? null : (id === this.defaultCharacter ? 'edgar' : this.defaultCharacter);
+        promise = (file ? loadModel(file) : Promise.reject(new Error(`no model file for "${id}"`)))
+            .catch(err => {
+                if (!fallback) throw err;
+                console.warn(`[Paint] Model "${id}" unavailable, using "${fallback}"`, err);
+                return this.requestCharacter(fallback);
+            })
+            .then(model => {
+                this.baseModels[id] = model;
+                return model;
+            });
+        promise.catch(err => {
+            console.error(`[Paint] Could not load a model for "${id}"`, err);
+            // Allow a retry later (not on every tick)
+            setTimeout(() => this.modelLoads.delete(id), 5000);
+        });
+        this.modelLoads.set(id, promise);
+        return promise;
+    }
+
+    /** Start downloading the characters of a player list (lobby room info / 'game-started') */
+    preloadCharacters(players) {
+        if (!Array.isArray(players)) return;
+        players.forEach(p => {
+            if (p && p.character) this.requestCharacter(p.character);
+        });
     }
 
     connectToServer() {
@@ -257,6 +307,8 @@ class PaintGame {
                     overlay.classList.add('hidden');
                     overlay.style.display = 'none';
                 }
+                // Models normally started downloading in the lobby; this covers defaults/late picks
+                this.preloadCharacters(data && data.players);
                 // New match or new tournament round: fresh floor, HUD and player set
                 this.resetForNewMatch(data && data.players);
                 if (data) this.hud.updateRound(data.currentRound || 1, data.tournamentRounds || 1);
@@ -264,6 +316,8 @@ class PaintGame {
 
             this.socket.on('player-joined', (data) => {
                 console.log('Player joined:', data);
+                // Download the characters already chosen while the lobby is open
+                this.preloadCharacters(data && data.room && data.room.players);
                 // Update player count if lobby is visible
                 const playerCountElem = document.getElementById('player-count');
                 const startBtn = document.getElementById('start-game-btn');
@@ -274,6 +328,11 @@ class PaintGame {
                         startBtn.textContent = 'EMPEZAR JUEGO';
                     }
                 }
+            });
+
+            this.socket.on('character-selected', (data) => {
+                // Start this character's model download during the lobby
+                if (data && data.character) this.requestCharacter(data.character);
             });
 
             this.socket.on('player-left', (data) => {
@@ -470,7 +529,7 @@ class PaintGame {
 
         if (state.roundState === 'active') {
             this.hud.updateTimer(state.timeLeft);
-            this.updateGrid(state.grid, state.players);
+            this.applyGridState(state);
             this.hud.updateScores(state.players);
         }
 
@@ -479,6 +538,8 @@ class PaintGame {
             let player = this.players.get(playerData.id);
             if (!player) {
                 player = this.createPlayer(playerData);
+                // Model still downloading: the player appears on a later tick once it is ready
+                if (!player) return;
                 this.players.set(playerData.id, player);
             }
             
@@ -494,9 +555,17 @@ class PaintGame {
         });
     }
 
+    /**
+     * Build a player's model. Returns null (and makes sure the download is running) while the
+     * character model or the animations are not loaded yet; updateState retries every tick.
+     */
     createPlayer(data) {
-        const characterId = data.character || 'edgar';
-        const baseModel = this.baseModels[characterId] || this.baseModels['edgar'];
+        const characterId = data.character || this.defaultCharacter;
+        const baseModel = this.baseModels[characterId];
+        if (!baseModel || !this.animationsReady) {
+            this.requestCharacter(characterId);
+            return null;
+        }
         const model = SkeletonUtils.clone(baseModel);
         model.scale.set(0.01, 0.01, 0.01);
         
@@ -524,6 +593,27 @@ class PaintGame {
         const animController = new AnimationController(model, this.baseAnimations);
         
         return { model, animController, label };
+    }
+
+    /**
+     * The server sends only the painted cells each tick (state.gridChanges = [index, playerNumber, ...])
+     * and the full grid once per second (state.grid). Keep a local copy and repaint from it.
+     */
+    applyGridState(state) {
+        if (Array.isArray(state.grid) || state.grid instanceof ArrayBuffer) {
+            const full = state.grid instanceof ArrayBuffer ? new Int8Array(state.grid) : state.grid;
+            if (!this.localGrid || this.localGrid.length !== full.length) this.localGrid = new Int8Array(full.length);
+            this.localGrid.set(full);
+        }
+        const changes = state.gridChanges;
+        if (this.localGrid && Array.isArray(changes)) {
+            for (let i = 0; i + 1 < changes.length; i += 2) {
+                const idx = changes[i];
+                if (idx >= 0 && idx < this.localGrid.length) this.localGrid[idx] = changes[i + 1];
+            }
+        }
+        const changed = Array.isArray(state.grid) || (Array.isArray(changes) && changes.length > 0);
+        if (this.localGrid && changed) this.updateGrid(this.localGrid, state.players);
     }
 
     updateGrid(gridData, players) {

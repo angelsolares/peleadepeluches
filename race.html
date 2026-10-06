@@ -6,6 +6,8 @@
     <title>Carrera de Peluches - Sprint Race</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/race.css">
+    <!-- Three.js modules come from unpkg: open the connection while the page parses -->
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
 </head>
 <body>
     <div id="game-container">
@@ -103,7 +105,7 @@
     
     <!-- Audio Managers -->
     <script src="js/audio/BGMManager.js"></script>
-    <script src="js/audio/SFXManager.js"></script>
+    <script type="module" src="js/audio/SFXManager.js"></script>
     
     <script type="importmap">
     {

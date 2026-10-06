@@ -5,11 +5,11 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL } from '../config.js';
 import TournamentManager from '../tournament/TournamentManager.js';
+import { loadClips, loadModel } from '../assets/AssetLoader.js';
 
 // Race configuration
 const RACE_CONFIG = {
@@ -56,10 +56,16 @@ const CHARACTER_MODELS = {
     'gabriel': { path: 'assets/Gabriel.fbx', color: '#66ccff', name: 'Gabriel' }
 };
 
-// Animation files (same as arena)
+// Character used before a player picks one (same default as the server's 'game-started' payload)
+// and as the fallback when a character model fails to load
+const DEFAULT_CHARACTER = 'edgar';
+
+// Animation files (animation-only JSON clips via AssetLoader). Baby shower only crawls.
 const ANIMATION_FILES = {
     walk: 'assets/Meshy_AI_Animation_Walking_withSkin.fbx',
-    run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx',
+    run: 'assets/Meshy_AI_Animation_Running_withSkin.fbx'
+};
+const BABY_ANIMATION_FILES = {
     crawling: 'assets/Crawling.fbx'
 };
 
@@ -114,6 +120,32 @@ class RacePlayerEntity {
     
     setupMixer() {
         this.mixer = new THREE.AnimationMixer(this.model);
+    }
+
+    /**
+     * Attach (or replace) the 3D model. Entities exist before their character finishes
+     * downloading, so the model can arrive late or change when the player picks another character.
+     * The caller adds/removes the model to/from the scene.
+     */
+    setModel(model) {
+        if (this.mixer) this.mixer.stopAllAction();
+        this.dispose(); // old name label
+        this.nameLabel = null;
+        this.mixer = null;
+        this.currentAction = null;
+        this.currentAnimation = null; // so 'idle' (or whatever update() picks) actually starts
+        this.model = model;
+        if (!model) return;
+
+        model.position.copy(this.targetPosition);
+        this.setupMixer();
+        this.createNameLabel();
+        this.playAnimation('idle');
+    }
+
+    setName(name) {
+        this.name = name;
+        if (this.nameLabel?.element) this.nameLabel.element.textContent = name;
     }
     
     createNameLabel() {
@@ -244,9 +276,10 @@ class RaceGame {
         this.bgmManager = window.BGMManager ? new window.BGMManager() : null;
         this.sfxManager = window.SFXManager ? new window.SFXManager() : null;
         
-        this.loadedModels = {}; // Cache for loaded character models
+        this.isBabyShower = window.location.search.includes('mode=baby_shower');
+        this.defaultModelKey = this.isBabyShower ? 'baby' : DEFAULT_CHARACTER;
+        this.loadedModels = {}; // Character models that finished loading (source objects, cloned per player)
         this.animations = {};
-        this.fbxLoader = null;
         
         this.clock = new THREE.Clock();
         
@@ -264,7 +297,7 @@ class RaceGame {
     
     async init() {
         // Apply baby theme if needed
-        if (window.location.search.includes('mode=baby_shower')) {
+        if (this.isBabyShower) {
             document.documentElement.classList.add('baby-theme');
             const gameTitle = document.querySelector('.game-title');
             if (gameTitle) gameTitle.innerHTML = 'CARRERA DE BEBÉS';
@@ -276,16 +309,21 @@ class RaceGame {
         this.setupCamera();
         this.setupLights();
         this.createTrack();
-        
-        await this.loadAssets();
-        
+
+        // Only the animations (small JSON clips) and one default character are loaded up front.
+        // Each player's character is downloaded when it becomes known (join / selection / game start).
+        const defaultModelReady = this.loadDefaultModel();
+        await this.loadAnimations();
+
+        // The room is created right away; the default model keeps downloading meanwhile
         this.setupSocket();
         this.setupScoreboard();
         this.createCameraSelector();
         this.setupRematchButtons();
-        
-        this.hideLoading();
         this.animate();
+
+        await defaultModelReady;
+        this.hideLoading();
     }
     
     setupRenderer() {
@@ -546,57 +584,118 @@ class RaceGame {
         update();
     }
     
-    async loadAssets() {
-        this.fbxLoader = new FBXLoader();
-        const progressFill = document.getElementById('progress-fill');
-        const loadingText = document.getElementById('loading-text');
-        
-        const isBabyShower = document.documentElement.classList.contains('baby-theme');
-        
+    async loadAnimations() {
+        const files = this.isBabyShower ? BABY_ANIMATION_FILES : ANIMATION_FILES;
         try {
-            // Load only needed character models
-            const characterKeys = isBabyShower ? ['baby'] : Object.keys(CHARACTER_MODELS);
-            const totalItems = characterKeys.length + Object.keys(ANIMATION_FILES).length;
-            let loadedItems = 0;
-            
-            for (const key of characterKeys) {
-                const charInfo = CHARACTER_MODELS[key];
-                if (!charInfo) continue;
-
-                loadingText.textContent = `Cargando ${charInfo.name}...`;
-                
-                try {
-                    this.loadedModels[key] = await this.fbxLoader.loadAsync(charInfo.path);
-                    console.log(`[Race] Loaded model: ${key}`);
-                } catch (err) {
-                    console.warn(`[Race] Failed to load model ${key}:`, err);
-                }
-                
-                loadedItems++;
-                progressFill.style.width = `${(loadedItems / totalItems) * 100}%`;
-            }
-            
-            // Load animations
-            loadingText.textContent = 'Cargando animaciones...';
-            
-            for (const [name, path] of Object.entries(ANIMATION_FILES)) {
-                const anim = await this.fbxLoader.loadAsync(path);
-                if (anim.animations && anim.animations.length > 0) {
-                    this.animations[name] = anim.animations[0];
-                }
-                loadedItems++;
-                progressFill.style.width = `${(loadedItems / totalItems) * 100}%`;
-            }
-            
-            progressFill.style.width = '100%';
-            loadingText.textContent = '¡Listo!';
-            
+            this.animations = await loadClips(files);
         } catch (error) {
-            console.error('Error loading assets:', error);
-            loadingText.textContent = 'Error cargando recursos';
+            console.error('[Race] Error loading animations:', error);
         }
     }
-    
+
+    /**
+     * Load the default character (shown while a player's own character downloads, and fallback)
+     */
+    async loadDefaultModel() {
+        const progressFill = document.getElementById('progress-fill');
+        const loadingText = document.getElementById('loading-text');
+        if (loadingText) loadingText.textContent = 'Cargando corredores...';
+
+        const model = await this.loadCharacterModel(this.defaultModelKey, (e) => {
+            if (progressFill && e.lengthComputable && e.total > 0) {
+                progressFill.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
+            }
+        });
+
+        if (progressFill) progressFill.style.width = '100%';
+        if (loadingText) loadingText.textContent = model ? '¡Listo!' : 'Error cargando recursos';
+    }
+
+    /** Model actually used for a character key (baby shower: everyone is a baby) */
+    modelKeyFor(characterKey) {
+        if (this.isBabyShower) return 'baby';
+        return CHARACTER_MODELS[characterKey] ? characterKey : DEFAULT_CHARACTER;
+    }
+
+    /**
+     * Load a character model (cached by AssetLoader). Never rejects: resolves with the
+     * default model if this one fails, or null if even the default cannot be loaded.
+     */
+    loadCharacterModel(modelKey, onProgress) {
+        if (this.loadedModels[modelKey]) return Promise.resolve(this.loadedModels[modelKey]);
+        const info = CHARACTER_MODELS[modelKey] || CHARACTER_MODELS[this.defaultModelKey];
+        return loadModel(info.path, onProgress)
+            .then((model) => {
+                this.loadedModels[modelKey] = model;
+                return model;
+            })
+            .catch((err) => {
+                console.warn(`[Race] Failed to load model ${modelKey}:`, err);
+                return modelKey === this.defaultModelKey ? null : this.loadCharacterModel(this.defaultModelKey);
+            });
+    }
+
+    /** Clone a loaded character for one player (opaque materials, shadows) */
+    prepareModel(sourceModel) {
+        const model = SkeletonUtils.clone(sourceModel);
+        model.scale.set(0.01, 0.01, 0.01);
+        model.rotation.y = 0; // Face forward (toward finish)
+
+        // Enable shadows and fix transparency
+        model.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+
+                // Fix transparency - make character fully opaque
+                if (child.material) {
+                    if (!Array.isArray(child.material)) {
+                        child.material = child.material.clone();
+                    }
+
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach(mat => {
+                        mat.transparent = false;
+                        mat.opacity = 1.0;
+                        mat.depthWrite = true;
+                        mat.depthTest = true;
+                    });
+                }
+            }
+        });
+        return model;
+    }
+
+    /**
+     * Give a player the model of its current character: immediately if it is loaded,
+     * otherwise when the download finishes (the player keeps its previous model, if any, meanwhile).
+     */
+    ensurePlayerModel(player) {
+        const modelKey = this.modelKeyFor(player.characterKey);
+        if (player.modelKey === modelKey) return; // Already shown or already on its way
+        player.modelKey = modelKey;
+
+        const ready = this.loadedModels[modelKey];
+        if (ready) {
+            this.applyModel(player, ready);
+            return;
+        }
+
+        this.loadCharacterModel(modelKey).then((sourceModel) => {
+            // Skip if the player left, the roster was rebuilt, or another character was picked meanwhile
+            if (!sourceModel || this.players.get(player.id) !== player || player.modelKey !== modelKey) return;
+            this.applyModel(player, sourceModel);
+            console.log(`[Race] Model ready for ${player.name}: ${modelKey}`);
+        });
+    }
+
+    applyModel(player, sourceModel) {
+        if (player.model?.parent) player.model.parent.remove(player.model);
+        const model = this.prepareModel(sourceModel);
+        player.setModel(model);
+        this.scene.add(model);
+    }
+
     setupSocket() {
         console.log('[Race] Connecting to server:', SERVER_URL);
         
@@ -650,6 +749,22 @@ class RaceGame {
             console.log('[Race] Player left:', data);
             this.removePlayer(data.playerId);
             this.updateRoomOverlay(this.players.size);
+        });
+
+        // A phone picked a character: start downloading it now, while everyone is in the lobby
+        this.socket.on('character-selected', (data) => {
+            const characterKey = String(data?.character || '').toLowerCase();
+            if (!characterKey) return;
+
+            const player = this.players.get(data.playerId);
+            if (player) {
+                player.characterKey = characterKey;
+                if (data.playerName) player.setName(data.playerName);
+                this.ensurePlayerModel(player);
+                this.updateScoreboard();
+            } else {
+                this.loadCharacterModel(this.modelKeyFor(characterKey)); // prefetch for 'game-started'
+            }
         });
         
         this.socket.on('game-started', (data) => {
@@ -897,90 +1012,45 @@ class RaceGame {
         }
     }
     
-    async addPlayer(playerData) {
+    addPlayer(playerData) {
         if (this.players.has(playerData.id)) return;
-        
-        const characterKey = (playerData.character || 'angel').toLowerCase();
-        const characterInfo = CHARACTER_MODELS[characterKey] || CHARACTER_MODELS['angel'];
-        
-        // Get the correct model for this character
-        let sourceModel = this.loadedModels[characterKey];
-        
-        // Fallback to first available model if character not found
-        if (!sourceModel) {
-            console.warn(`[Race] Model not found for ${characterKey}, using fallback`);
-            const fallbackKey = Object.keys(this.loadedModels)[0];
-            sourceModel = this.loadedModels[fallbackKey];
-        }
-        
-        if (!sourceModel) {
-            console.error('[Race] No models loaded!');
-            return;
-        }
-        
-        // Clone the correct character model
-        const model = SkeletonUtils.clone(sourceModel);
-        model.scale.set(0.01, 0.01, 0.01);
-        
+
+        const characterKey = (playerData.character || DEFAULT_CHARACTER).toLowerCase();
+        const characterInfo = CHARACTER_MODELS[characterKey] || CHARACTER_MODELS[DEFAULT_CHARACTER];
+
         console.log(`[Race] Creating player with character: ${characterKey}`);
-        
-        // Create player entity (color comes from the player slot so equal characters stay distinguishable)
+
+        // Create player entity (color comes from the player slot so equal characters stay distinguishable).
+        // The model is attached by ensurePlayerModel: right away if it is loaded, else when it arrives.
         const player = new RacePlayerEntity(
             playerData.id,
             playerData.name || characterInfo.name,
             playerData.color || characterInfo.color,
             playerData.number || this.players.size + 1,
-            model,
+            null,
             this.animations
         );
-        
+        player.characterKey = characterKey;
+        player.modelKey = null;
+
         // Set initial position (lane based)
         player.lane = this.players.size;
         const laneX = getLaneX(player.lane);
-        model.position.set(laneX, 0, 0);
-        model.rotation.y = 0; // Face forward (toward finish)
-        
         player.worldPosition.set(laneX, 0, 0);
         player.targetPosition.set(laneX, 0, 0);
-        
-        // Enable shadows and fix transparency
-        model.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-                
-                // Fix transparency - make character fully opaque
-                if (child.material) {
-                    if (!Array.isArray(child.material)) {
-                        child.material = child.material.clone();
-                    }
-                    
-                    const materials = Array.isArray(child.material) ? child.material : [child.material];
-                    materials.forEach(mat => {
-                        mat.transparent = false;
-                        mat.opacity = 1.0;
-                        mat.depthWrite = true;
-                        mat.depthTest = true;
-                    });
-                }
-            }
-        });
-        
-        this.scene.add(model);
+
         this.players.set(playerData.id, player);
-        
-        // Start idle animation
-        player.playAnimation('idle');
-        
+        this.ensurePlayerModel(player);
+
         // Update scoreboard
         this.updateScoreboard();
-        
+
         // Update progress markers
         this.updateProgressMarkers();
-        
+
         console.log(`[Race] Added player ${player.name} in lane ${player.lane}`);
     }
-    
+
     removePlayer(playerId) {
         const player = this.players.get(playerId);
         if (player) {
@@ -1317,8 +1387,10 @@ class RaceGame {
             const laneX = getLaneX(laneIndex);
             player.worldPosition.set(laneX, 0, 0);
             player.targetPosition.set(laneX, 0, 0);
-            player.model.position.copy(player.targetPosition);
-            player.model.visible = true;
+            if (player.model) {
+                player.model.position.copy(player.targetPosition);
+                player.model.visible = true;
+            }
 
             if (player.nameLabel) {
                 player.nameLabel.element.style.display = 'block';

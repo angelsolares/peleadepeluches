@@ -4,11 +4,11 @@
  */
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL } from '../config.js';
 import TournamentManager from '../tournament/TournamentManager.js';
+import { loadClips, loadModel } from '../assets/AssetLoader.js';
 
 // Character Models Configuration
 const CHARACTER_MODELS = {
@@ -30,10 +30,13 @@ const CHARACTER_MODELS = {
     'ciguenia': { path: 'assets/ciguenia.fbx', color: '#FFFFFF', name: 'Cigüeña' }
 };
 
-// Animation Files
+// Character used before a player picks one (same default as the server's 'game-started' payload)
+// and as the fallback when a character model fails to load
+const DEFAULT_CHARACTER = 'edgar';
+
+// Animation Files (animation-only JSON clips via AssetLoader; every flyer uses 'flying')
 const ANIMATION_FILES = {
-    flying: 'assets/Flying.fbx',
-    crawling: 'assets/Crawling.fbx'
+    flying: 'assets/Flying.fbx'
 };
 
 // Game Configuration
@@ -83,30 +86,71 @@ class FlappyPlayerEntity {
     constructor(playerData, model, animations, scene) {
         this.id = playerData.id;
         this.name = playerData.name;
+        this.character = playerData.character;
+        this.modelKey = null; // Model requested for this player (see FlappyGame.ensurePlayerModel)
         this.lane = playerData.lane || 0;
+        this.laneZ = getLaneZ(this.lane, playerData.playerCount || this.lane + 1);
         this.color = LANE_COLORS[this.lane % LANE_COLORS.length] || '#ffffff';
         this.scene = scene;
-        
+
         this.isAlive = true;
         this.y = 0;
         this.velocity = 0;
         this.lastVelocity = 0;  // Track velocity changes for flap detection
         this.distance = 0;
-        
+
+        this.model = null;
+        this.nameLabel = null;
+        this.mixer = null;
+        this.currentAction = null;
+
+        // Clone animations
+        this.animations = {};
+        for (const [name, clip] of Object.entries(animations)) {
+            this.animations[name] = clip.clone();
+        }
+
+        // Create particle system for flap effect
+        this.createParticleSystem(scene);
+
+        // The model may still be downloading: FlappyGame attaches it with setModel() when ready
+        if (model) this.setModel(model);
+    }
+
+    /**
+     * Attach (or replace) the character model: clone it, keep lane/height, restart the
+     * flying animation and recreate the name label.
+     */
+    setModel(sourceModel) {
+        const scene = this.scene;
+
+        // Remove the previous model and its label
+        if (this.mixer) this.mixer.stopAllAction();
+        if (this.model) {
+            if (this.nameLabel) {
+                this.model.remove(this.nameLabel);
+                this.nameLabel.element?.remove();
+            }
+            scene.remove(this.model);
+        }
+        this.nameLabel = null;
+        this.mixer = null;
+        this.currentAction = null;
+        this.model = null;
+        if (!sourceModel) return;
+
         // Clone model
-        this.model = SkeletonUtils.clone(model);
-        this.model.scale.set(0.01, 0.01, 0.01);
-        
-        // Position based on lane (re-centered later by FlappyGame.layoutLanes)
-        const startX = GAME_CONFIG.playerStartX;
-        const laneZ = getLaneZ(this.lane, playerData.playerCount || this.lane + 1);
-        this.model.position.set(startX, 0, laneZ);
-        
+        const model = SkeletonUtils.clone(sourceModel);
+        model.scale.set(0.01, 0.01, 0.01);
+
+        // Position based on lane (re-centered by FlappyGame.layoutLanes)
+        model.position.set(GAME_CONFIG.playerStartX, this.y, this.laneZ);
+
         // Rotate to face right (direction of flight)
-        this.model.rotation.y = Math.PI / 2;
-        
-        // Apply color tint
-        this.model.traverse((child) => {
+        model.rotation.y = Math.PI / 2;
+
+        // Opaque, per-player materials (the death fade changes them)
+        model.traverse((child) => {
             if (child.isMesh && child.material) {
                 const mat = child.material.clone();
                 mat.transparent = false;
@@ -116,29 +160,24 @@ class FlappyPlayerEntity {
                 child.material = mat;
             }
         });
-        
-        scene.add(this.model);
-        
-        // Setup animations
-        this.mixer = new THREE.AnimationMixer(this.model);
-        this.animations = {};
-        this.currentAction = null;
-        
-        // Clone animations
-        for (const [name, clip] of Object.entries(animations)) {
-            this.animations[name] = clip.clone();
-        }
-        
-        // Start with flying animation
+
+        scene.add(model);
+        this.model = model;
+
+        // Setup animations, start with flying
+        this.mixer = new THREE.AnimationMixer(model);
         this.playAnimation('flying');
-        
+
         // Create name label
         this.createNameLabel(scene);
-        
-        // Create particle system for flap effect
-        this.createParticleSystem(scene);
+
+        // Arrived after this player already fell: keep it hidden like the others
+        if (!this.isAlive) {
+            model.visible = false;
+            if (this.nameLabel) this.nameLabel.element.style.display = 'none';
+        }
     }
-    
+
     createParticleSystem(scene) {
         // Create particle geometry
         const particleCount = 30;
@@ -195,7 +234,7 @@ class FlappyPlayerEntity {
     }
     
     emitFlapParticles() {
-        if (!this.particles || !this.isAlive) return;
+        if (!this.particles || !this.isAlive || !this.model) return;
         
         const positions = this.particles.geometry.attributes.position.array;
         const colors = this.particles.geometry.attributes.color.array;
@@ -331,8 +370,9 @@ class FlappyPlayerEntity {
         
         if (serverState) {
             // Smooth interpolation to server state
-            this.y = THREE.MathUtils.lerp(this.model.position.y, serverState.y, 0.3);
-            this.model.position.y = this.y;
+            const currentY = this.model ? this.model.position.y : this.y;
+            this.y = THREE.MathUtils.lerp(currentY, serverState.y, 0.3);
+            if (this.model) this.model.position.y = this.y;
             this.isAlive = serverState.isAlive;
             this.distance = serverState.distance || 0;
             
@@ -358,8 +398,10 @@ class FlappyPlayerEntity {
                 this.lastVelocity = serverState.velocity;
                 
                 // Tilt based on velocity
-                const tiltAngle = THREE.MathUtils.clamp(serverState.velocity * 0.05, -0.5, 0.5);
-                this.model.rotation.z = THREE.MathUtils.lerp(this.model.rotation.z, -tiltAngle, 0.1);
+                if (this.model) {
+                    const tiltAngle = THREE.MathUtils.clamp(serverState.velocity * 0.05, -0.5, 0.5);
+                    this.model.rotation.z = THREE.MathUtils.lerp(this.model.rotation.z, -tiltAngle, 0.1);
+                }
             }
         }
         
@@ -367,7 +409,7 @@ class FlappyPlayerEntity {
         this.updateParticles(deltaTime);
         
         // Handle death visual
-        if (!this.isAlive) {
+        if (!this.isAlive && this.model) {
             this.model.traverse((child) => {
                 if (child.isMesh && child.material) {
                     child.material.opacity = THREE.MathUtils.lerp(child.material.opacity, 0.3, 0.05);
@@ -382,9 +424,10 @@ class FlappyPlayerEntity {
      */
     setLane(lane, playerCount) {
         this.lane = lane;
+        this.laneZ = getLaneZ(lane, playerCount);
         this.color = LANE_COLORS[lane % LANE_COLORS.length] || '#ffffff';
         if (this.model) {
-            this.model.position.z = getLaneZ(lane, playerCount);
+            this.model.position.z = this.laneZ;
         }
         
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
@@ -417,10 +460,10 @@ class FlappyPlayerEntity {
             clearInterval(this.fadeInterval);
             this.fadeInterval = null;
         }
-        if (this.nameLabel) {
+        if (this.nameLabel && this.model) {
             this.model.remove(this.nameLabel);
         }
-        scene.remove(this.model);
+        if (this.model) scene.remove(this.model);
         if (this.mixer) {
             this.mixer.stopAllAction();
         }
@@ -447,7 +490,10 @@ class FlappyGame {
         this.socket = null;
         this.roomCode = null;
         this.players = new Map();
-        this.loadedModels = {};
+        this.isBabyShower = window.location.search.includes('mode=baby_shower');
+        // Baby shower: every player flies as the stork
+        this.defaultModelKey = this.isBabyShower ? 'ciguenia' : DEFAULT_CHARACTER;
+        this.loadedModels = {}; // Character models that finished loading (source objects, cloned per player)
         this.animations = {};
         
         this.pipes = [];
@@ -479,7 +525,7 @@ class FlappyGame {
     
     async init() {
         // Apply baby theme if needed
-        const isBabyShower = window.location.search.includes('mode=baby_shower');
+        const isBabyShower = this.isBabyShower;
         if (isBabyShower) {
             document.documentElement.classList.add('baby-theme');
             const gameTitle = document.querySelector('.game-title');
@@ -523,18 +569,30 @@ class FlappyGame {
         document.getElementById('game-container').appendChild(this.labelRenderer.domElement);
 
         this.setupLights();
-        await this.loadAssets();
+
+        // Only the flying animation (small JSON clip) and one default model are loaded up front.
+        // Each player's character is downloaded when it becomes known (join / selection / game start).
+        const defaultModelReady = this.loadDefaultModel();
+        await this.loadAnimations();
+
+        // The room is created right away; the default model keeps downloading meanwhile
         this.setupSocket();
         this.setupRematchButtons();
-        
+
         // Handle resize
         window.addEventListener('resize', () => this.onResize());
-        
+
         // Create environment
         this.createEnvironment();
-        
+
         this.animate();
-        
+
+        await defaultModelReady;
+        setTimeout(() => {
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) loadingScreen.style.display = 'none';
+        }, 300);
+
         console.log('[FlappyGame] Initialization complete');
     }
     
@@ -658,62 +716,79 @@ class FlappyGame {
         this.scene.add(hemisphere);
     }
     
-    async loadAssets() {
-        const loadingText = document.getElementById('loading-text');
-        const progressFill = document.getElementById('progress-fill');
-        
-        const fbxLoader = new FBXLoader();
-        
+    async loadAnimations() {
         try {
-            const isBabyShower = document.documentElement.classList.contains('baby-theme');
-
-            // Load only needed character models
-            // In Baby Shower mode, the 'baby' character uses the 'ciguenia' model
-            const characterKeys = isBabyShower ? ['baby'] : Object.keys(CHARACTER_MODELS);
-            let progress = 0;
-            const totalModels = characterKeys.length;
-            
-            for (const key of characterKeys) {
-                let charInfo = CHARACTER_MODELS[key];
-                if (!charInfo) continue;
-
-                // SPECIAL CASE: In Baby Shower mode for Flappy, we use ciguenia for all babies
-                if (isBabyShower && key === 'baby') {
-                    charInfo = CHARACTER_MODELS['ciguenia'];
-                }
-
-                loadingText.textContent = `Cargando ${charInfo.name}...`;
-                
-                const model = await fbxLoader.loadAsync(charInfo.path);
-                this.loadedModels[key] = model;
-                
-                progress++;
-                progressFill.style.width = `${(progress / totalModels) * 60}%`;
-            }
-            
-            // Load animations
-            loadingText.textContent = 'Cargando animaciones...';
-            progressFill.style.width = '70%';
-            
-            const flyingAnim = await fbxLoader.loadAsync(ANIMATION_FILES.flying);
-            if (flyingAnim.animations && flyingAnim.animations.length > 0) {
-                this.animations.flying = flyingAnim.animations[0];
-            }
-            
-            progressFill.style.width = '100%';
-            loadingText.textContent = '¡Listo!';
-            
-            // Hide loading screen
-            setTimeout(() => {
-                document.getElementById('loading-screen').style.display = 'none';
-            }, 500);
-            
+            this.animations = await loadClips(ANIMATION_FILES);
         } catch (error) {
-            console.error('Error loading assets:', error);
-            loadingText.textContent = 'Error cargando recursos';
+            console.error('[FlappyGame] Error loading animations:', error);
         }
     }
-    
+
+    /**
+     * Load the default model (shown while a player's own character downloads, and fallback)
+     */
+    async loadDefaultModel() {
+        const loadingText = document.getElementById('loading-text');
+        const progressFill = document.getElementById('progress-fill');
+        if (loadingText) loadingText.textContent = `Cargando ${CHARACTER_MODELS[this.defaultModelKey].name}...`;
+
+        const model = await this.loadCharacterModel(this.defaultModelKey, (e) => {
+            if (progressFill && e.lengthComputable && e.total > 0) {
+                progressFill.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
+            }
+        });
+
+        if (progressFill) progressFill.style.width = '100%';
+        if (loadingText) loadingText.textContent = model ? '¡Listo!' : 'Error cargando recursos';
+    }
+
+    /** Model actually used for a character key (baby shower: everyone is the stork) */
+    modelKeyFor(characterKey) {
+        if (this.isBabyShower) return 'ciguenia';
+        return CHARACTER_MODELS[characterKey] ? characterKey : DEFAULT_CHARACTER;
+    }
+
+    /**
+     * Load a character model (cached by AssetLoader). Never rejects: resolves with the
+     * default model if this one fails, or null if even the default cannot be loaded.
+     */
+    loadCharacterModel(modelKey, onProgress) {
+        if (this.loadedModels[modelKey]) return Promise.resolve(this.loadedModels[modelKey]);
+        const info = CHARACTER_MODELS[modelKey] || CHARACTER_MODELS[this.defaultModelKey];
+        return loadModel(info.path, onProgress)
+            .then((model) => {
+                this.loadedModels[modelKey] = model;
+                return model;
+            })
+            .catch((err) => {
+                console.warn(`[FlappyGame] Failed to load model ${modelKey}:`, err);
+                return modelKey === this.defaultModelKey ? null : this.loadCharacterModel(this.defaultModelKey);
+            });
+    }
+
+    /**
+     * Give a player the model of its current character: immediately if it is loaded,
+     * otherwise when the download finishes (the player keeps its previous model, if any, meanwhile).
+     */
+    ensurePlayerModel(player) {
+        const modelKey = this.modelKeyFor(player.character);
+        if (player.modelKey === modelKey) return; // Already shown or already on its way
+        player.modelKey = modelKey;
+
+        const ready = this.loadedModels[modelKey];
+        if (ready) {
+            player.setModel(ready);
+            return;
+        }
+
+        this.loadCharacterModel(modelKey).then((sourceModel) => {
+            // Skip if the player left, the room was re-created, or another character was picked meanwhile
+            if (!sourceModel || this.players.get(player.id) !== player || player.modelKey !== modelKey) return;
+            player.setModel(sourceModel);
+            console.log(`[FlappyGame] Model ready for ${player.name}: ${modelKey}`);
+        });
+    }
+
     setupSocket() {
         console.log('[FlappyGame] Connecting to server...');
         this.socket = io(SERVER_URL);
@@ -755,113 +830,32 @@ class FlappyGame {
         
         this.socket.on('character-selected', (data) => {
             console.log('[FlappyGame] Character selected:', data);
-            const characterKey = data.character.toLowerCase();
+            const characterKey = String(data?.character || '').toLowerCase();
+            if (!characterKey) return;
             const newName = CHARACTER_MODELS[characterKey]?.name || data.character;
-            
-            // Update player if already exists
+
             const player = this.players.get(data.playerId);
             if (player) {
-                // Check if character changed
-                if (player.character !== characterKey) {
-                    console.log(`[FlappyGame] Changing character from ${player.character} to ${characterKey}`);
-                    
-                    // Get new model
-                    const newSourceModel = this.loadedModels[characterKey];
-                    if (newSourceModel) {
-                        // Remove old name label from model first (it's a child of the model)
-                        if (player.nameLabel) {
-                            if (player.model) {
-                                player.model.remove(player.nameLabel);
-                            }
-                            // Dispose the CSS2D element
-                            if (player.nameLabel.element && player.nameLabel.element.parentNode) {
-                                player.nameLabel.element.parentNode.removeChild(player.nameLabel.element);
-                            }
-                            player.nameLabel = null;
-                        }
-                        
-                        // Remove old model from scene
-                        if (player.model) {
-                            this.scene.remove(player.model);
-                        }
-                        
-                        // Clone new model
-                        const newModel = SkeletonUtils.clone(newSourceModel);
-                        newModel.scale.set(0.01, 0.01, 0.01);
-                        
-                        // Keep same position
-                        const startX = GAME_CONFIG.playerStartX;
-                        const laneZ = player.model ? player.model.position.z : getLaneZ(player.lane, this.players.size);
-                        newModel.position.set(startX, 0, laneZ);
-                        newModel.rotation.y = Math.PI / 2;
-                        
-                        // Apply materials
-                        newModel.traverse((child) => {
-                            if (child.isMesh && child.material) {
-                                const mat = child.material.clone();
-                                mat.transparent = false;
-                                mat.opacity = 1.0;
-                                mat.depthWrite = true;
-                                mat.depthTest = true;
-                                child.material = mat;
-                            }
-                        });
-                        
-                        this.scene.add(newModel);
-                        player.model = newModel;
-                        
-                        // Setup new animation mixer
-                        player.mixer = new THREE.AnimationMixer(newModel);
-                        player.currentAction = null;
-                        
-                        // Play flying animation
-                        if (this.animations.flying) {
-                            const action = player.mixer.clipAction(this.animations.flying);
-                            action.setLoop(THREE.LoopRepeat);
-                            action.play();
-                            player.currentAction = action;
-                        }
-                        
-                        // Recreate name label
-                        const labelDiv = document.createElement('div');
-                        labelDiv.className = 'player-name-label';
-                        labelDiv.textContent = newName;
-                        labelDiv.style.cssText = `
-                            color: white;
-                            font-family: 'Bangers', cursive;
-                            font-size: 16px;
-                            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-                            background: rgba(0,0,0,0.5);
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                            white-space: nowrap;
-                        `;
-                        const nameLabel = new CSS2DObject(labelDiv);
-                        nameLabel.position.set(0, 250, 0);
-                        newModel.add(nameLabel);
-                        player.nameLabel = nameLabel;
-                    }
-                }
-                
                 player.name = newName;
                 player.character = characterKey;
-                
-                // Update label text
                 if (player.nameLabel && player.nameLabel.element) {
                     player.nameLabel.element.textContent = newName;
                 }
-                
+
+                // Swap the model now if it is loaded, otherwise as soon as it downloads
+                this.ensurePlayerModel(player);
                 this.updatePlayersPanel();
             } else {
-                // Store pending character selection for when player is added
+                // Store pending character selection for when player is added, and start the download
                 if (!this.pendingCharacters) this.pendingCharacters = new Map();
                 this.pendingCharacters.set(data.playerId, {
                     character: data.character,
                     name: newName
                 });
+                this.loadCharacterModel(this.modelKeyFor(characterKey));
             }
         });
-        
+
         this.socket.on('player-left', (data) => {
             console.log('[FlappyGame] Player left:', data);
             this.removePlayer(data?.playerId ?? data?.player?.id ?? data?.id);
@@ -1099,7 +1093,7 @@ class FlappyGame {
         if (this.players.has(playerData.id)) return;
         
         // Check for pending character selection
-        let characterKey = (playerData.character || 'angel').toLowerCase();
+        let characterKey = (playerData.character || DEFAULT_CHARACTER).toLowerCase();
         let playerName = playerData.characterName || playerData.name || CHARACTER_MODELS[characterKey]?.name || 'Player';
         
         if (this.pendingCharacters && this.pendingCharacters.has(playerData.id)) {
@@ -1109,13 +1103,7 @@ class FlappyGame {
             this.pendingCharacters.delete(playerData.id);
         }
         
-        let sourceModel = this.loadedModels[characterKey];
-        
-        if (!sourceModel) {
-            console.warn(`[FlappyGame] Model not found for ${characterKey}, using angel`);
-            sourceModel = this.loadedModels['angel'];
-        }
-        
+        // The model is attached by ensurePlayerModel: right away if it is loaded, else when it arrives
         const player = new FlappyPlayerEntity(
             {
                 id: playerData.id,
@@ -1124,12 +1112,13 @@ class FlappyGame {
                 lane: this.players.size,
                 playerCount: this.players.size + 1
             },
-            sourceModel,
+            null,
             this.animations,
             this.scene
         );
-        
+
         this.players.set(playerData.id, player);
+        this.ensurePlayerModel(player);
         this.layoutLanes();
         this.updatePlayersPanel();
         console.log(`[FlappyGame] Added player: ${playerName} (${characterKey})`);
@@ -1170,7 +1159,13 @@ class FlappyGame {
             if (!ids.has(id)) this.removePlayer(id);
         });
         serverPlayers.forEach((p) => {
-            if (!this.players.has(p.id)) this.addPlayer(p);
+            const existing = this.players.get(p.id);
+            if (!existing) {
+                this.addPlayer(p);
+            } else if (p.character && existing.character !== String(p.character).toLowerCase()) {
+                existing.character = String(p.character).toLowerCase();
+                this.ensurePlayerModel(existing);
+            }
         });
         this.layoutLanes();
         this.updatePlayersPanel();
@@ -1633,12 +1628,14 @@ class FlappyGame {
             player.distance = 0;
 
             // Reset position (lane z is set by layoutLanes below)
-            player.model.position.set(GAME_CONFIG.playerStartX, 0, player.model.position.z);
-            player.model.rotation.set(0, Math.PI / 2, 0);
+            if (player.model) {
+                player.model.position.set(GAME_CONFIG.playerStartX, 0, player.model.position.z);
+                player.model.rotation.set(0, Math.PI / 2, 0);
+                player.model.visible = true;
+            }
 
-            // Reset model visibility and undo the death fade on the materials
+            // Undo the death fade on the materials
             player.restoreMaterials();
-            player.model.visible = true;
             if (player.nameLabel) {
                 player.nameLabel.element.style.display = '';
             }
@@ -1684,7 +1681,7 @@ class FlappyGame {
         let maxY = -Infinity;
         
         this.players.forEach(player => {
-            if (player.isAlive) {
+            if (player.isAlive && player.model) {
                 totalX += player.model.position.x;
                 totalY += player.model.position.y;
                 minY = Math.min(minY, player.model.position.y);
