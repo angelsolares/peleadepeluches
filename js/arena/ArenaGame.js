@@ -13,6 +13,7 @@ import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationCon
 import ArenaPlayerController from './ArenaPlayerController.js';
 import ArenaHUD from './ArenaHUD.js';
 import TournamentManager from '../tournament/TournamentManager.js';
+import { retargetMixamoClip } from '../animation/MixamoRetarget.js';
 
 // =================================
 // Configuration
@@ -117,34 +118,123 @@ function getSpawnPosition(index, total) {
 }
 
 // =================================
+// Wrestling (grapples) configuration
+// =================================
+
+// Mixamo clips (skinless FBX in assets/mixamo) retargeted onto each character's Meshy skeleton
+const MIXAMO_FILES = {
+    idle: 'fighting_idle.fbx',        // Guard stance (replaces the paused-walk idle)
+    tieup: 'hold_off_assailant.fbx',  // Collar-and-elbow struggle
+    headbutt: 'headbutt.fbx',
+    knee: 'illegal_knee.fbx',
+    suplex: 'falling_back.fbx',       // Suplex attacker: falls on the back
+    stomp: 'stomping.fbx',
+    kneel: 'kneel.fbx',               // Pin cover (kneels down then stays kneeling: played once, clamped)
+    down: 'laying_breathless.fbx',    // On the mat, lying on the back (the clip itself lies the body down)
+    getup: 'getting_up_c.fbx'         // Gets up from lying on the back
+};
+
+// Meshy clip copied in when a Mixamo clip can't be loaded/retargeted (no fallback = skipped)
+const MIXAMO_FALLBACKS = {
+    tieup: 'grab', headbutt: 'punch', knee: 'kick', suplex: 'fall',
+    stomp: 'kick', kneel: 'block', down: 'fall'
+};
+
+// Attacker clip per grapple move ('slamThrow' is a private copy of the Meshy 'throw' clip)
+const MOVE_ATTACKER_CLIPS = { headbutt: 'headbutt', knee: 'knee', slam: 'slamThrow', suplex: 'suplex' };
+
+const MOVE_NAMES = { headbutt: '¡CABEZAZO!', knee: '¡RODILLAZO!', slam: '¡AZOTÓN!', suplex: '¡SUPLEX!' };
+const MOVE_COLORS = { headbutt: 0xffcc00, knee: 0xff6600, slam: 0xff3366, suplex: 0x9966ff };
+
+const WRESTLE_CONFIG = {
+    LIFT_HEIGHT: 1.7,            // Slam: lowest point of the lifted body above the mat (world units)
+    SUPLEX_PEAK: 1.5,            // Suplex: arc height of the lowest point of the body
+    SUPLEX_FALL_FRACTION: 0.45,  // Point of falling_back where the back hits the mat (synced to the impact)
+    GETUP_MS: 1500,              // Server GETUP_DURATION
+    POST_SUPLEX_GETUP_MS: 700,   // The suplexing attacker scrambles back up after the move
+    STOMP_MS: 800,
+    KNEEL_SPEED: 1.5,
+    HIT_REACT_SPEED: 1.5,
+    LANDING_HOLD_MS: 600         // Keep the landing spot until the server position catches up
+};
+
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const IDENTITY_QUAT = new THREE.Quaternion();
+// Tips an upright model onto its back (head towards local -Z): only used if the lying clip doesn't lie down
+const LIE_BACK_QUAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+// Rough body points (world units, model origin at the feet) if the pose analysis can't run
+const DEFAULT_BODY_POINTS = [
+    new THREE.Vector3(0, 1.6, 0), new THREE.Vector3(0, 0.9, 0),
+    new THREE.Vector3(0.12, 0.08, 0), new THREE.Vector3(-0.12, 0.08, 0)
+];
+
+// Scratch objects for the per-frame procedural motion
+const _flightPos = new THREE.Vector3();
+const _pointTmp = new THREE.Vector3();
+const _qAxis = new THREE.Quaternion();
+const _qSpin = new THREE.Quaternion();
+const _qPose = new THREE.Quaternion();
+
+/**
+ * Lowest Y of a set of body points (model space) once rotated by q
+ */
+function minPointY(q, points) {
+    let min = Infinity;
+    for (const p of points) {
+        const y = _pointTmp.copy(p).applyQuaternion(q).y;
+        if (y < min) min = y;
+    }
+    return min === Infinity ? 0 : min;
+}
+
+function easeInOut(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+// =================================
 // Arena Player Entity
 // =================================
 
 class ArenaPlayerEntity {
-    constructor(id, number, color, baseModel, baseAnimations) {
+    /**
+     * @param {object} animations - Clips for this character (Meshy clips + retargeted grapple clips)
+     * @param {object|null} wrestleMeta - Pose info of the grapple clips (see ArenaGame.analyzeWrestlePoses)
+     */
+    constructor(id, number, color, baseModel, animations, wrestleMeta = null) {
         this.id = id;
         this.number = number;
         this.color = color;
         this.name = `Player ${number}`;
-        
+
         // Clone the model
         this.model = SkeletonUtils.clone(baseModel);
         this.model.scale.set(0.01, 0.01, 0.01);
-        
+
         // Apply color tint
         this.applyColorTint(color);
-        
+
         // Create floating name label
         this.nameLabel = this.createNameLabel(color);
         this.model.add(this.nameLabel);
-        
+
         // Animation controller
-        this.animController = new AnimationController(this.model, baseAnimations);
-        
+        this.animController = new AnimationController(this.model, animations);
+        this.wrestleMeta = wrestleMeta;
+
+        // Grapple visuals (host side). While lockAnim is set, a grapple state owns the
+        // animation: locomotion and the legacy hit/idle/attack calls can't override it.
+        this.lockAnim = null;
+        this.lockOpts = null;
+        this.timedAnim = null;    // { name, start, until, yaw, cancelOnMove } short one-shot (stomp, scramble up)
+        this.poseYaw = null;      // Fixed yaw while on the mat / getting up
+        this.flight = null;       // Procedural slam/suplex motion of a defender
+        this.positionHold = null; // { x, z, until } landing spot kept until the server position catches up
+        this.moveVisual = null;   // { type, role } grapple move being shown
+
         // Arena-specific controller (360 movement)
         this.controller = new ArenaPlayerController(id, number, color);
     }
-    
+
     /**
      * Create floating name label above player
      */
@@ -153,16 +243,16 @@ class ArenaPlayerEntity {
         div.className = 'arena-player-name-label';
         div.textContent = this.name;
         div.style.color = color;
-        
+
         const label = new CSS2DObject(div);
         // Position above player's head (in model's local space, scaled by 0.01)
         // 280 in local = 2.8 in world (well above head, not covering face)
         label.position.set(0, 280, 0);
         label.center.set(0.5, 0);
-        
+
         return label;
     }
-    
+
     /**
      * Update the name label text
      */
@@ -172,10 +262,10 @@ class ArenaPlayerEntity {
             this.nameLabel.element.textContent = name;
         }
     }
-    
+
     applyColorTint(color) {
         const tintColor = new THREE.Color(color);
-        
+
         this.model.traverse((child) => {
             if (child.isMesh && child.material) {
                 if (Array.isArray(child.material)) {
@@ -183,7 +273,7 @@ class ArenaPlayerEntity {
                 } else {
                     child.material = child.material.clone();
                 }
-                
+
                 const materials = Array.isArray(child.material) ? child.material : [child.material];
                 materials.forEach(mat => {
                     mat.transparent = false;
@@ -191,7 +281,7 @@ class ArenaPlayerEntity {
                     mat.depthWrite = true;
                     mat.depthTest = true;
                     mat.side = THREE.FrontSide;
-                    
+
                     if (mat.emissive) {
                         mat.emissive = tintColor;
                         mat.emissiveIntensity = 0.15;
@@ -199,17 +289,21 @@ class ArenaPlayerEntity {
                     mat.needsUpdate = true;
                 });
             }
-            
+
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
             }
         });
     }
-    
+
     playAnimation(actionName) {
+        // A grapple state owns the animation (tie-up, move, on the mat, pin...)
+        if (this.lockAnim) return;
+        this.timedAnim = null;
+
         switch (actionName) {
-            case 'idle': this.animController.playIdle(); break;
+            case 'idle': this.playFightIdle(); break;
             case 'walk': this.animController.playWalk(); break;
             case 'run': this.animController.playRun(); break;
             case 'punch': this.animController.playPunch(); break;
@@ -222,7 +316,7 @@ class ArenaPlayerEntity {
             case 'throw': this.animController.play('throw'); break;
             default: this.animController.play(actionName);
         }
-        
+
         // Apply speed multipliers for Arena mode (faster action)
         if (this.animController && this.animController.mixer) {
             const ARENA_SPEEDS = {
@@ -233,7 +327,7 @@ class ArenaPlayerEntity {
                 'punch': 2.0,
                 'kick': 2.0
             };
-            
+
             if (ARENA_SPEEDS[actionName]) {
                 const action = this.animController.mixer.clipAction(
                     this.animController.animations[actionName]
@@ -244,7 +338,266 @@ class ArenaPlayerEntity {
             }
         }
     }
-    
+
+    /**
+     * Guard-stance idle (Mixamo fighting_idle). Falls back to the old paused-walk idle.
+     */
+    playFightIdle(fade = ANIMATION_CONFIG.fadeDuration.toIdle) {
+        const ac = this.animController;
+        const idle = ac.actions.idle;
+        if (!idle) return ac.playIdle();
+        if (ac.isAttacking) return false;
+        if (ac.currentAction === idle && idle.isRunning()) return true;
+        return ac.play('idle', fade);
+    }
+
+    clipDuration(name) {
+        const action = this.animController.actions[name];
+        return action ? action.getClip().duration : 1;
+    }
+
+    isFallbackClip(name) {
+        return !!this.wrestleMeta?.fallback?.has(name);
+    }
+
+    /**
+     * Force a clip while a grapple state is active (see playState for the options)
+     */
+    setLock(name, opts = {}) {
+        if (!this.animController.actions[name]) return false;
+        // Meshy stand-ins for missing Mixamo clips are one-shots: play them once and hold
+        const options = this.isFallbackClip(name) ? { ...opts, loop: false } : opts;
+
+        if (name !== 'down' && name !== 'getup') this.poseYaw = null;
+        this.timedAnim = null;
+        if (this.lockAnim === name && !opts.restart) return true;
+
+        this.lockAnim = name;
+        this.lockOpts = options;
+        this.animController.playState(name, options);
+        return true;
+    }
+
+    /**
+     * Leave the grapple state: locomotion (fight idle / walk / run) takes over next frame
+     */
+    clearLock() {
+        const prev = this.lockAnim;
+        if (!prev) return;
+        this.lockAnim = null;
+        this.lockOpts = null;
+        if (this.poseYaw !== null) {
+            this.poseYaw = null;
+            this.model.rotation.set(0, this.model.rotation.y, 0);
+        }
+
+        // The suplexing attacker ends on their back: scramble up (cancelled as soon as they move)
+        if (prev === 'suplex' && !this.controller.isEliminated) {
+            const m = this.wrestleMeta;
+            const yaw = m ? this.model.rotation.y + (m.suplexEndAlpha - m.getupAlpha) : null;
+            this.playTimed('getup', WRESTLE_CONFIG.POST_SUPLEX_GETUP_MS, { yaw });
+        }
+    }
+
+    /**
+     * Short one-shot that locomotion can't override until it ends (or the player moves)
+     */
+    playTimed(name, ms, { yaw = null, cancelOnMove = true, timeScale } = {}) {
+        const ac = this.animController;
+        if (this.lockAnim || !ac.actions[name]) return false;
+        const duration = this.clipDuration(name);
+        ac.playState(name, {
+            loop: false,
+            timeScale: timeScale ?? Math.max(0.1, duration / (ms / 1000)),
+            fade: 0.1,
+            restart: true
+        });
+        const now = performance.now();
+        this.timedAnim = { name, start: now, until: now + ms, yaw, cancelOnMove };
+        return true;
+    }
+
+    /**
+     * @returns {boolean} True while a timed one-shot is playing
+     */
+    updateTimed(now, isMoving) {
+        const timed = this.timedAnim;
+        if (!timed) return false;
+        const ac = this.animController;
+        const replaced = ac.currentAction !== ac.actions[timed.name];
+        const moved = timed.cancelOnMove && isMoving && now - timed.start > 250;
+        if (now >= timed.until || replaced || moved) {
+            this.timedAnim = null;
+            if (timed.yaw !== null) this.model.rotation.set(0, this.model.rotation.y, 0);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Lying on the mat (keeps the yaw it landed with)
+     */
+    enterDown() {
+        if (this.lockAnim === 'down') return;
+        if (this.poseYaw === null) this.poseYaw = this.model.rotation.y;
+        this.setLock('down', { loop: true, fade: 0.25 });
+    }
+
+    /**
+     * Get up from the mat in WRESTLE_CONFIG.GETUP_MS
+     */
+    enterGetUp() {
+        if (this.lockAnim === 'getup') return;
+        if (!this.animController.actions.getup) {
+            this.clearLock();
+            return;
+        }
+        // Turn the model so the get-up clip starts with the head where the lying clip had it
+        const m = this.wrestleMeta;
+        if (this.lockAnim === 'down' && m) {
+            const baseYaw = this.poseYaw ?? this.model.rotation.y;
+            this.poseYaw = baseYaw + (m.downAlpha - m.getupAlpha);
+        } else {
+            this.poseYaw = null;
+        }
+        this.setLock('getup', {
+            loop: false,
+            timeScale: this.clipDuration('getup') / (WRESTLE_CONFIG.GETUP_MS / 1000),
+            fade: 0.2
+        });
+    }
+
+    /**
+     * How the lying clip lies: head direction (yaw in model space) and body points
+     */
+    getLieInfo() {
+        const m = this.wrestleMeta;
+        if (!m || m.downIsLying) {
+            return { alpha: m ? m.downAlpha : Math.PI, local: IDENTITY_QUAT, points: m?.downPoints || DEFAULT_BODY_POINTS };
+        }
+        // The clip doesn't lie the model down: tip it over procedurally (head towards local -Z)
+        return { alpha: Math.PI, local: LIE_BACK_QUAT, points: m.restPoints || DEFAULT_BODY_POINTS };
+    }
+
+    /**
+     * Start the procedural flight of a slammed/suplexed defender. The body plays the lying
+     * clip the whole time and is rotated/moved as a rigid block, landing on its back on
+     * `landing` exactly impactMs after the start.
+     * - slam: lifted horizontal above the attacker's head, then slammed in front
+     * - suplex: arcs backwards over the attacker's head (270 deg flip) and lands behind
+     */
+    startFlight({ type, start, attacker, landing, angle, impactMs }) {
+        const lie = this.getLieInfo();
+        // World direction the head points once landed: across the attacker for a slam,
+        // back towards the attacker for a suplex
+        const beta = type === 'slam' ? angle + Math.PI / 2 : angle;
+        const yaw = beta - lie.alpha;
+        const qFinal = new THREE.Quaternion().setFromAxisAngle(UP_AXIS, yaw).multiply(lie.local);
+
+        this.flight = {
+            type,
+            yaw,
+            qFinal,
+            axis: new THREE.Vector3(Math.cos(beta), 0, -Math.sin(beta)), // up x head direction
+            points: lie.points,
+            minYFinal: minPointY(qFinal, lie.points),
+            start: new THREE.Vector3(start.x, 0, start.z),
+            attacker: new THREE.Vector3(attacker.x, 0, attacker.z),
+            landing: new THREE.Vector3(landing.x, 0, landing.z),
+            ground: Number.isFinite(landing.y) ? landing.y : ARENA_CONFIG.RING_HEIGHT,
+            impactMs: Math.max(1, impactMs || 1),
+            startTime: performance.now()
+        };
+        this.positionHold = null;
+        this.poseYaw = yaw;
+        this.setLock('down', { loop: true, fade: 0.2 });
+    }
+
+    /**
+     * @returns {boolean} True while the flight drives the model transform
+     */
+    updateFlight(now) {
+        const fl = this.flight;
+        if (!fl) return false;
+
+        const t = now - fl.startTime;
+        const impact = fl.impactMs;
+        if (t >= impact) {
+            this.finishFlight();
+            return false;
+        }
+
+        // rot: around the horizontal axis perpendicular to the head direction (0 = lying flat,
+        // -PI/2 = upright, +PI/2 = upside down). spin: extra yaw around the vertical axis.
+        let rot = 0;
+        let spin = 0;
+        let height = 0;
+
+        if (fl.type === 'slam') {
+            const liftEnd = 0.45 * impact;
+            const holdEnd = 0.75 * impact;
+            if (t < liftEnd) {
+                // Upright and facing the attacker -> horizontal above their head
+                const s = easeInOut(t / liftEnd);
+                rot = -Math.PI / 2 * (1 - s);
+                spin = -Math.PI / 2 * (1 - s);
+                _flightPos.lerpVectors(fl.start, fl.attacker, s);
+                height = WRESTLE_CONFIG.LIFT_HEIGHT * s;
+            } else if (t < holdEnd) {
+                _flightPos.copy(fl.attacker);
+                height = WRESTLE_CONFIG.LIFT_HEIGHT + 0.1 * Math.sin(((t - liftEnd) / (holdEnd - liftEnd)) * Math.PI);
+            } else {
+                // Slammed down (accelerating) onto the landing spot
+                const s = (t - holdEnd) / (impact - holdEnd);
+                _flightPos.lerpVectors(fl.attacker, fl.landing, s);
+                height = WRESTLE_CONFIG.LIFT_HEIGHT * (1 - s * s);
+            }
+        } else {
+            // Suplex: upright (3PI/2) -> head first over the attacker -> upside down -> flat on the back
+            const s = t / impact;
+            rot = 1.5 * Math.PI * (1 - s) * (1 - s);
+            _flightPos.lerpVectors(fl.start, fl.landing, s);
+            height = WRESTLE_CONFIG.SUPLEX_PEAK * Math.sin(Math.PI * s);
+        }
+
+        _qAxis.setFromAxisAngle(fl.axis, rot);
+        _qSpin.setFromAxisAngle(UP_AXIS, spin);
+        _qPose.copy(_qSpin).multiply(_qAxis).multiply(fl.qFinal);
+
+        // Keep the body's lowest point `height` above the mat (the root is the hips' floor point)
+        const y = fl.ground + height + (fl.minYFinal - minPointY(_qPose, fl.points));
+        this.model.position.set(_flightPos.x, y, _flightPos.z);
+        this.model.quaternion.copy(_qPose);
+        return true;
+    }
+
+    finishFlight() {
+        const fl = this.flight;
+        if (!fl) return;
+        this.flight = null;
+        this.poseYaw = fl.yaw;
+        this.model.position.set(fl.landing.x, fl.ground, fl.landing.z);
+        this.model.rotation.set(0, fl.yaw, 0);
+        this.positionHold = {
+            x: fl.landing.x,
+            z: fl.landing.z,
+            until: performance.now() + WRESTLE_CONFIG.LANDING_HOLD_MS
+        };
+    }
+
+    /**
+     * Drop every grapple visual (new round / rematch)
+     */
+    resetWrestleVisuals() {
+        this.lockAnim = null;
+        this.lockOpts = null;
+        this.timedAnim = null;
+        this.poseYaw = null;
+        this.flight = null;
+        this.positionHold = null;
+        this.moveVisual = null;
+    }
+
     /**
      * Lerp the model's Y rotation toward an angle along the shortest arc
      */
@@ -254,13 +607,37 @@ class ArenaPlayerEntity {
         this.model.rotation.y = current + diff * t;
     }
 
-    update(delta) {
-        // Update controller physics
-        this.controller.update(delta);
-        
-        // Update model position
-        this.model.position.copy(this.controller.position);
-        
+    /**
+     * Model position/rotation from the controller (outside procedural flights)
+     */
+    updateModelTransform(now) {
+        const ctrlPos = this.controller.position;
+
+        // Right after a landing, keep the landing spot until the server position catches up
+        const hold = this.positionHold;
+        if (hold) {
+            const dx = ctrlPos.x - hold.x;
+            const dz = ctrlPos.z - hold.z;
+            if (now > hold.until || dx * dx + dz * dz < 0.04) this.positionHold = null;
+        }
+        if (this.positionHold) {
+            this.model.position.set(hold.x, ctrlPos.y, hold.z);
+        } else {
+            this.model.position.copy(ctrlPos);
+        }
+
+        // Fixed yaw on the mat / getting up / scrambling up
+        const timedYaw = this.timedAnim ? this.timedAnim.yaw : null;
+        const yaw = timedYaw ?? this.poseYaw;
+        if (yaw !== null && yaw !== undefined) {
+            if (this.lockAnim === 'down' && this.getLieInfo().local !== IDENTITY_QUAT) {
+                this.model.quaternion.setFromAxisAngle(UP_AXIS, yaw).multiply(LIE_BACK_QUAT);
+            } else {
+                this.model.rotation.set(0, yaw, 0);
+            }
+            return;
+        }
+
         // Update model rotation based on facing angle (always, not just when moving)
         // This ensures rotation updates even when grabbing/grabbed
         if (this.controller.facingAngle !== undefined) {
@@ -273,24 +650,64 @@ class ArenaPlayerEntity {
             );
             this.rotateTowards(targetAngle, 0.15);
         }
-        
-        // Update animation based on state
-        const isMoving = this.controller.velocity.length() > 0.5;
-        const isRunning = isMoving && this.controller.input.run;
-        
-        this.animController.updateFromMovementState({
-            isMoving,
-            isRunning,
-            isGrounded: true,
-            isJumping: false
-        });
-        
-        this.animController.update(delta);
     }
-    
+
+    /**
+     * Fight idle / walk / run from the movement state
+     */
+    updateLocomotion(isMoving) {
+        const ac = this.animController;
+        const isRunning = isMoving && this.controller.input.run;
+
+        // No guard-stance clip: keep the original behaviour
+        if (!ac.actions.idle) {
+            ac.updateFromMovementState({ isMoving, isRunning, isGrounded: true, isJumping: false });
+            return;
+        }
+
+        // Eliminated players stay down; attacks/blocks/taunts finish on their own
+        if (this.controller.isEliminated) return;
+        if (ac.isAttacking || ac.isBlocking || ac.isTaunting) return;
+
+        if (isRunning) {
+            ac.playRun();
+        } else if (isMoving) {
+            ac.playWalk();
+        } else {
+            this.playFightIdle();
+        }
+    }
+
+    update(delta) {
+        const now = performance.now();
+
+        // Update controller physics
+        this.controller.update(delta);
+        const isMoving = this.controller.velocity.length() > 0.5;
+
+        // Procedural flight (slam/suplex) owns the transform; otherwise follow the controller
+        if (!this.updateFlight(now)) {
+            this.updateModelTransform(now);
+        }
+
+        // Animation priority: grapple lock > timed one-shot > locomotion
+        const ac = this.animController;
+        if (this.lockAnim) {
+            // Something else took over (a one-shot's auto-return to idle...): put the lock clip back
+            const action = ac.actions[this.lockAnim];
+            if (action && ac.currentAction !== action) {
+                ac.playState(this.lockAnim, { ...this.lockOpts, restart: true });
+            }
+        } else if (!this.updateTimed(now, isMoving)) {
+            this.updateLocomotion(isMoving);
+        }
+
+        ac.update(delta);
+    }
+
     dispose() {
         this.animController.dispose();
-        
+
         // Remove name label
         if (this.nameLabel) {
             this.model.remove(this.nameLabel);
@@ -298,7 +715,7 @@ class ArenaPlayerEntity {
                 this.nameLabel.element.parentNode.removeChild(this.nameLabel.element);
             }
         }
-        
+
         this.model.traverse((child) => {
             if (child.geometry) child.geometry.dispose();
             if (child.material) {
@@ -329,8 +746,16 @@ class ArenaGame {
         this.baseModel = null;
         this.baseAnimations = {};
         this.characterModelCache = {};
+        this.characterAnimCache = {};      // characterId -> Promise<{animations, meta}> (Meshy + retargeted Mixamo clips)
+        this.mixamoSourcesPromise = null;  // Mixamo grapple FBX files, loaded once
+        this.sharedGrappleClips = null;
         this.selectedCharacter = 'edgar'; // Default character
-        
+
+        // Grapple overlays
+        this.tieUpIndicators = new Map();  // attackerId -> floating "AMARRE" tag
+        this.transientLabels = new Set();  // Move-name popups
+        this.pinVerdictTimer = null;
+
         // Networking
         this.socket = null;
         this.roomCode = null;
@@ -817,9 +1242,12 @@ class ArenaGame {
         
         const charId = characterId || this.selectedCharacter;
         const characterConfig = CHARACTER_MODELS[charId];
-        
+
+        // Grapple clips (Mixamo) load in parallel with everything else
+        const mixamoPromise = this.loadMixamoSources();
+
         try {
-            this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
+this.updateLoadingProgress(0, `Cargando modelo: ${characterConfig.name}...`);
             
             // Load character model
             this.baseModel = await this.loadFBX(loader, `assets/${characterConfig.file}`);
@@ -846,9 +1274,14 @@ class ArenaGame {
                 loadedCount++;
             }
             
+            // Retarget the grapple clips onto this character
+            this.updateLoadingProgress(97, 'Preparando llaves de lucha...');
+            await mixamoPromise;
+            const grapple = await this.getCharacterAnimations(charId);
+
             // Create local player
-            this.createLocalPlayer();
-            
+            this.createLocalPlayer(grapple);
+
             this.updateLoadingProgress(100, '¡Arena lista!');
             
             setTimeout(() => {
@@ -866,6 +1299,175 @@ class ArenaGame {
         }
     }
     
+    /**
+     * Load every Mixamo grapple clip in parallel, once (failed files resolve to null)
+     * @returns {Promise<Object<string, THREE.Object3D|null>>} file name -> loaded FBX
+     */
+    loadMixamoSources() {
+        if (!this.mixamoSourcesPromise) {
+            const loader = new FBXLoader();
+            const files = [...new Set(Object.values(MIXAMO_FILES))];
+            this.mixamoSourcesPromise = Promise.all(files.map((file) =>
+                this.loadFBX(loader, `assets/mixamo/${file}`)
+                    .then((fbx) => [file, fbx])
+                    .catch((err) => {
+                        console.warn(`[Arena] Mixamo clip ${file} not loaded:`, err);
+                        return [file, null];
+                    })
+            )).then((entries) => Object.fromEntries(entries));
+        }
+        return this.mixamoSourcesPromise;
+    }
+
+    /**
+     * Private copies of Meshy clips used by grapple states. Separate clip objects get their
+     * own mixer actions, so the AnimationController's one-shot auto-return to idle (keyed on
+     * 'throw'/'hit'/'fall') never fires for them.
+     */
+    getSharedGrappleClips() {
+        if (!this.sharedGrappleClips) {
+            const base = this.baseAnimations;
+            this.sharedGrappleClips = {};
+            if (base.throw) this.sharedGrappleClips.slamThrow = base.throw.clone(); // Slam attacker
+            if (base.hit) this.sharedGrappleClips.hitReact = base.hit.clone();     // Headbutt/knee victim
+            if (base.fall) this.sharedGrappleClips.ko = base.fall.clone();         // Eliminated: fall and stay down
+        }
+        return this.sharedGrappleClips;
+    }
+
+    /**
+     * Clips for a character: shared Meshy clips + Mixamo clips retargeted to its skeleton
+     * (cached per character). Needs characterModelCache[characterId] to be loaded.
+     * @returns {Promise<{animations: object, meta: object|null}>}
+     */
+    getCharacterAnimations(characterId) {
+        if (!this.characterAnimCache[characterId]) {
+            this.characterAnimCache[characterId] = this.buildCharacterAnimations(characterId)
+                .catch((err) => {
+                    console.error(`[Arena] Grapple clips failed for ${characterId}:`, err);
+                    return { animations: { ...this.baseAnimations, ...this.getSharedGrappleClips() }, meta: null };
+                });
+        }
+        return this.characterAnimCache[characterId];
+    }
+
+    async buildCharacterAnimations(characterId) {
+        const model = this.characterModelCache[characterId];
+        const sources = await this.loadMixamoSources();
+        const animations = { ...this.baseAnimations, ...this.getSharedGrappleClips() };
+        const fallback = new Set();
+        const startTime = performance.now();
+
+        for (const [name, file] of Object.entries(MIXAMO_FILES)) {
+            const source = sources[file];
+            const clip = source?.animations?.[0];
+            if (model && clip) {
+                try {
+                    animations[name] = retargetMixamoClip(model, source, clip, { name: `${characterId}_${name}` });
+                } catch (err) {
+                    console.warn(`[Arena] Retarget ${name} failed for ${characterId}:`, err);
+                }
+            }
+            const stand = MIXAMO_FALLBACKS[name];
+            if (!animations[name] && stand && this.baseAnimations[stand]) {
+                animations[name] = this.baseAnimations[stand].clone();
+                fallback.add(name);
+            }
+            // Retargeting is synchronous: yield between clips so the page stays responsive
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        const meta = this.analyzeWrestlePoses(model, animations, fallback);
+        const deg = (rad) => Math.round(THREE.MathUtils.radToDeg(rad));
+        console.log(`[Arena] Grapple clips for ${characterId} ready in ${Math.round(performance.now() - startTime)} ms`, {
+            fallback: [...fallback],
+            downIsLying: meta.downIsLying,
+            downHeadYawDeg: deg(meta.downAlpha),
+            getupStartHeadYawDeg: deg(meta.getupAlpha),
+            suplexEndHeadYawDeg: deg(meta.suplexEndAlpha)
+        });
+        return { animations, meta };
+    }
+
+    /**
+     * Sample the lying / get-up / suplex clips on a throwaway copy of the character to learn
+     * where the head points (yaw in model space, 0 = +Z = facing direction) and whether the
+     * lying clip really lies the body down. The host uses this to line up the procedural
+     * slam/suplex landing and the down -> get-up transition.
+     */
+    analyzeWrestlePoses(model, animations, fallback) {
+        const meta = {
+            fallback,
+            downIsLying: true,
+            downAlpha: Math.PI,
+            getupAlpha: Math.PI,
+            suplexEndAlpha: Math.PI,
+            downPoints: null,
+            restPoints: null
+        };
+        if (!model) return meta;
+
+        const probe = SkeletonUtils.clone(model);
+        probe.position.set(0, 0, 0);
+        probe.rotation.set(0, 0, 0);
+        probe.scale.setScalar(0.01);
+        const bones = new Map();
+        probe.traverse((o) => { if (o.isBone && !bones.has(o.name)) bones.set(o.name, o); });
+        const names = ['Head', 'Hips', 'LeftFoot', 'RightFoot', 'LeftHand', 'RightHand'];
+        const mixer = new THREE.AnimationMixer(probe);
+
+        const sample = (clip, time) => {
+            mixer.stopAllAction();
+            if (clip) {
+                const action = mixer.clipAction(clip);
+                action.reset();
+                action.play();
+                mixer.setTime(Math.max(0, Math.min(time, clip.duration * 0.999)));
+            }
+            probe.updateMatrixWorld(true);
+            const points = {};
+            names.forEach((n) => {
+                const bone = bones.get(n);
+                if (bone) points[n] = bone.getWorldPosition(new THREE.Vector3());
+            });
+            if (!points.Head || !points.Hips) return null;
+            const d = points.Head.clone().sub(points.Hips);
+            return {
+                alpha: Math.atan2(d.x, d.z),
+                lying: Math.hypot(d.x, d.z) > Math.abs(d.y),
+                points: Object.values(points)
+            };
+        };
+
+        try {
+            const rest = sample(null, 0);
+            if (rest) meta.restPoints = rest.points;
+
+            const down = animations.down;
+            if (down) {
+                const t = fallback.has('down') ? down.duration : Math.min(0.4, down.duration * 0.5);
+                const info = sample(down, t);
+                if (info) {
+                    meta.downIsLying = info.lying;
+                    meta.downAlpha = info.lying ? info.alpha : Math.PI; // Procedural lie: head to -Z
+                    meta.downPoints = info.points;
+                }
+            }
+
+            const up = animations.getup ? sample(animations.getup, 0) : null;
+            meta.getupAlpha = up && up.lying ? up.alpha : meta.downAlpha;
+
+            const sup = animations.suplex ? sample(animations.suplex, animations.suplex.duration) : null;
+            meta.suplexEndAlpha = sup && sup.lying ? sup.alpha : meta.getupAlpha;
+        } catch (err) {
+            console.warn('[Arena] Wrestle pose analysis failed:', err);
+        } finally {
+            mixer.stopAllAction();
+            mixer.uncacheRoot(probe);
+        }
+        return meta;
+    }
+
     loadFBX(loader, path) {
         return new Promise((resolve, reject) => {
             loader.load(path, resolve, undefined, reject);
@@ -886,13 +1488,14 @@ class ArenaGame {
         });
     }
     
-    createLocalPlayer() {
+    createLocalPlayer(grapple = null) {
         this.localPlayer = new ArenaPlayerEntity(
             'local',
             1,
             PLAYER_COLORS[0],
             this.baseModel,
-            this.baseAnimations
+            grapple?.animations || this.baseAnimations,
+            grapple?.meta || null
         );
         
         // Set name based on selected character
@@ -1073,7 +1676,17 @@ class ArenaGame {
         this.socket.on('arena-game-over', (data) => this.handleArenaGameOver(data));
         this.socket.on('arena-grab-escape', (data) => this.handleArenaGrabEscape(data));
         this.socket.on('arena-elimination', (data) => this.handleArenaElimination(data));
-        
+
+        // Grappling (tie-ups, grapple moves, downs, pins)
+        this.socket.on('arena-tieup', (data) => this.handleArenaTieUp(data));
+        this.socket.on('arena-tieup-end', (data) => this.handleArenaTieUpEnd(data));
+        this.socket.on('arena-grapple-move', (data) => this.handleArenaGrappleMove(data));
+        this.socket.on('arena-grapple-impact', (data) => this.handleArenaGrappleImpact(data));
+        this.socket.on('arena-getup', (data) => this.handleArenaGetUp(data));
+        this.socket.on('arena-pin-start', (data) => this.handleArenaPinStart(data));
+        this.socket.on('arena-pin-count', (data) => this.handleArenaPinCount(data));
+        this.socket.on('arena-pin-end', (data) => this.handleArenaPinEnd(data));
+
         // Tournament events - listen for round transitions
         this.socket.on('round-starting', (data) => {
             console.log('[Arena] Round starting:', data);
@@ -1361,7 +1974,10 @@ class ArenaGame {
                     // Return to idle animation
                     player.playAnimation('idle');
                 }
-                
+
+                // Grapple animations follow the server flags (tie-up, move, down, get-up, pin)
+                this.syncGrappleVisuals(player);
+
                 // Update HUD
                 if (this.hud) {
                     this.hud.updatePlayer(player);
@@ -1373,10 +1989,16 @@ class ArenaGame {
     handleArenaAttackStarted(data) {
         console.log('[Arena] Attack started:', data);
         const player = this.players.get(data.attackerId);
+        if (player && data.attackType === 'stomp') {
+            // Strike on a downed opponent
+            player.playTimed('stomp', WRESTLE_CONFIG.STOMP_MS);
+            this.sfxManager?.playKickWhoosh?.();
+            return;
+        }
         if (player) {
             // Play attack animation
             player.playAnimation(data.attackType);
-            
+
             // Create attack trail VFX
             if (this.vfxManager && player.model) {
                 const pos = player.model.position.clone();
@@ -1409,6 +2031,11 @@ class ArenaGame {
                 const target = this.players.get(hit.targetId);
                 
                 if (target && !target.controller.isEliminated) {
+                    // A clean hit breaks a tie-up or knocks a pinner off the cover
+                    if (!hit.blocked && (target.lockAnim === 'tieup' || target.lockAnim === 'kneel')) {
+                        target.clearLock();
+                    }
+
                     // Play hit/hurt animation (speed x2 for arena)
                     if (target.animController) {
                         target.playAnimation('hit');
@@ -1475,6 +2102,11 @@ class ArenaGame {
         const victim = this.players.get(data.targetId);
         
         if (grabber && victim) {
+            // Lifted out of a tie-up: the carry visuals take over
+            this.removeTieUpIndicator(data.grabberId);
+            grabber.clearLock();
+            victim.clearLock();
+
             grabber.controller.isGrabbing = true;
             grabber.controller.grabbedPlayer = victim.controller;
             grabber.grabbedEntity = victim; // Store the entity reference for position updates
@@ -1719,12 +2351,23 @@ class ArenaGame {
             // Show elimination announcement
             const reason = data.reason === 'ringout' ? '¡RING OUT!'
                 : data.reason === 'disconnect' ? '¡DESCONECTADO!'
+                : data.reason === 'pinfall' ? '¡PINFALL!'
                 : '¡K.O.!';
             this.showEliminationAnnouncement(data.playerName, reason);
-            
-            // Play fall animation
-            player.playAnimation('fall');
-            
+
+            // Already on the mat (pinned, stomped, or mid slam/suplex): stay lying down.
+            // Otherwise fall and stay down (the plain 'fall' one-shot used to pop back to idle).
+            const onTheMat = player.flight || player.lockAnim === 'down' || data.reason === 'pinfall';
+            if (onTheMat) {
+                if (!player.flight) player.enterDown();
+            } else {
+                player.clearLock();
+                const fallSpeed = ANIMATION_CONFIG.defaultSpeeds.fall || 1;
+                if (!player.setLock('ko', { loop: false, timeScale: fallSpeed, fade: 0.1, restart: true })) {
+                    player.playAnimation('fall');
+                }
+            }
+
             // Create dramatic elimination VFX
             if (this.vfxManager && player.model) {
                 const pos = player.model.position.clone();
@@ -2210,6 +2853,7 @@ class ArenaGame {
         document.getElementById('tournament-end-overlay')?.classList.add('hidden');
         document.getElementById('room-code-overlay')?.classList.add('hidden');
         document.querySelectorAll('.elimination-announcement, .grab-indicator').forEach(el => el.remove());
+        this.clearGrappleOverlays();
         this.setRematchButtonsPending(false);
 
         if (data.rematch) {
@@ -2253,6 +2897,7 @@ class ArenaGame {
         }
 
         // Host-side visual flags
+        player.resetWrestleVisuals?.();
         player.isBeingThrown = false;
         player.isFlying = false;
         player.isBeingCarried = false;
@@ -2451,7 +3096,371 @@ class ArenaGame {
         }
     }
     
-    async addPlayer(playerData, index = 0, total = Math.max(this.players.size + 1, 4)) {
+    // =================================
+    // Grappling (tie-ups, moves, downs, pins)
+    // =================================
+
+    /**
+     * Drive grapple animations from the arena-state flags, so a missed event self-heals.
+     * Priority: pin > on the mat > getting up > move > tie-up > nothing (locomotion).
+     */
+    syncGrappleVisuals(player) {
+        const c = player.controller;
+        if (c.isEliminated || player.flight) return;
+        if (!c.move) player.moveVisual = null;
+
+        if (c.pin) {
+            if (c.pin.role === 'pinner') {
+                player.setLock('kneel', { loop: false, timeScale: WRESTLE_CONFIG.KNEEL_SPEED, fade: 0.2 });
+            } else {
+                player.enterDown();
+            }
+        } else if (c.isDown) {
+            player.enterDown();
+        } else if (c.isGettingUp) {
+            player.enterGetUp();
+        } else if (c.move) {
+            if (!player.moveVisual) {
+                // Missed 'arena-grapple-move': best-effort pose until the move ends
+                player.moveVisual = { type: c.move.type, role: c.move.role };
+                if (c.move.role === 'attacker') {
+                    player.setLock(MOVE_ATTACKER_CLIPS[c.move.type] || 'tieup', { loop: false, fade: 0.1 });
+                } else {
+                    player.setLock('tieup', { loop: true });
+                }
+            }
+        } else if (c.tieUp) {
+            player.setLock('tieup', { loop: true, fade: 0.15 });
+        } else if (player.lockAnim && player.lockAnim !== 'ko') {
+            player.clearLock();
+        }
+    }
+
+    handleArenaTieUp(data) {
+        const attacker = this.players.get(data.attackerId);
+        const defender = this.players.get(data.defenderId);
+        [attacker, defender].forEach((p) => {
+            if (p && !p.controller.isEliminated) p.setLock('tieup', { loop: true, fade: 0.15 });
+        });
+        if (!attacker || !defender) return;
+
+        this.showTieUpIndicator(attacker, defender, data.duration || 2500);
+
+        if (this.vfxManager) {
+            const mid = attacker.model.position.clone().add(defender.model.position).multiplyScalar(0.5);
+            mid.y += 1.2;
+            this.vfxManager.createHitSparks?.(mid, 0xffcc00, 0.8);
+        }
+        this.sfxManager?.playBlock?.();
+    }
+
+    handleArenaTieUpEnd(data) {
+        this.removeTieUpIndicator(data.attackerId);
+        const attacker = this.players.get(data.attackerId);
+        const defender = this.players.get(data.defenderId);
+
+        if (data.reason === 'escape') {
+            this.hud?.showStatus(data.defenderId, '¡SE ZAFÓ!');
+            this.hud?.showStatus(data.attackerId, 'stunned');
+            this.sfxManager?.playBlock?.();
+            if (this.vfxManager && defender) {
+                const pos = defender.model.position.clone();
+                pos.y += 1.2;
+                this.vfxManager.createBlockSparks?.(pos);
+            }
+        }
+
+        // No move/lift follows a tie-up end: release both (arena-state would do it too)
+        [attacker, defender].forEach((p) => {
+            if (p && p.lockAnim === 'tieup') p.clearLock();
+        });
+    }
+
+    handleArenaGrappleMove(data) {
+        const attacker = this.players.get(data.attackerId);
+        const defender = this.players.get(data.defenderId);
+        this.removeTieUpIndicator(data.attackerId);
+
+        const duration = data.duration || 1000;
+        const impactDelay = data.impactDelay || duration / 2;
+
+        if (attacker && !attacker.controller.isEliminated) {
+            attacker.moveVisual = { type: data.move, role: 'attacker' };
+            if (typeof data.facingAngle === 'number') attacker.controller.facingAngle = data.facingAngle;
+
+            const clipName = MOVE_ATTACKER_CLIPS[data.move] || 'tieup';
+            const clipDuration = attacker.clipDuration(clipName);
+            // Fit the clip to the move; the suplex fall is synced so the back hits the mat at the impact
+            let timeScale = clipDuration / (duration / 1000);
+            if (data.move === 'suplex' && !attacker.isFallbackClip('suplex')) {
+                timeScale = (clipDuration * WRESTLE_CONFIG.SUPLEX_FALL_FRACTION) / (impactDelay / 1000);
+            }
+            attacker.setLock(clipName, { loop: false, timeScale, fade: 0.1, restart: true });
+        }
+
+        if (defender && !defender.controller.isEliminated) {
+            defender.moveVisual = { type: data.move, role: 'defender' };
+            if ((data.move === 'slam' || data.move === 'suplex') && data.landing) {
+                const attackerPos = data.attackerPos || attacker?.controller.position || defender.model.position;
+                defender.startFlight({
+                    type: data.move,
+                    start: defender.model.position,
+                    attacker: attackerPos,
+                    landing: data.landing,
+                    angle: typeof data.facingAngle === 'number'
+                        ? data.facingAngle
+                        : Math.atan2(defender.model.position.x - attackerPos.x, defender.model.position.z - attackerPos.z),
+                    impactMs: impactDelay
+                });
+            } else {
+                // Headbutt/knee: keep struggling until the impact
+                defender.setLock('tieup', { loop: true });
+            }
+        }
+
+        if (this.sfxManager) {
+            if (data.move === 'headbutt') this.sfxManager.playPunchWhoosh?.();
+            else if (data.move === 'knee') this.sfxManager.playKickWhoosh?.();
+            else this.sfxManager.playJump?.();
+        }
+    }
+
+    handleArenaGrappleImpact(data) {
+        const defender = this.players.get(data.defenderId);
+        if (defender) {
+            if (typeof data.newHealth === 'number') defender.controller.health = data.newHealth;
+
+            if (!defender.controller.isEliminated) {
+                if (!data.down) {
+                    defender.setLock('hitReact', {
+                        loop: false,
+                        timeScale: WRESTLE_CONFIG.HIT_REACT_SPEED,
+                        fade: 0.08,
+                        restart: true
+                    });
+                } else if (!defender.flight) {
+                    // The flight was missed (or already over): make sure they're on the mat
+                    defender.enterDown();
+                }
+            }
+        }
+
+        this.playGrappleImpactEffects(data, defender);
+    }
+
+    playGrappleImpactEffects(data, defender) {
+        const heavy = !!data.down;
+        const color = MOVE_COLORS[data.move] || 0xff3366;
+        const damage = data.damage || 0;
+
+        let hitPos;
+        if (heavy && data.landing) {
+            hitPos = new THREE.Vector3(data.landing.x, (data.landing.y ?? ARENA_CONFIG.RING_HEIGHT) + 0.3, data.landing.z);
+        } else if (defender) {
+            hitPos = defender.model.position.clone();
+            hitPos.y += data.move === 'headbutt' ? 1.5 : 1.0;
+        } else {
+            return;
+        }
+
+        if (this.vfxManager) {
+            this.vfxManager.createHitSparks?.(hitPos, color, heavy ? 2.5 : 1.6);
+            this.vfxManager.createImpactRing?.(hitPos, color);
+            this.vfxManager.createDamageNumber?.(hitPos, damage, color);
+            if (defender) this.vfxManager.createCharacterFlash?.(defender.model, 120);
+            if (heavy) {
+                const ground = hitPos.clone();
+                ground.y = ARENA_CONFIG.RING_HEIGHT;
+                this.vfxManager.createLandingImpact?.(ground, data.move === 'suplex' ? 2.5 : 2.0);
+                this.vfxManager.createDustCloud?.(ground, 2);
+            }
+        }
+
+        if (this.sfxManager) {
+            if (heavy) {
+                this.sfxManager.playHit?.(35, false); // Heavy hit
+                this.sfxManager.playLand?.(1);
+            } else if (data.move === 'knee') {
+                this.sfxManager.playKickHit?.(damage);
+            } else {
+                this.sfxManager.playHit?.(20, false);
+            }
+        }
+
+        if (heavy) {
+            this.shakeScreen(data.move === 'suplex' ? 1.0 : 0.8, data.move === 'suplex' ? 550 : 450);
+        } else {
+            this.shakeScreen(0.35, 180);
+        }
+
+        if (this.hud && defender) {
+            this.hud.updatePlayer(defender);
+            this.hud.showDamage(data.defenderId, damage, false);
+            if (heavy && !data.eliminated) this.hud.showStatus(data.defenderId, '¡A LA LONA!');
+        }
+
+        this.showMovePopup(MOVE_NAMES[data.move] || '¡ZAS!', hitPos);
+    }
+
+    handleArenaGetUp(data) {
+        const player = this.players.get(data.playerId);
+        if (!player || player.controller.isEliminated || player.flight) return;
+        player.enterGetUp();
+    }
+
+    handleArenaPinStart(data) {
+        const pinner = this.players.get(data.pinnerId);
+        const victim = this.players.get(data.victimId);
+        if (pinner && !pinner.controller.isEliminated) {
+            pinner.setLock('kneel', { loop: false, timeScale: WRESTLE_CONFIG.KNEEL_SPEED, fade: 0.2 });
+        }
+        if (victim && !victim.controller.isEliminated && !victim.flight) victim.enterDown();
+
+        this.hud?.showStatus(data.victimId, '¡CUBIERTO!');
+        this.hud?.showRefCount('¡PIN!', 'start', 800);
+    }
+
+    handleArenaPinCount(data) {
+        const count = data.count || 0;
+        const final = count >= 3;
+        this.hud?.showRefCount(final ? '3!' : String(count), final ? 'final' : 'count', final ? 900 : 850);
+
+        // Referee slapping the mat
+        this.sfxManager?.playBlock?.();
+        if (final) this.sfxManager?.playKO?.();
+        this.shakeScreen(final ? 0.3 : 0.12, final ? 250 : 120);
+
+        const victim = this.players.get(data.victimId);
+        if (this.vfxManager && victim) {
+            const pos = victim.model.position.clone();
+            pos.y = ARENA_CONFIG.RING_HEIGHT + 0.05;
+            this.vfxManager.createImpactRing?.(pos, final ? 0xffcc00 : 0xffffff);
+        }
+    }
+
+    handleArenaPinEnd(data) {
+        const pinner = this.players.get(data.pinnerId);
+        if (pinner && pinner.lockAnim === 'kneel') pinner.clearLock();
+
+        if (data.result === 'kickout') {
+            this.hud?.showRefCount('¡SE ZAFÓ!', 'kickout', 1600);
+            this.hud?.showStatus(data.victimId, '¡SE ZAFÓ!');
+            if (pinner && !pinner.controller.isEliminated) {
+                pinner.playTimed('hitReact', 500, { cancelOnMove: false });
+            }
+            this.sfxManager?.playBlock?.();
+            this.shakeScreen(0.3, 200);
+        } else if (data.result === 'pinfall') {
+            // "3!" is on screen: follow it with the verdict
+            const matchId = this.matchId;
+            clearTimeout(this.pinVerdictTimer);
+            this.pinVerdictTimer = setTimeout(() => {
+                if (matchId === this.matchId) this.hud?.showRefCount('¡CUENTA DE 3!', 'pinfall', 1800);
+            }, 650);
+        } else {
+            this.hud?.hideRefCount();
+        }
+    }
+
+    /**
+     * "AMARRE" tag floating over a tied-up pair, with the tie-up timer and escape progress
+     */
+    showTieUpIndicator(attacker, defender, duration) {
+        this.removeTieUpIndicator(attacker.id);
+
+        const el = document.createElement('div');
+        el.className = 'arena-tieup-indicator';
+        el.innerHTML = `
+            <span class="arena-tieup-label">AMARRE</span>
+            <div class="arena-tieup-bar"><div class="arena-tieup-fill"></div></div>
+            <span class="arena-tieup-escape"></span>
+        `;
+        const label = new CSS2DObject(el);
+        label.center.set(0.5, 1);
+        this.scene.add(label);
+
+        this.tieUpIndicators.set(attacker.id, {
+            label,
+            attackerId: attacker.id,
+            defenderId: defender.id,
+            fill: el.querySelector('.arena-tieup-fill'),
+            escape: el.querySelector('.arena-tieup-escape'),
+            duration,
+            start: performance.now()
+        });
+        this.updateTieUpIndicators();
+    }
+
+    removeTieUpIndicator(attackerId) {
+        const indicator = this.tieUpIndicators.get(attackerId);
+        if (!indicator) return;
+        indicator.label.removeFromParent(); // CSS2DObject removes its element on 'removed'
+        this.tieUpIndicators.delete(attackerId);
+    }
+
+    updateTieUpIndicators() {
+        const now = performance.now();
+        this.tieUpIndicators.forEach((ind, attackerId) => {
+            const attacker = this.players.get(ind.attackerId);
+            const defender = this.players.get(ind.defenderId);
+            const elapsed = now - ind.start;
+            const gone = !attacker || !defender ||
+                attacker.controller.isEliminated || defender.controller.isEliminated ||
+                (!attacker.controller.tieUp && elapsed > 300) ||
+                elapsed > ind.duration + 1000;
+            if (gone) {
+                this.removeTieUpIndicator(attackerId);
+                return;
+            }
+
+            ind.label.position.copy(attacker.model.position).add(defender.model.position).multiplyScalar(0.5);
+            ind.label.position.y += 2.4;
+
+            const tie = attacker.controller.tieUp;
+            const msLeft = tie && typeof tie.msLeft === 'number' ? tie.msLeft : Math.max(0, ind.duration - elapsed);
+            ind.fill.style.width = `${Math.max(0, Math.min(1, msLeft / ind.duration)) * 100}%`;
+
+            const defTie = defender.controller.tieUp;
+            const taps = defTie?.escapeTaps || 0;
+            ind.escape.textContent = taps > 0 ? `ZAFÁNDOSE ${taps}/${defTie.escapeNeeded || 5}` : '';
+        });
+    }
+
+    /**
+     * Big move name over the impact point ("¡SUPLEX!")
+     */
+    showMovePopup(text, worldPos) {
+        const el = document.createElement('div');
+        el.className = 'arena-move-popup';
+        const inner = document.createElement('span');
+        inner.textContent = text;
+        el.appendChild(inner);
+
+        const label = new CSS2DObject(el);
+        label.position.copy(worldPos);
+        label.position.y += 1.4;
+        label.center.set(0.5, 1);
+        this.scene.add(label);
+        this.transientLabels.add(label);
+
+        setTimeout(() => {
+            label.removeFromParent();
+            this.transientLabels.delete(label);
+        }, 1300);
+    }
+
+    /**
+     * Remove every grapple overlay (new round / rematch)
+     */
+    clearGrappleOverlays() {
+        Array.from(this.tieUpIndicators.keys()).forEach((id) => this.removeTieUpIndicator(id));
+        this.transientLabels.forEach((label) => label.removeFromParent());
+        this.transientLabels.clear();
+        clearTimeout(this.pinVerdictTimer);
+        this.hud?.hideRefCount?.();
+    }
+
+    async addPlayer(playerData, index = 0, total= Math.max(this.players.size + 1, 4)) {
         if (this.players.has(playerData.id)) return;
         
         // Several events (player-joined, game-started) can add the same player while its
@@ -2469,8 +3478,11 @@ class ArenaGame {
             playerModel = await this.loadFBX(loader, `assets/${config.file}`);
             this.characterModelCache[characterId] = playerModel;
         }
-        
-        // Superseded by a newer addPlayer, removed meanwhile, or already created
+
+        // Grapple clips retargeted to this character (cached)
+        const grapple = await this.getCharacterAnimations(characterId);
+
+        // Supersededby a newer addPlayer, removed meanwhile, or already created
         if (this.pendingPlayerLoads.get(playerData.id) !== loadToken) return;
         this.pendingPlayerLoads.delete(playerData.id);
         if (this.players.has(playerData.id)) return;
@@ -2481,7 +3493,8 @@ class ArenaGame {
             number,
             playerData.color || PLAYER_COLORS[(number - 1) % PLAYER_COLORS.length],
             playerModel,
-            this.baseAnimations
+            grapple.animations,
+            grapple.meta
         );
         player.characterId = playerData.character || 'edgar';
         
@@ -2503,6 +3516,9 @@ class ArenaGame {
         this.pendingPlayerLoads?.delete(playerId); // cancel an in-flight addPlayer
         const player = this.players.get(playerId);
         if (player) {
+            this.tieUpIndicators.forEach((ind, attackerId) => {
+                if (ind.attackerId === playerId || ind.defenderId === playerId) this.removeTieUpIndicator(attackerId);
+            });
             this.scene.remove(player.model);
             player.dispose();
             this.players.delete(playerId);
@@ -2735,7 +3751,10 @@ class ArenaGame {
         
         // Update grabbed player positions (make them follow their grabber)
         this.updateGrabbedPlayerPositions();
-        
+
+        // Floating "AMARRE" tags follow their pair
+        this.updateTieUpIndicators();
+
         // Check collisions
         this.checkPlayerCollisions();
         this.checkRingBoundaries();

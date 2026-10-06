@@ -180,6 +180,26 @@
             </div>
             
             <div class="controller-body">
+                <!-- Arena wrestling HUD (tie-up move guide, pin count, status).
+                     Sits above the controls and never takes touches. -->
+                <div id="arena-hud" class="arena-hud hidden" aria-live="polite">
+                    <div class="arena-hud-title" id="arena-hud-title"></div>
+                    <div class="arena-hud-sub" id="arena-hud-sub"></div>
+                    <div class="arena-hud-guide hidden" id="arena-hud-guide">
+                        <span class="guide-row"><b>GOLPE</b> Cabezazo</span>
+                        <span class="guide-row"><b>GOLPE + 🕹</b> Azotón</span>
+                        <span class="guide-row"><b>PATADA</b> Rodillazo</span>
+                        <span class="guide-row"><b>PATADA + 🕹</b> Suplex</span>
+                        <span class="guide-row guide-wide"><b>AGARRAR</b> Cargar</span>
+                    </div>
+                    <div class="arena-hud-count pin-count hidden" id="arena-hud-count">
+                        <span class="pin-num" data-n="1">1</span><span class="pin-sep">·</span><span class="pin-num" data-n="2">2</span><span class="pin-sep">·</span><span class="pin-num" data-n="3">3</span>
+                    </div>
+                    <div class="arena-hud-timer hidden" id="arena-hud-timer">
+                        <div class="arena-hud-timer-fill" id="arena-hud-timer-fill"></div>
+                    </div>
+                </div>
+
                 <!-- Analog joystick (Left side): one thumb, 8 directions -->
                 <div class="dpad-container joystick-container">
                     <div class="joystick-zone" id="joystick-zone" aria-label="Joystick de movimiento">
@@ -341,6 +361,25 @@
             </div>
         </div>
         
+        <!-- Arena mash screen: tie-up defender / pinned / carried. The whole overlay is the tap target. -->
+        <div id="mash-overlay" class="mash-overlay hidden" data-mode="">
+            <div class="mash-panel">
+                <div class="mash-title" id="mash-title"></div>
+                <div class="mash-sub" id="mash-sub"></div>
+                <div class="mash-count pin-count hidden" id="mash-count">
+                    <span class="pin-num" data-n="1">1</span><span class="pin-sep">·</span><span class="pin-num" data-n="2">2</span><span class="pin-sep">·</span><span class="pin-num" data-n="3">3</span>
+                </div>
+                <div class="mash-progress">
+                    <div class="mash-progress-fill" id="mash-fill"></div>
+                </div>
+                <div class="mash-taps" id="mash-taps">0 / 0</div>
+            </div>
+            <div class="mash-btn" id="mash-btn" role="button" aria-label="Toca rápido">
+                <span class="mash-btn-icon" id="mash-btn-icon">💪</span>
+                <span class="mash-btn-text" id="mash-btn-text">¡TOCA!</span>
+            </div>
+        </div>
+
         <!-- Game Over Overlay -->
         <div id="game-over-overlay" class="overlay hidden">
             <div class="overlay-content">

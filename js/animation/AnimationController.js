@@ -362,6 +362,67 @@ export class AnimationController {
     }
     
     /**
+     * Play a clip as an externally managed "state" animation (grapples, knockdowns...).
+     * Unlike play(), the caller owns the state: attack/block/taunt locks are cleared (so a
+     * one-shot interrupted by this clip can't leave them stuck) and the loop mode, clamp,
+     * speed and restart behaviour are chosen per call. Nothing returns to idle on its own.
+     * @param {string} actionName
+     * @param {Object} [options]
+     * @param {boolean} [options.loop=true]      LoopRepeat (true) or LoopOnce (false)
+     * @param {boolean} [options.clamp=true]     Hold the last frame of a LoopOnce clip
+     * @param {number}  [options.timeScale=1]    Playback speed
+     * @param {number}  [options.fade=0.15]      Crossfade from the current action (seconds)
+     * @param {boolean} [options.restart=false]  Restart even if it is already the current action
+     * @returns {boolean} False if the clip doesn't exist
+     */
+    playState(actionName, options = {}) {
+        const {
+            loop = true,
+            clamp = true,
+            timeScale = 1,
+            fade = ANIMATION_CONFIG.fadeDuration.default,
+            restart = false
+        } = options;
+
+        const action = this.actions[actionName];
+        if (!action) return false;
+
+        this.isAttacking = false;
+        this.isBlocking = false;
+        this.isTaunting = false;
+
+        // Already showing it (running, or a LoopOnce clip clamped on its last frame)
+        if (!restart && this.currentAction === action && action.enabled && (action.isRunning() || action.paused)) {
+            action.timeScale = timeScale;
+            return true;
+        }
+
+        if (!ANIMATION_CONFIG.oneShot.includes(this.currentActionName)) {
+            this.previousActionName = this.currentActionName;
+        }
+
+        action.reset();
+        action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+        action.clampWhenFinished = !loop && clamp;
+        action.timeScale = timeScale;
+        action.paused = false;
+
+        if (this.currentAction && this.currentAction !== action) {
+            this.currentAction.fadeOut(fade);
+            action.fadeIn(fade);
+        }
+
+        action.play();
+        this.currentAction = action;
+        this.currentActionName = actionName;
+
+        if (this.onStateChange) {
+            this.onStateChange(actionName, this.previousActionName);
+        }
+        return true;
+    }
+
+    /**
      * Update animation based on movement state
      * @param {Object} state - { isMoving, isRunning, isGrounded, isJumping }
      */

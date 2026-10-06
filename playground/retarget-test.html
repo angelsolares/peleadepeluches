@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de animaciones Mixamo</title>
+    <style>
+        html, body { margin: 0; height: 100%; background: #12121f; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
+        #info { position: fixed; top: 10px; left: 10px; right: 10px; display: flex; gap: 10px; flex-wrap: wrap; z-index: 2; }
+        #info span { background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+        #controls { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 2; }
+        button { background: #ff3366; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 700; cursor: pointer; }
+        button.secondary { background: #333a55; }
+        #status { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); padding: 6px 12px; border-radius: 8px; font-size: 13px; }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="info">
+        <span>1. Esqueleto Mixamo (referencia)</span>
+        <span>2. Edgar + Fighting Idle</span>
+        <span>3. Edgar + Getting Up</span>
+        <span>4. Edgar + animación Meshy actual (caminar)</span>
+    </div>
+    <div id="status">Cargando…</div>
+    <div id="controls">
+        <button id="btn-idle">Referencia: Fighting Idle</button>
+        <button id="btn-up" class="secondary">Referencia: Getting Up</button>
+        <button id="btn-pause" class="secondary">Pausa</button>
+    </div>
+    <script type="module">
+        import * as THREE from 'three';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+        import { retargetMixamoClip } from '../js/animation/MixamoRetarget.js';
+
+        const statusEl = document.getElementById('status');
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x334466, 1.6));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+        sun.position.set(3, 6, 4);
+        scene.add(sun);
+        const grid = new THREE.GridHelper(12, 24, 0x445577, 0x2a2f45);
+        scene.add(grid);
+
+        const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 6.5);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0.8, 0);
+        controls.update();
+
+        const loader = new FBXLoader();
+        const load = url => new Promise((res, rej) => loader.load(url, res, undefined, rej));
+
+        const mixers = [];
+        let paused = false;
+
+        function place(obj, x) {
+            obj.scale.setScalar(0.01);
+            obj.position.set(x, 0, 0);
+            scene.add(obj);
+        }
+
+        try {
+            const [edgar, walkFbx, idleFbx, upFbx] = await Promise.all([
+                load('../assets/Edgar_Model.fbx'),
+                load('../assets/Meshy_AI_Animation_Walking_withSkin.fbx'),
+                load('../assets/mixamo/fighting_idle.fbx'),
+                load('../assets/mixamo/getting_up.fbx')
+            ]);
+
+            const idleClip = retargetMixamoClip(edgar, idleFbx, idleFbx.animations[0], { name: 'fighting_idle' });
+            const upClip = retargetMixamoClip(edgar, upFbx, upFbx.animations[0], { name: 'getting_up' });
+
+            // 1. Mixamo source skeleton (reference)
+            const ref = SkeletonUtils.clone(idleFbx);
+            place(ref, -3);
+            const helper = new THREE.SkeletonHelper(ref);
+            helper.material.linewidth = 2;
+            scene.add(helper);
+            const refMixer = new THREE.AnimationMixer(ref);
+            let refAction = refMixer.clipAction(idleFbx.animations[0]);
+            refAction.play();
+            mixers.push(refMixer);
+            const upFbxClip = upFbx.animations[0];
+            document.getElementById('btn-idle').onclick = () => { refMixer.stopAllAction(); refAction = refMixer.clipAction(idleFbx.animations[0]); refAction.play(); };
+            document.getElementById('btn-up').onclick = () => { refMixer.stopAllAction(); refAction = refMixer.clipAction(upFbxClip); refAction.play(); };
+
+            // 2-4. Edgar copies
+            const variants = [
+                { x: -1, clip: idleClip },
+                { x: 1, clip: upClip },
+                { x: 3, clip: walkFbx.animations[0] }
+            ];
+            for (const v of variants) {
+                const model = SkeletonUtils.clone(edgar);
+                place(model, v.x);
+                const mixer = new THREE.AnimationMixer(model);
+                mixer.clipAction(v.clip).play();
+                mixers.push(mixer);
+            }
+
+            document.getElementById('btn-pause').onclick = (e) => { paused = !paused; e.target.textContent = paused ? 'Reanudar' : 'Pausa'; };
+            statusEl.textContent = `Listo · idle ${idleClip.duration.toFixed(1)} s (${idleClip.tracks.length} pistas) · getting up ${upClip.duration.toFixed(1)} s`;
+            window.__retargetReady = { idle: idleClip.tracks.length, up: upClip.tracks.length };
+        } catch (err) {
+            console.error(err);
+            statusEl.textContent = 'Error: ' + err.message;
+            window.__retargetError = String(err);
+        }
+
+        const clock = new THREE.Clock();
+        window.__setTime = (t) => { for (const m of mixers) m.setTime(t); };
+        window.__view = (x, y, z, tx, ty, tz) => { camera.position.set(x, y, z); controls.target.set(tx, ty, tz); controls.update(); };
+        window.__pause = (p) => { paused = p; };
+        renderer.setAnimationLoop(() => {
+            const dt = clock.getDelta();
+            if (!paused) for (const m of mixers) m.update(dt);
+            renderer.render(scene, camera);
+        });
+        addEventListener('resize', () => {
+            camera.aspect = innerWidth / innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+        });
+    </script>
+</body>
+</html>

@@ -721,8 +721,9 @@ io.on('connection', (socket) => {
         }
         
         const attackInfo = arenaStateManager.queueAttack(socket.id, attackType, roomCode);
-        
-        if (attackInfo) {
+
+        // Grapple moves are announced through the queued 'arena-grapple-move' event instead
+        if (attackInfo && !attackInfo.grapple) {
             // Broadcast attack started for animation
             io.to(roomCode).emit('arena-attack-started', attackInfo);
         }
@@ -745,11 +746,8 @@ io.on('connection', (socket) => {
             return;
         }
         
+        // Tie-up / lift / pin events are queued by the arena state and emitted by the loop
         const grabInfo = arenaStateManager.processGrab(socket.id, roomCode);
-        
-        if (grabInfo) {
-            io.to(roomCode).emit('arena-grab', grabInfo);
-        }
         
         if (typeof callback === 'function') {
             callback({ success: !!grabInfo, grabInfo });
@@ -816,8 +814,9 @@ io.on('connection', (socket) => {
         
         const result = arenaStateManager.processEscape(socket.id, roomCode);
         callback?.(result);
-        
-        if (result.success) {
+
+        // Only a completed carry escape is announced here (tie-up/pin escapes are queued events)
+        if (result.success && result.escaped && result.mode === 'carry') {
             // Broadcast escape to all clients
             io.to(roomCode).emit('arena-grab-escape', {
                 targetId: socket.id,
@@ -1435,7 +1434,12 @@ function startArenaLoop(roomCode) {
     
     const loop = setInterval(() => {
         const state = arenaStateManager.processTick(roomCode);
-        
+
+        // Grappling events queued by the arena state (from this tick or from socket handlers)
+        for (const event of arenaStateManager.drainEvents(roomCode)) {
+            io.to(roomCode).emit(event.name, event.data);
+        }
+
         if (state) {
             // Send state to all clients in room
             io.to(roomCode).emit('arena-state', state);

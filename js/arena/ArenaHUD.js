@@ -20,6 +20,7 @@ class ArenaHUD {
     constructor() {
         this.container = document.getElementById('arena-player-huds');
         this.playerHUDs = new Map();
+        this.refCountTimer = null; // Auto-hide of the referee pin count overlay
         
         if (!this.container) {
             console.warn('[ArenaHUD] Container not found, creating one');
@@ -370,6 +371,38 @@ class ArenaHUD {
         hud.appendChild(eliminatedEl);
     }
     
+    /**
+     * Big referee overlay for pins: "1", "2", "3!", "¡SE ZAFÓ!", "¡CUENTA DE 3!"
+     * @param {string} text - Text to show
+     * @param {string} variant - 'start' | 'count' | 'final' | 'kickout' | 'pinfall'
+     * @param {number} holdMs - Time before it hides again
+     */
+    showRefCount(text, variant = 'count', holdMs = 900) {
+        let el = document.getElementById('arena-ref-count');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'arena-ref-count';
+            (document.getElementById('game-container') || document.body).appendChild(el);
+        }
+
+        el.textContent = text;
+        // Restart the pop animation
+        el.className = '';
+        void el.offsetWidth;
+        el.className = `ref-${variant}`;
+
+        clearTimeout(this.refCountTimer);
+        this.refCountTimer = setTimeout(() => el.classList.add('hidden'), holdMs);
+    }
+
+    /**
+     * Hide the referee overlay right away
+     */
+    hideRefCount() {
+        clearTimeout(this.refCountTimer);
+        document.getElementById('arena-ref-count')?.classList.add('hidden');
+    }
+
     /**
      * Clear all HUDs
      */

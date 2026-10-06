@@ -377,3 +377,152 @@
     cursor: wait;
     transform: none;
 }
+
+/* ==================================
+   Grappling: tie-up tag, move popups, referee count
+   ================================== */
+
+/* "AMARRE" tag floating over a tied-up pair (CSS2DObject: the renderer owns its transform) */
+.arena-tieup-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    pointer-events: none;
+    user-select: none;
+    font-family: 'Orbitron', sans-serif;
+}
+
+.arena-tieup-label {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #ffcc00;
+    background: rgba(0, 0, 0, 0.75);
+    border: 2px solid #ffcc00;
+    border-radius: 8px;
+    padding: 2px 10px;
+    text-shadow: 0 0 8px rgba(255, 204, 0, 0.8);
+    animation: tieup-pulse 0.45s ease-in-out infinite alternate;
+}
+
+.arena-tieup-bar {
+    width: 72px;
+    height: 5px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.arena-tieup-fill {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #ff3366, #ffcc00);
+    transition: width 0.1s linear;
+}
+
+.arena-tieup-escape {
+    min-height: 1em;
+    font-size: 10px;
+    font-weight: 700;
+    color: #00ffcc;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+    white-space: nowrap;
+}
+
+@keyframes tieup-pulse {
+    from { transform: scale(1); }
+    to { transform: scale(1.12); }
+}
+
+/* Move name over the impact point ("¡SUPLEX!") */
+.arena-move-popup {
+    pointer-events: none;
+    user-select: none;
+}
+
+.arena-move-popup span {
+    display: inline-block;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    font-weight: 900;
+    color: #fff;
+    white-space: nowrap;
+    -webkit-text-stroke: 1px #000;
+    text-shadow: 0 0 14px #ff3366, 3px 3px 0 #000;
+    animation: move-popup 1.3s ease-out forwards;
+}
+
+@keyframes move-popup {
+    0% { opacity: 0; transform: scale(2.2) rotate(-6deg); }
+    15% { opacity: 1; transform: scale(1) rotate(-6deg); }
+    75% { opacity: 1; transform: translateY(-12px) scale(1) rotate(-3deg); }
+    100% { opacity: 0; transform: translateY(-30px) scale(0.9) rotate(-3deg); }
+}
+
+/* Referee pin count: "1", "2", "3!", "¡SE ZAFÓ!", "¡CUENTA DE 3!" */
+#arena-ref-count {
+    position: absolute;
+    top: 26%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 60;
+    pointer-events: none;
+    user-select: none;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(4rem, 14vw, 8rem);
+    font-weight: 900;
+    line-height: 1;
+    color: #ffffff;
+    white-space: nowrap;
+    -webkit-text-stroke: 2px #000;
+    text-shadow: 0 0 30px rgba(255, 255, 255, 0.6), 5px 5px 0 #000;
+    animation: ref-count-pop 0.85s ease-out forwards;
+}
+
+#arena-ref-count.hidden {
+    display: none;
+}
+
+#arena-ref-count.ref-start {
+    font-size: clamp(2rem, 7vw, 3.5rem);
+    color: #00ffcc;
+    text-shadow: 0 0 25px rgba(0, 255, 204, 0.8), 4px 4px 0 #000;
+}
+
+#arena-ref-count.ref-final {
+    font-size: clamp(5rem, 17vw, 10rem);
+    color: #ffcc00;
+    text-shadow: 0 0 40px rgba(255, 204, 0, 0.9), 6px 6px 0 #000;
+}
+
+#arena-ref-count.ref-kickout,
+#arena-ref-count.ref-pinfall {
+    font-size: clamp(2.2rem, 8vw, 4.5rem);
+    animation: ref-banner 1.7s ease-out forwards;
+}
+
+#arena-ref-count.ref-kickout {
+    color: #00ffcc;
+    text-shadow: 0 0 30px rgba(0, 255, 204, 0.9), 4px 4px 0 #000;
+}
+
+#arena-ref-count.ref-pinfall {
+    color: #ff3366;
+    text-shadow: 0 0 30px rgba(255, 51, 102, 0.9), 4px 4px 0 #000;
+}
+
+@keyframes ref-count-pop {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(2.6); }
+    25% { opacity: 1; transform: translate(-50%, -50%) scale(0.92); }
+    40% { transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0.85; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes ref-banner {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-4deg); }
+    20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1) rotate(-4deg); }
+    35% { transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
+}

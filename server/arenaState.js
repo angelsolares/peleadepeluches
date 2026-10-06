@@ -59,7 +59,38 @@ const ARENA_CONFIG = {
     PUNCH_RANGE: 1.2,
     KICK_RANGE: 1.5,
     GRAB_RANGE: 1.8,           // Increased for easier grabs
+
+    // ---- Grappling (WCW/nWo style) ----
+    TIEUP_DURATION: 2500,      // ms the attacker has to pick a move before the tie-up breaks
+    TIEUP_STAMINA: 25,         // Cost of starting a tie-up
+    TIEUP_DISTANCE: 0.9,       // Distance between both players while locked up
+    TIEUP_ESCAPE_TAPS: 5,      // Defender taps needed to break a tie-up
+    LIFT_STAMINA: 10,          // Tie-up -> lift into the carry
+    CARRY_ESCAPE_TAPS: 6,      // Taps needed to escape a carry
+    LANDING_DISTANCE: 1.3,     // Where slammed/suplexed players land (in front / behind)
+    DOWN_DURATION: 3000,       // ms a slammed player stays on the mat
+    GETUP_DURATION: 1500,      // ms of the getting-up animation (invulnerable)
+    STOMP_DAMAGE: 6,
+    STOMP_STAMINA: 10,
+    STOMP_RANGE: 1.6,
+    PIN_RANGE: 1.7,
+    PIN_COUNT_INTERVAL: 1000,  // ms between referee counts (1, 2, 3)
+
+    // Grapple moves: picked in a tie-up with PUNCH/KICK, with or without a stick direction
+    MOVES: {
+        headbutt: { damage: 10, stamina: 10, duration: 900,  impact: 450,  down: false, stun: 800, knockback: 5 },
+        knee:     { damage: 12, stamina: 10, duration: 900,  impact: 450,  down: false, stun: 800, knockback: 5 },
+        slam:     { damage: 15, stamina: 20, duration: 1300, impact: 850,  down: true,  landing: 'front' },
+        suplex:   { damage: 20, stamina: 20, duration: 1500, impact: 1000, down: true,  landing: 'back' }
+    }
 };
+
+/**
+ * Taps a pinned player needs to kick out: harder the more damage they have taken
+ */
+function kickoutTapsNeeded(health) {
+    return 3 + Math.floor(Math.max(0, ARENA_CONFIG.MAX_HEALTH - health) / 15);
+}
 
 class ArenaStateManager {
     constructor(lobbyManager) {
@@ -85,6 +116,7 @@ class ArenaStateManager {
         
         const arenaState = {
             roomCode,
+            events: [],        // Queued socket events ({ name, data }) drained by the server loop
             players: new Map(),
             roundNumber: 1,
             roundState: 'active', // 'active', 'paused', 'finished'
@@ -145,7 +177,17 @@ class ArenaStateManager {
             // Grab state
             grabbedBy: null,
             grabbing: null,
-            
+            escapeTaps: 0,
+
+            // Grappling state
+            tieUp: null,       // { partnerId, role: 'attacker'|'defender', until, escapeTaps }
+            move: null,        // { type, role, partnerId, startedAt, impactAt, endAt, impactDone, landing }
+            isDown: false,
+            downUntil: 0,
+            isGettingUp: false,
+            getUpUntil: 0,
+            pin: null,         // { partnerId, role: 'pinner'|'pinned', count, nextCountAt, taps, tapsNeeded }
+
             // Cooldowns (timestamps)
             lastAttackTime: 0,
             stunEndTime: 0,
@@ -207,14 +249,24 @@ class ArenaStateManager {
             if (playerState.isGrabbing && now >= playerState.grabEndTime) {
                 this.releaseGrab(arenaState, socketId);
             }
-            
+
+            // Grappling timers (tie-up timeout, move impact/end, down/get-up, pin counts)
+            this.updateGrappleTimers(arenaState, playerState, now);
+            if (playerState.isEliminated) return;
+                        
             previousPositions.set(socketId, { x: playerState.position.x, z: playerState.position.z });
 
             // Carried players are positioned by their grabber (pass 4).
             // Everyone else is integrated every tick, including stunned/thrown players
             // so knockback and throws actually move them. They just can't steer.
             if (!playerState.isGrabbed) {
-                const canControl = !playerState.isStunned && !playerState.isBeingThrown;
+                const locked = this.isLocked(playerState);
+                if (locked) {
+                    // Grapples, downs and pins hold players in place
+                    playerState.velocity.x = 0;
+                    playerState.velocity.z = 0;
+                }
+                const canControl = !playerState.isStunned && !playerState.isBeingThrown && !locked;
                 this.processPlayerMovement(playerState, delta, canControl);
             }
 
@@ -363,6 +415,7 @@ class ArenaStateManager {
         const radius = ARENA_CONFIG.COLLISION_RADIUS;
         const active = players.filter(p =>
             !p.isEliminated && !p.isGrabbed && !p.isBeingThrown && !p.isStunned &&
+            !p.move && !p.isDown && !p.pin && !p.tieUp &&
             p.position.y <= ARENA_CONFIG.RING_HEIGHT + 0.3
         );
 
@@ -514,17 +567,40 @@ class ArenaStateManager {
         
         const playerState = arenaState.players.get(socketId);
         if (!playerState || playerState.isEliminated || playerState.isStunned) return null;
-        
+
         const now = Date.now();
-        
+
+        // In a tie-up, PUNCH/KICK pick a grapple move instead of a strike
+        if (playerState.tieUp) {
+            if (playerState.tieUp.role !== 'attacker') return null;
+            return this.startGrappleMove(arenaState, playerState, attackType);
+        }
+
+        // Busy with a grapple, on the mat, getting up, pinning or being carried
+        if (this.isLocked(playerState) || playerState.isGrabbed || playerState.isGrabbing) return null;
+
         // Check cooldown
         if (now - playerState.lastAttackTime < ARENA_CONFIG.ATTACK_COOLDOWN) {
             return null;
+        }
+
+        // Strike on a downed opponent nearby (and nobody standing in range) = stomp
+        if (attackType === 'punch' || attackType === 'kick') {
+            const reach = attackType === 'punch' ? ARENA_CONFIG.PUNCH_RANGE : ARENA_CONFIG.KICK_RANGE;
+            let downedNear = false, standingNear = false;
+            arenaState.players.forEach((other, otherId) => {
+                if (otherId === socketId || other.isEliminated) return;
+                const d = Math.hypot(other.position.x - playerState.position.x, other.position.z - playerState.position.z);
+                if (other.isDown && d <= ARENA_CONFIG.STOMP_RANGE) downedNear = true;
+                else if (!other.isDown && d <= reach) standingNear = true;
+            });
+            if (downedNear && !standingNear) attackType = 'stomp';
         }
         
         // Check stamina
         const staminaCost = attackType === 'punch' ? ARENA_CONFIG.PUNCH_STAMINA :
                           attackType === 'kick' ? ARENA_CONFIG.KICK_STAMINA :
+                          attackType === 'stomp' ? ARENA_CONFIG.STOMP_STAMINA :
                           ARENA_CONFIG.GRAB_STAMINA;
         
         if (playerState.stamina < staminaCost) {
@@ -594,38 +670,50 @@ class ArenaStateManager {
         const attacker = arenaState.players.get(attack.attackerId);
         if (!attacker || attacker.isEliminated) return null;
         
+        const isStomp = attack.attackType === 'stomp';
+
         const range = attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_RANGE :
                      attack.attackType === 'kick' ? ARENA_CONFIG.KICK_RANGE :
+                     isStomp ? ARENA_CONFIG.STOMP_RANGE :
                      ARENA_CONFIG.GRAB_RANGE;
-        
+
         const damage = attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_DAMAGE :
-                      attack.attackType === 'kick' ? ARENA_CONFIG.KICK_DAMAGE : 0;
-        
+                      attack.attackType === 'kick' ? ARENA_CONFIG.KICK_DAMAGE :
+                      isStomp ? ARENA_CONFIG.STOMP_DAMAGE : 0;
+
         const knockback = attack.attackType === 'punch' ? ARENA_CONFIG.PUNCH_KNOCKBACK :
                          attack.attackType === 'kick' ? ARENA_CONFIG.KICK_KNOCKBACK : 0;
-        
+
         const hits = [];
-        
+
         // Check all other players for hits
         arenaState.players.forEach((targetState, targetId) => {
             if (targetId === attack.attackerId || targetState.isEliminated) return;
-            
+
+            // Stomps only hit players on the mat; strikes only hit standing players.
+            // Players inside a grapple move or getting up can't be hit.
+            if (isStomp !== !!targetState.isDown) return;
+            if (targetState.move || targetState.isGettingUp) return;
+
             // Calculate distance
             const dx = targetState.position.x - attack.position.x;
             const dz = targetState.position.z - attack.position.z;
             const distance = Math.sqrt(dx * dx + dz * dz);
-            
+
             // Check if in range
             if (distance <= range) {
-                // Check if in attack arc (roughly 120 degrees in front)
+                // Check if in attack arc (roughly 120 degrees in front; stomps hit all around)
                 const angleToTarget = Math.atan2(dx, dz);
                 let angleDiff = angleToTarget - attack.facingAngle;
-                
+
                 // Normalize angle difference
                 while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                 while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                
-                if (Math.abs(angleDiff) < Math.PI / 3) { // 60 degrees each side
+
+                if (isStomp || Math.abs(angleDiff) < Math.PI / 3) { // 60 degrees each side
+                    // Getting hit breaks a tie-up, and hitting a pinner breaks the pin
+                    if (targetState.tieUp) this.breakTieUp(arenaState, targetState, 'interrupted');
+                    if (targetState.pin && targetState.pin.role === 'pinner') this.endPin(arenaState, targetState, 'interrupted');
                     // Hit!
                     const blocked = targetState.isBlocking;
                     const actualDamage = blocked ? damage * 0.2 : damage;
@@ -639,8 +727,8 @@ class ArenaStateManager {
                     targetState.velocity.x += Math.sin(knockbackAngle) * actualKnockback;
                     targetState.velocity.z += Math.cos(knockbackAngle) * actualKnockback;
                     
-                    // Apply stun if not blocked
-                    if (!blocked) {
+                    // Apply stun if not blocked (a stomped player is already on the mat)
+                    if (!blocked && !isStomp) {
                         targetState.isStunned = true;
                         targetState.stunEndTime = Date.now() + ARENA_CONFIG.STUN_DURATION;
                     }
@@ -707,6 +795,14 @@ class ArenaStateManager {
             console.log('[Arena] Attacker is eliminated');
             return null;
         }
+
+        // GRAB while holding someone in a tie-up: lift them into the carry
+        if (attacker.tieUp && attacker.tieUp.role === 'attacker') {
+            return this.liftFromTieUp(arenaState, attacker);
+        }
+
+        // Busy (tie-up defender, grapple move, on the mat, getting up, pinning)
+        if (this.isLocked(attacker)) return null;
         if (attacker.isGrabbing) {
             console.log('[Arena] Attacker already grabbing');
             return null;
@@ -716,9 +812,15 @@ class ArenaStateManager {
             return null;
         }
         
+        // GRAB next to a downed opponent: pin (cover) them for the 3-count
+        const pinTarget = this.findPinTarget(arenaState, attacker);
+        if (pinTarget) {
+            return this.startPin(arenaState, attacker, pinTarget);
+        }
+
         // Check stamina
-        if (attacker.stamina < ARENA_CONFIG.GRAB_STAMINA) {
-            console.log(`[Arena] Not enough stamina: ${attacker.stamina} < ${ARENA_CONFIG.GRAB_STAMINA}`);
+        if (attacker.stamina < ARENA_CONFIG.TIEUP_STAMINA) {
+            console.log(`[Arena] Not enough stamina: ${attacker.stamina} < ${ARENA_CONFIG.TIEUP_STAMINA}`);
             return null;
         }
         
@@ -741,6 +843,9 @@ class ArenaStateManager {
             if (targetState.isBeingThrown || targetState.position.y > ARENA_CONFIG.RING_HEIGHT + 0.3) {
                 return; // Can't grab someone in the air
             }
+            if (targetState.isGrabbing || this.isLocked(targetState)) {
+                return; // Already busy in another grapple, on the mat or getting up
+            }
             
             const dx = targetState.position.x - attacker.position.x;
             const dz = targetState.position.z - attacker.position.z;
@@ -755,23 +860,9 @@ class ArenaStateManager {
         });
         
         if (nearestTarget) {
-            console.log(`[Arena] GRAB SUCCESS! Target: ${nearestTarget.id}`);
-            
-            // Consume stamina
-            attacker.stamina -= ARENA_CONFIG.GRAB_STAMINA;
-            
-            // Set grab state
-            attacker.isGrabbing = true;
-            attacker.grabbing = nearestTarget.id;
-            attacker.grabEndTime = Date.now() + ARENA_CONFIG.GRAB_DURATION;
-            
-            nearestTarget.isGrabbed = true;
-            nearestTarget.grabbedBy = socketId;
-            
-            return {
-                grabberId: socketId,
-                targetId: nearestTarget.id
-            };
+            console.log(`[Arena] TIE-UP! ${attacker.name} locks up with ${nearestTarget.name}`);
+            attacker.stamina -= ARENA_CONFIG.TIEUP_STAMINA;
+            return this.startTieUp(arenaState, attacker, nearestTarget);
         }
         
         console.log('[Arena] No target found in range');
@@ -906,14 +997,42 @@ class ArenaStateManager {
             return { success: false, error: 'Player not found' };
         }
         
+        // Mashing out of a tie-up
+        if (target.tieUp && target.tieUp.role === 'defender') {
+            target.tieUp.escapeTaps++;
+            if (target.tieUp.escapeTaps < ARENA_CONFIG.TIEUP_ESCAPE_TAPS) {
+                return { success: true, escaped: false, mode: 'tieup', taps: target.tieUp.escapeTaps, needed: ARENA_CONFIG.TIEUP_ESCAPE_TAPS };
+            }
+            const attackerId = target.tieUp.partnerId;
+            this.breakTieUp(arenaState, target, 'escape');
+            return { success: true, escaped: true, mode: 'tieup', attackerId };
+        }
+
+        // Kicking out of a pin
+        if (target.pin && target.pin.role === 'pinned') {
+            target.pin.taps++;
+            if (target.pin.taps < target.pin.tapsNeeded) {
+                return { success: true, escaped: false, mode: 'pin', taps: target.pin.taps, needed: target.pin.tapsNeeded };
+            }
+            this.endPin(arenaState, target, 'kickout');
+            return { success: true, escaped: true, mode: 'pin' };
+        }
+
         console.log(`[Arena] Target state: isGrabbed=${target.isGrabbed}, grabbedBy=${target.grabbedBy}`);
-        
+
         // Check if player is actually grabbed
         if (!target.isGrabbed || !target.grabbedBy) {
             console.log('[Arena] Player not grabbed');
             return { success: false, error: 'Not grabbed' };
         }
-        
+
+        // Escaping a carry takes several taps (counted here, not on the phone)
+        target.escapeTaps = (target.escapeTaps || 0) + 1;
+        if (target.escapeTaps < ARENA_CONFIG.CARRY_ESCAPE_TAPS) {
+            return { success: true, escaped: false, mode: 'carry', taps: target.escapeTaps, needed: ARENA_CONFIG.CARRY_ESCAPE_TAPS };
+        }
+        target.escapeTaps = 0;
+                
         const grabberId = target.grabbedBy;
         console.log(`[Arena] Releasing grab from ${grabberId}`);
         
@@ -958,6 +1077,8 @@ class ArenaStateManager {
         
         return {
             success: true,
+            escaped: true,
+            mode: 'carry',
             grabberId: grabberId,
             grabberEliminated: !!grabberElimination,
             grabberName: grabber?.name,
@@ -975,7 +1096,10 @@ class ArenaStateManager {
         
         playerState.isEliminated = true;
         playerState.health = 0;
-        
+
+        // Free whoever was locked with this player
+        this.clearGrapples(arenaState, playerState);
+                
         // Release any grabs
         if (playerState.isGrabbing) {
             this.releaseGrab(arenaState, playerId);
@@ -1098,6 +1222,14 @@ class ArenaStateManager {
             playerState.grabbing = null;
             playerState.isBeingThrown = false;
             playerState.isOutOfRing = false;
+            playerState.escapeTaps = 0;
+            playerState.tieUp = null;
+            playerState.move = null;
+            playerState.isDown = false;
+            playerState.downUntil = 0;
+            playerState.isGettingUp = false;
+            playerState.getUpUntil = 0;
+            playerState.pin = null;
             playerState.velocity = { x: 0, y: 0, z: 0 };
             
             // Position around the ring (evenly distributed based on total players)
@@ -1135,8 +1267,424 @@ class ArenaStateManager {
             isGrabbing: playerState.isGrabbing,
             isGrabbed: playerState.isGrabbed,
             isStunned: playerState.isStunned,
-            isEliminated: playerState.isEliminated
+            isEliminated: playerState.isEliminated,
+
+            // Grappling
+            isDown: !!playerState.isDown,
+            isGettingUp: !!playerState.isGettingUp,
+            tieUp: playerState.tieUp ? {
+                partnerId: playerState.tieUp.partnerId,
+                role: playerState.tieUp.role,
+                msLeft: Math.max(0, playerState.tieUp.until - Date.now()),
+                escapeTaps: playerState.tieUp.escapeTaps,
+                escapeNeeded: ARENA_CONFIG.TIEUP_ESCAPE_TAPS
+            } : null,
+            move: playerState.move ? {
+                type: playerState.move.type,
+                role: playerState.move.role,
+                partnerId: playerState.move.partnerId
+            } : null,
+            pin: playerState.pin ? {
+                partnerId: playerState.pin.partnerId,
+                role: playerState.pin.role,
+                count: playerState.pin.count,
+                taps: playerState.pin.taps,
+                tapsNeeded: playerState.pin.tapsNeeded
+            } : null,
+            carryEscape: playerState.isGrabbed ? {
+                taps: playerState.escapeTaps || 0,
+                needed: ARENA_CONFIG.CARRY_ESCAPE_TAPS
+            } : null
         };
+    }
+
+    // =====================================================================
+    // Grappling (tie-ups, grapple moves, downs, pins)
+    // =====================================================================
+
+    /** Queue a socket event to be emitted by the server loop */
+    pushEvent(arenaState, name, data) {
+        arenaState.events.push({ name, data });
+    }
+
+    /** Take and clear the queued events for a room */
+    drainEvents(roomCode) {
+        const arenaState = this.arenaStates.get(roomCode);
+        if (!arenaState || arenaState.events.length === 0) return [];
+        const events = arenaState.events;
+        arenaState.events = [];
+        return events;
+    }
+
+    /** Player can't move or act on their own */
+    isLocked(p) {
+        return !!(p.tieUp || p.move || p.isDown || p.isGettingUp || p.pin);
+    }
+
+    angleTo(from, to) {
+        return Math.atan2(to.position.x - from.position.x, to.position.z - from.position.z);
+    }
+
+    clampInsideRopes(pos) {
+        const limit = ARENA_CONFIG.RING_SIZE / 2 - 0.8 - 0.4;
+        pos.x = Math.max(-limit, Math.min(limit, pos.x));
+        pos.z = Math.max(-limit, Math.min(limit, pos.z));
+        return pos;
+    }
+
+    startTieUp(arenaState, attacker, defender) {
+        const until = Date.now() + ARENA_CONFIG.TIEUP_DURATION;
+
+        // Face each other at a fixed distance
+        const angle = this.angleTo(attacker, defender);
+        const midX = (attacker.position.x + defender.position.x) / 2;
+        const midZ = (attacker.position.z + defender.position.z) / 2;
+        const half = ARENA_CONFIG.TIEUP_DISTANCE / 2;
+        attacker.position.x = midX - Math.sin(angle) * half;
+        attacker.position.z = midZ - Math.cos(angle) * half;
+        defender.position.x = midX + Math.sin(angle) * half;
+        defender.position.z = midZ + Math.cos(angle) * half;
+        attacker.facingAngle = angle;
+        defender.facingAngle = angle + Math.PI;
+        attacker.velocity = { x: 0, y: 0, z: 0 };
+        defender.velocity = { x: 0, y: 0, z: 0 };
+
+        // A grab beats a block
+        defender.isBlocking = false;
+        attacker.isTaunting = false;
+        defender.isTaunting = false;
+
+        attacker.tieUp = { partnerId: defender.id, role: 'attacker', until, escapeTaps: 0 };
+        defender.tieUp = { partnerId: attacker.id, role: 'defender', until, escapeTaps: 0 };
+
+        const info = {
+            mode: 'tieup',
+            attackerId: attacker.id,
+            defenderId: defender.id,
+            duration: ARENA_CONFIG.TIEUP_DURATION
+        };
+        this.pushEvent(arenaState, 'arena-tieup', info);
+        return info;
+    }
+
+    /** End a tie-up for both players. reason: 'timeout' | 'escape' | 'interrupted' */
+    breakTieUp(arenaState, player, reason) {
+        if (!player.tieUp) return;
+        const partner = arenaState.players.get(player.tieUp.partnerId);
+        const attacker = player.tieUp.role === 'attacker' ? player : partner;
+        const defender = player.tieUp.role === 'attacker' ? partner : player;
+
+        player.tieUp = null;
+        if (partner) partner.tieUp = null;
+
+        // Push both apart; an escape shoves the attacker harder and dazes them
+        if (attacker && defender) {
+            const angle = this.angleTo(attacker, defender);
+            const push = reason === 'escape' ? 7 : 4;
+            attacker.velocity.x -= Math.sin(angle) * push;
+            attacker.velocity.z -= Math.cos(angle) * push;
+            defender.velocity.x += Math.sin(angle) * 3;
+            defender.velocity.z += Math.cos(angle) * 3;
+            if (reason === 'escape') {
+                attacker.isStunned = true;
+                attacker.stunEndTime = Date.now() + 500;
+            }
+        }
+
+        this.pushEvent(arenaState, 'arena-tieup-end', {
+            attackerId: attacker?.id,
+            defenderId: defender?.id,
+            reason
+        });
+    }
+
+    /** GRAB during a tie-up: lift the defender into the existing carry */
+    liftFromTieUp(arenaState, attacker) {
+        const defender = arenaState.players.get(attacker.tieUp.partnerId);
+        if (!defender || attacker.stamina < ARENA_CONFIG.LIFT_STAMINA) return null;
+
+        attacker.stamina -= ARENA_CONFIG.LIFT_STAMINA;
+        attacker.tieUp = null;
+        defender.tieUp = null;
+
+        attacker.isGrabbing = true;
+        attacker.grabbing = defender.id;
+        attacker.grabEndTime = Date.now() + ARENA_CONFIG.GRAB_DURATION;
+        defender.isGrabbed = true;
+        defender.grabbedBy = attacker.id;
+        defender.escapeTaps = 0;
+
+        const info = { mode: 'carry', grabberId: attacker.id, targetId: defender.id };
+        // Same event the host already uses to start the carry
+        this.pushEvent(arenaState, 'arena-grab', info);
+        return info;
+    }
+
+    /** PUNCH/KICK in a tie-up: pick and start a grapple move */
+    startGrappleMove(arenaState, attacker, attackType) {
+        const defender = arenaState.players.get(attacker.tieUp.partnerId);
+        if (!defender) return null;
+
+        const input = attacker.input || {};
+        const withStick = !!(input.left || input.right || input.up || input.down);
+        const type = attackType === 'kick'
+            ? (withStick ? 'suplex' : 'knee')
+            : (withStick ? 'slam' : 'headbutt');
+        const cfg = ARENA_CONFIG.MOVES[type];
+
+        if (attacker.stamina < cfg.stamina) return null; // Not enough stamina: keep the tie-up
+        attacker.stamina -= cfg.stamina;
+
+        const now = Date.now();
+        const angle = this.angleTo(attacker, defender);
+        attacker.facingAngle = angle;
+        defender.facingAngle = angle + Math.PI;
+
+        let landing = null;
+        if (cfg.down) {
+            const dist = ARENA_CONFIG.LANDING_DISTANCE * (cfg.landing === 'back' ? -1 : 1);
+            landing = this.clampInsideRopes({
+                x: attacker.position.x + Math.sin(angle) * dist,
+                y: ARENA_CONFIG.RING_HEIGHT,
+                z: attacker.position.z + Math.cos(angle) * dist
+            });
+        }
+
+        const base = { type, startedAt: now, impactAt: now + cfg.impact, endAt: now + cfg.duration, impactDone: false, landing };
+        attacker.tieUp = null;
+        defender.tieUp = null;
+        attacker.move = { ...base, role: 'attacker', partnerId: defender.id };
+        defender.move = { ...base, role: 'defender', partnerId: attacker.id };
+        attacker.lastAttackTime = now;
+
+        this.pushEvent(arenaState, 'arena-grapple-move', {
+            attackerId: attacker.id,
+            defenderId: defender.id,
+            move: type,
+            duration: cfg.duration,
+            impactDelay: cfg.impact,
+            attackerPos: { ...attacker.position },
+            defenderPos: { ...defender.position },
+            facingAngle: angle,
+            landing
+        });
+
+        return { grapple: true, attackerId: attacker.id, attackType: type };
+    }
+
+    /** Apply a grapple move's impact (damage, knockdown or stun) */
+    applyGrappleImpact(arenaState, attacker, defender) {
+        const type = attacker.move.type;
+        const cfg = ARENA_CONFIG.MOVES[type];
+        attacker.move.impactDone = true;
+        if (defender.move) defender.move.impactDone = true;
+
+        defender.health = Math.max(0, defender.health - cfg.damage);
+
+        if (cfg.down) {
+            const landing = attacker.move.landing;
+            defender.position.x = landing.x;
+            defender.position.z = landing.z;
+            defender.position.y = ARENA_CONFIG.RING_HEIGHT;
+            defender.velocity = { x: 0, y: 0, z: 0 };
+            defender.isDown = true;
+            defender.downUntil = Date.now() + ARENA_CONFIG.DOWN_DURATION;
+            defender.isStunned = false;
+        } else {
+            const angle = this.angleTo(attacker, defender);
+            defender.velocity.x += Math.sin(angle) * cfg.knockback;
+            defender.velocity.z += Math.cos(angle) * cfg.knockback;
+            defender.isStunned = true;
+            defender.stunEndTime = Date.now() + cfg.stun;
+        }
+
+        let eliminated = false;
+        if (defender.health <= 0) {
+            const info = this.eliminatePlayer(arenaState, defender.id);
+            eliminated = !!info;
+            if (info) {
+                this.pushEvent(arenaState, 'arena-elimination', {
+                    playerId: defender.id,
+                    playerName: defender.name,
+                    playerNumber: defender.number,
+                    reason: 'knockout',
+                    eliminatedBy: attacker.id
+                });
+            }
+        }
+
+        this.pushEvent(arenaState, 'arena-grapple-impact', {
+            attackerId: attacker.id,
+            defenderId: defender.id,
+            move: type,
+            damage: cfg.damage,
+            newHealth: defender.health,
+            down: !!cfg.down,
+            landing: cfg.down ? { ...defender.position } : null,
+            eliminated
+        });
+    }
+
+    findPinTarget(arenaState, attacker) {
+        let best = null;
+        let bestDist = ARENA_CONFIG.PIN_RANGE;
+        arenaState.players.forEach((other, otherId) => {
+            if (otherId === attacker.id || other.isEliminated || !other.isDown || other.pin || other.move) return;
+            const d = Math.hypot(other.position.x - attacker.position.x, other.position.z - attacker.position.z);
+            if (d <= bestDist) {
+                bestDist = d;
+                best = other;
+            }
+        });
+        return best;
+    }
+
+    startPin(arenaState, pinner, victim) {
+        const now = Date.now();
+        const tapsNeeded = kickoutTapsNeeded(victim.health);
+
+        // Kneel next to the victim, facing them
+        const angle = this.angleTo(pinner, victim);
+        pinner.facingAngle = angle;
+        pinner.velocity = { x: 0, y: 0, z: 0 };
+        pinner.isTaunting = false;
+        pinner.isBlocking = false;
+
+        pinner.pin = { partnerId: victim.id, role: 'pinner', count: 0, nextCountAt: now + ARENA_CONFIG.PIN_COUNT_INTERVAL, taps: 0, tapsNeeded };
+        victim.pin = { partnerId: pinner.id, role: 'pinned', count: 0, nextCountAt: 0, taps: 0, tapsNeeded };
+        victim.downUntil = Infinity; // Stays down while pinned
+
+        const info = { mode: 'pin', pinnerId: pinner.id, victimId: victim.id, tapsNeeded };
+        this.pushEvent(arenaState, 'arena-pin-start', info);
+        return info;
+    }
+
+    /** End a pin. result: 'kickout' | 'pinfall' | 'interrupted' */
+    endPin(arenaState, player, result) {
+        if (!player.pin) return;
+        const partner = arenaState.players.get(player.pin.partnerId);
+        const pinner = player.pin.role === 'pinner' ? player : partner;
+        const victim = player.pin.role === 'pinned' ? player : partner;
+        const count = (pinner?.pin || player.pin).count;
+
+        player.pin = null;
+        if (partner) partner.pin = null;
+
+        if (victim && !victim.isEliminated) {
+            if (result === 'kickout') {
+                // Kick out: get up right away and shove the pinner off
+                victim.isDown = false;
+                victim.downUntil = 0;
+                victim.isGettingUp = true;
+                victim.getUpUntil = Date.now() + ARENA_CONFIG.GETUP_DURATION;
+                this.pushEvent(arenaState, 'arena-getup', { playerId: victim.id });
+                if (pinner) {
+                    pinner.isStunned = true;
+                    pinner.stunEndTime = Date.now() + 400;
+                    const angle = this.angleTo(victim, pinner);
+                    pinner.velocity.x += Math.sin(angle) * 4;
+                    pinner.velocity.z += Math.cos(angle) * 4;
+                }
+            } else {
+                // Interrupted: the victim stays down a little longer
+                victim.downUntil = Date.now() + 800;
+            }
+        }
+
+        this.pushEvent(arenaState, 'arena-pin-end', {
+            pinnerId: pinner?.id,
+            victimId: victim?.id,
+            result,
+            count
+        });
+    }
+
+    /** Per-tick grappling timers for one player */
+    updateGrappleTimers(arenaState, p, now) {
+        // Tie-up timeout (handled once, from the attacker's side)
+        if (p.tieUp && p.tieUp.role === 'attacker' && now >= p.tieUp.until) {
+            this.breakTieUp(arenaState, p, 'timeout');
+        }
+
+        // Grapple move impact and end (handled from the attacker's side)
+        if (p.move && p.move.role === 'attacker') {
+            const defender = arenaState.players.get(p.move.partnerId);
+            if (!defender || defender.isEliminated) {
+                p.move = null;
+            } else {
+                if (!p.move.impactDone && now >= p.move.impactAt) {
+                    this.applyGrappleImpact(arenaState, p, defender);
+                }
+                if (p.move && now >= p.move.endAt) {
+                    p.move = null;
+                    defender.move = null;
+                }
+            }
+        }
+
+        // On the mat -> getting up
+        if (p.isDown && !p.pin && now >= p.downUntil) {
+            p.isDown = false;
+            p.isGettingUp = true;
+            p.getUpUntil = now + ARENA_CONFIG.GETUP_DURATION;
+            this.pushEvent(arenaState, 'arena-getup', { playerId: p.id });
+        }
+        if (p.isGettingUp && now >= p.getUpUntil) {
+            p.isGettingUp = false;
+        }
+
+        // Referee count (handled from the pinner's side)
+        if (p.pin && p.pin.role === 'pinner' && now >= p.pin.nextCountAt) {
+            const victim = arenaState.players.get(p.pin.partnerId);
+            if (!victim || victim.isEliminated) {
+                p.pin = null;
+                return;
+            }
+            p.pin.count++;
+            if (victim.pin) victim.pin.count = p.pin.count;
+            this.pushEvent(arenaState, 'arena-pin-count', { pinnerId: p.id, victimId: victim.id, count: p.pin.count });
+
+            if (p.pin.count >= 3) {
+                // Pinfall: the victim is eliminated
+                this.endPin(arenaState, p, 'pinfall');
+                const info = this.eliminatePlayer(arenaState, victim.id);
+                if (info) {
+                    this.pushEvent(arenaState, 'arena-elimination', {
+                        playerId: victim.id,
+                        playerName: victim.name,
+                        playerNumber: victim.number,
+                        reason: 'pinfall',
+                        eliminatedBy: p.id
+                    });
+                }
+            } else {
+                p.pin.nextCountAt += ARENA_CONFIG.PIN_COUNT_INTERVAL;
+            }
+        }
+    }
+
+    /** Release every grapple that involves this player (used on elimination/leave) */
+    clearGrapples(arenaState, p) {
+        if (p.tieUp) {
+            const partner = arenaState.players.get(p.tieUp.partnerId);
+            if (partner) partner.tieUp = null;
+            p.tieUp = null;
+        }
+        if (p.move) {
+            const partner = arenaState.players.get(p.move.partnerId);
+            if (partner) partner.move = null;
+            p.move = null;
+        }
+        if (p.pin) {
+            const partner = arenaState.players.get(p.pin.partnerId);
+            if (partner) {
+                partner.pin = null;
+                if (partner.isDown) partner.downUntil = Date.now() + 800;
+            }
+            p.pin = null;
+        }
+        p.isDown = false;
+        p.isGettingUp = false;
     }
     
     /**

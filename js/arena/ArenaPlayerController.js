@@ -69,6 +69,14 @@ class ArenaPlayerController {
         this.isNearEdge = false;
         this.isExhausted = false; // No stamina
 
+        // Grappling state (mirrored from the server, see applyServerState)
+        this.isDown = false;      // On the mat after a slam/suplex
+        this.isGettingUp = false; // Getting up (invulnerable)
+        this.tieUp = null;        // { partnerId, role, msLeft, escapeTaps, escapeNeeded }
+        this.move = null;         // { type, role, partnerId }
+        this.pin = null;          // { partnerId, role, count, taps, tapsNeeded }
+        this.carryEscape = null;  // { taps, needed }
+
         // True once the server starts sending state: the server is authoritative,
         // so the host must not run its own (different) movement physics on top of it.
         this.serverControlled = false;
@@ -440,6 +448,12 @@ class ArenaPlayerController {
         this.attackCooldown = 0;
         this.stunTimer = 0;
         this.grabTimer = 0;
+        this.isDown = false;
+        this.isGettingUp = false;
+        this.tieUp = null;
+        this.move = null;
+        this.pin = null;
+        this.carryEscape = null;
         this.velocity.set(0, 0, 0);
     }
     
@@ -463,6 +477,21 @@ class ArenaPlayerController {
         if (typeof state.isGrabbing === 'boolean') this.isGrabbing = state.isGrabbing;
         if (typeof state.isEliminated === 'boolean') this.isEliminated = state.isEliminated;
         if (state.input) this.input = { ...this.input, ...state.input };
+
+        // Grappling
+        if ('isDown' in state) this.isDown = !!state.isDown;
+        if ('isGettingUp' in state) this.isGettingUp = !!state.isGettingUp;
+        if ('tieUp' in state) this.tieUp = state.tieUp || null;
+        if ('move' in state) this.move = state.move || null;
+        if ('pin' in state) this.pin = state.pin || null;
+        if ('carryEscape' in state) this.carryEscape = state.carryEscape || null;
+    }
+
+    /**
+     * Held in place by a grapple (tie-up, move, on the mat, getting up, pin)
+     */
+    isGrappleLocked() {
+        return !!(this.tieUp || this.move || this.isDown || this.isGettingUp || this.pin);
     }
     
     /**

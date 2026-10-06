@@ -94,8 +94,7 @@ let selectedCharacter = null; // No character selected by default
 let gameMode = 'smash'; // 'smash', 'arena', or 'race'
 let isGrabbing = false; // Track if player is currently grabbing someone (Arena mode)
 let isGrabbed = false; // Track if player is currently grabbed by someone (Arena mode)
-let escapeProgress = 0; // Progress towards escaping from grab (0-100)
-let escapeThreshold = 3; // Number of button presses needed to escape (3 = ~33% per press)
+// Tie-ups, grapple moves, downs and pins live in `wrestle` / `mash` (Arena wrestling section)
 
 // Race mode state
 let lastRaceTap = null; // 'left' or 'right' - track last tap for alternating
@@ -207,6 +206,9 @@ function connectToServer() {
             // Same socket id, room and player slot; missed events are replayed by the server.
             // The server zeroed our input while we were away: resend what is held right now.
             sendInput();
+            // Escape taps sent before the drop never got their ack: stop counting them.
+            // The next 'arena-state' redraws the wrestling UI from the server's truth.
+            mash.pending = 0;
             return;
         }
 
@@ -287,6 +289,15 @@ function connectToServer() {
     socket.on('arena-throw', handleArenaThrowEvent);
     socket.on('arena-grab-released', handleArenaGrabReleased);
     socket.on('arena-grab-escape', handleArenaGrabEscapeEvent);
+    // Arena wrestling (tie-ups, grapple moves, downs, pins)
+    socket.on('arena-tieup', handleArenaTieUp);
+    socket.on('arena-tieup-end', handleArenaTieUpEnd);
+    socket.on('arena-grapple-move', handleArenaGrappleMove);
+    socket.on('arena-grapple-impact', handleArenaGrappleImpact);
+    socket.on('arena-getup', handleArenaGetUp);
+    socket.on('arena-pin-start', handleArenaPinStart);
+    socket.on('arena-pin-count', handleArenaPinCount);
+    socket.on('arena-pin-end', handleArenaPinEnd);
     
     // Race mode events
     socket.on('race-state', handleRaceState);
@@ -1227,12 +1238,8 @@ function resetMatchState() {
     Object.keys(inputState).forEach(key => inputState[key] = false);
     document.querySelectorAll('#controller-screen .pressed').forEach(el => el.classList.remove('pressed'));
 
-    // Arena grab state
-    isGrabbing = false;
-    isGrabbed = false;
-    escapeProgress = 0;
-    hideEscapeUI();
-    updateGrabButtonState();
+    // Arena grab / wrestling state (carry, tie-up, move, down, pin, mash screen, HUD)
+    clearArenaWrestling();
 
     // Race
     lastRaceTap = null;
@@ -1777,6 +1784,7 @@ function handleGameState(data) {
 
 // Handle Arena-specific state updates
 function handleArenaState(data) {
+    if (!data || !Array.isArray(data.players) || !socket) return;
     const myState = data.players.find(p => p.id === socket.id);
     
     if (myState) {
@@ -1799,49 +1807,37 @@ function handleArenaState(data) {
             elements.playerDamage.style.color = 'var(--primary)';
         }
         
-        // Update grab state from server
-        if (myState.isGrabbing !== undefined) {
-            if (isGrabbing !== myState.isGrabbing) {
-                isGrabbing = myState.isGrabbing;
-                updateGrabButtonState();
-            }
-        }
-        
-        // Update grabbed state from server (sync in case of auto-release)
-        if (myState.isGrabbed !== undefined) {
-            if (isGrabbed && !myState.isGrabbed) {
-                // We were grabbed but now we're not - grab was released
-                console.log('[Arena] Grab auto-released by server');
-                isGrabbed = false;
-                hideEscapeUI();
-            } else if (!isGrabbed && myState.isGrabbed) {
-                // Server says we're grabbed but we didn't know - show escape UI
-                console.log('[Arena] Grab detected from server state');
-                isGrabbed = true;
-                escapeProgress = 0;
-                showEscapeUI();
-            }
-        }
+        // Carry flags come from the server every tick: this self-heals any missed event
+        // (auto-release, throw, escape, reconnection)
+        isGrabbing = !!myState.isGrabbing && !myState.isEliminated;
+        isGrabbed = !!myState.isGrabbed && !myState.isEliminated;
+
+        // Tie-up / grapple move / down / pin / carry escape, plus CUBRIR proximity
+        syncWrestleFromState(myState, data.players);
     }
 }
 
 /**
- * Handle when someone grabs (server broadcast)
+ * Handle when someone grabs (server broadcast). With the wrestling update this is only
+ * sent for the carry (lifting the opponent out of a tie-up).
  */
 function handleArenaGrabEvent(data) {
-    console.log('[Arena] Grab event:', data);
-    // If we are the grabber, update our state
+    if (!data || !socket) return;
+    if (data.mode && data.mode !== 'carry') return;
+    // If we are the grabber, update our state (button becomes LANZAR)
     if (data.grabberId === socket.id) {
         isGrabbing = true;
-        updateGrabButtonState();
-        triggerHaptic();
+        wrestle.tieRole = null;
+        vibrate(WRESTLE_VIBRATION.lift);
+        renderWrestleUI();
     }
-    // If we are the target (being grabbed), show escape UI
+    // If we are the target (being carried), open the mash screen
     if (data.targetId === socket.id) {
         isGrabbed = true;
-        escapeProgress = 0;
-        showEscapeUI();
-        triggerHaptic(true);
+        wrestle.tieRole = null;
+        setMash({ mode: 'carry', taps: 0 });
+        vibrate(WRESTLE_VIBRATION.carried);
+        renderWrestleUI();
     }
 }
 
@@ -1849,18 +1845,19 @@ function handleArenaGrabEvent(data) {
  * Handle when someone is thrown (server broadcast)
  */
 function handleArenaThrowEvent(data) {
-    console.log('[Arena] Throw event:', data);
+    if (!data || !socket) return;
     // If we were grabbing, we're no longer grabbing
     if (data.grabberId === socket.id) {
         isGrabbing = false;
-        updateGrabButtonState();
         triggerHaptic();
+        renderWrestleUI();
     }
-    // If we were thrown, hide escape UI and vibrate (long pattern)
+    // If we were thrown, close the mash screen and vibrate (long pattern)
     if (data.targetId === socket.id) {
         isGrabbed = false;
-        hideEscapeUI();
+        if (mash.mode === 'carry') setMash(null);
         vibrate(HIT_VIBRATION.thrown);
+        renderWrestleUI();
     }
 }
 
@@ -1868,33 +1865,39 @@ function handleArenaThrowEvent(data) {
  * Handle when grab is released without throw
  */
 function handleArenaGrabReleased(data) {
-    console.log('[Arena] Grab released:', data);
+    if (!data || !socket) return;
     if (data.grabberId === socket.id) {
         isGrabbing = false;
-        updateGrabButtonState();
+        renderWrestleUI();
     }
     if (data.targetId === socket.id) {
         isGrabbed = false;
-        hideEscapeUI();
+        if (mash.mode === 'carry') setMash(null);
+        renderWrestleUI();
     }
 }
 
 /**
- * Handle when someone escapes from a grab (server broadcast)
+ * Handle when someone escapes from a carry (server broadcast)
  */
 function handleArenaGrabEscapeEvent(data) {
-    console.log('[Arena] Grab escape event:', data);
-    // If we were the one who escaped
+    if (!data || !socket) return;
+    // If we were the one who escaped (the escape callback may have handled it already)
     if (data.targetId === socket.id) {
         isGrabbed = false;
-        hideEscapeUI();
-        triggerHaptic();
+        if (mash.mode === 'carry') {
+            setMash(null);
+            vibrate(WRESTLE_VIBRATION.escaped);
+            flashHud('¡LIBRE!', 'Te soltaste', 'good');
+        }
+        renderWrestleUI();
     }
     // If we were the grabber and they escaped
     if (data.grabberId === socket.id) {
         isGrabbing = false;
-        updateGrabButtonState();
         triggerHaptic(true); // Strong vibration - they escaped!
+        flashHud('¡SE ESCAPÓ!', '', 'danger');
+        renderWrestleUI();
     }
 }
 
@@ -1909,6 +1912,9 @@ function handlePlayerKO(kos) {
 
 function handleGameOver(data) {
     console.log('[Game] Game over!', data);
+
+    // No mash screen / wrestling HUD left behind the end-of-match screen
+    clearArenaWrestling();
     
     elements.gameOverOverlay.classList.remove('hidden');
     
@@ -2240,9 +2246,16 @@ function setupControllerInput() {
         btn.addEventListener('mouseup', () => handleBlockEnd(inputType, btn));
         btn.addEventListener('mouseleave', () => handleBlockEnd(inputType, btn));
     });
+
+    // Arena mash screen (tie-up defender / pinned / carried)
+    setupMashInput();
 }
 
 function handleAction(action, btn) {
+    // Arena: on the mat, getting up, in a grapple move, pinning or held -> the server
+    // ignores actions, so the (dimmed) buttons do nothing
+    if (gameMode === 'arena' && wrestle.locked) return;
+
     btn.classList.add('pressed');
 
     // While reconnecting, socket.io would buffer these and replay stale attacks later
@@ -2254,7 +2267,8 @@ function handleAction(action, btn) {
         if (action === 'taunt') {
             socket.emit('player-taunt');
         } else if (action === 'grab') {
-            console.log(`[Arena] Grab button pressed. isGrabbing=${isGrabbing}`);
+            // isGrabbing is refreshed from 'arena-state' every tick (me.isGrabbing)
+            console.log(`[Arena] Grab button pressed. mode=${grabButtonMode} isGrabbing=${isGrabbing}`);
             if (isGrabbing) {
                 // If already grabbing, try to throw
                 // Calculate throw direction from current input
@@ -2270,21 +2284,22 @@ function handleAction(action, btn) {
                     console.log('[Arena Throw] Response:', response);
                     if (response && response.success) {
                         isGrabbing = false;
-                        updateGrabButtonState();
+                        renderWrestleUI();
                         console.log('[Arena] Throw success, button reset to AGARRAR');
                     }
                 });
             } else {
-                // Try to grab
-                console.log('[Arena] Attempting grab...');
+                // AGARRAR = tie-up, CUBRIR = pin a downed rival, CARGAR = lift from the tie-up.
+                // The server picks which one; tie-up/pin UI arrives with its events and state.
                 socket.emit('arena-grab', (response) => {
                     console.log('[Arena Grab] Response:', response);
-                    if (response && response.success) {
+                    if (!response || !response.success) return;
+                    const mode = response.grabInfo && response.grabInfo.mode;
+                    if (mode === 'carry' || !mode) {
+                        // Carrying: button becomes LANZAR right away
                         isGrabbing = true;
-                        updateGrabButtonState();
-                        console.log('[Arena] Grab success! Button changed to LANZAR');
-                    } else {
-                        console.log('[Arena] Grab failed - no target in range?');
+                        wrestle.tieRole = null;
+                        renderWrestleUI();
                     }
                 });
             }
@@ -2379,211 +2394,665 @@ function triggerHaptic(strong = false) {
     vibrate(strong ? [50, 30, 50] : 10);
 }
 
-/**
- * Update grab button visual state based on isGrabbing
- */
-function updateGrabButtonState() {
-    const grabButton = document.querySelector('.action-btn[data-action="grab"]');
-    if (!grabButton) return;
-    
-    const labelSpan = grabButton.querySelector('.btn-action');
-    
-    if (isGrabbing) {
-        // Change to "LANZAR" (throw) mode
-        grabButton.classList.add('grabbing');
-        grabButton.style.borderColor = '#ff6600';
-        grabButton.style.color = '#ff6600';
-        grabButton.style.animation = 'pulse 0.5s infinite';
-        if (labelSpan) labelSpan.textContent = 'LANZAR';
+// =================================
+// Arena wrestling: tie-ups, grapple moves, downs, pins and carries
+// =================================
+// The phone mirrors MY entry in 'arena-state' (~60 Hz), so the UI always heals itself
+// (missed events, reconnection). The one-shot events only make it react right away and
+// drive the haptics; every haptic fires on a state CHANGE, so event + state never double up.
+
+const GRAPPLE_MOVE_NAMES = {
+    headbutt: '¡CABEZAZO!',
+    slam: '¡AZOTÓN!',
+    knee: '¡RODILLAZO!',
+    suplex: '¡SUPLEX!'
+};
+const HEAVY_GRAPPLE_MOVES = ['slam', 'suplex'];
+
+const WRESTLE = {
+    TIEUP_MS: 2500,             // Server TIEUP_DURATION (the 'arena-tieup' event sends the real value)
+    TIEUP_ESCAPE_TAPS: 5,       // Server defaults, replaced by the callback / state values
+    CARRY_ESCAPE_TAPS: 6,
+    PIN_RANGE: 1.7,             // Server PIN_RANGE: AGARRAR becomes CUBRIR within this distance
+    TAP_DEBOUNCE_MS: 40,        // The same physical tap reported twice
+    PENDING_TIMEOUT_MS: 1000,   // Unacked taps stop counting after this
+    FLASH_MS: 1300              // Short HUD messages (escaped, pinfall...)
+};
+
+const WRESTLE_VIBRATION = {
+    tieUpAttacker: 30,
+    tieUpDefender: [40, 30, 40],
+    lift: [50, 30, 50],
+    carried: [60, 30, 90],
+    moveStart: 20,
+    impactHeavy: [150, 50, 230],  // Slam / suplex received
+    impactLight: [70, 35, 70],    // Headbutt / knee received
+    impactDealt: 25,
+    pinStart: [50, 30, 50],
+    pinCount: 70,
+    pinThree: [200, 60, 300],
+    pinCountPinner: 15,
+    pinWin: [40, 30, 40, 30, 120],
+    escaped: [25, 20, 60],
+    partnerEscaped: [50, 30, 50],
+    getUp: 15,
+    mashTap: 8
+};
+
+const MASH_SCREENS = {
+    tieup: { title: '¡ZÁFATE!', sub: '¡Toca rápido para soltarte del amarre!', icon: '💪', button: '¡ZÁFATE!' },
+    pin: { title: '¡PATEA PARA SALIR!', sub: '¡Toca rápido antes de la cuenta de 3!', icon: '🦵', button: '¡PATEA!' },
+    carry: { title: '¡ESCÁPATE!', sub: '¡Toca rápido para soltarte!', icon: '🤸', button: '¡ESCAPA!' }
+};
+
+const GRAB_BUTTON_MODES = {
+    grab: { label: 'AGARRAR', className: '' },
+    cover: { label: 'CUBRIR', className: 'mode-cover' },
+    lift: { label: 'CARGAR', className: 'mode-lift' },
+    throw: { label: 'LANZAR', className: 'grabbing' }
+};
+
+// MY wrestling situation (mirrors my 'arena-state' entry; events update it a frame early)
+const wrestle = {
+    tieRole: null,          // 'attacker' | 'defender' | null
+    tieMsLeft: 0,
+    tieDuration: WRESTLE.TIEUP_MS,
+    pinRole: null,          // 'pinner' | 'pinned' | null
+    pinCount: 0,
+    moveType: null,         // 'headbutt' | 'slam' | 'knee' | 'suplex' | null
+    moveRole: null,         // 'attacker' | 'defender' | null
+    isDown: false,
+    isGettingUp: false,
+    eliminated: false,
+    coverAvailable: false,  // A downed rival within PIN_RANGE (AGARRAR -> CUBRIR)
+    locked: false,          // Actions are ignored by the server right now
+    flash: null,            // { id, title, sub, tone } short message after an escape / pinfall
+    flashTimer: null,
+    hudKey: ''
+};
+
+// Mash screen (tie-up defender / pinned / carried): exactly one 'arena-escape' per tap
+const mash = {
+    mode: null,             // 'tieup' | 'pin' | 'carry' | null
+    taps: 0,                // Confirmed by the server (callback or state)
+    needed: 0,
+    pending: 0,             // Sent but not acked yet (shown optimistically)
+    lastEmitAt: 0,
+    lastTapAt: 0,
+    count: 0                // Referee count while pinned
+};
+
+let grabButtonMode = 'grab';
+let flashSeq = 0;
+const wrestleEls = {};
+
+function wEl(id) {
+    if (!wrestleEls[id]) wrestleEls[id] = document.getElementById(id);
+    return wrestleEls[id];
+}
+
+function isMe(id) {
+    return !!socket && !!id && id === socket.id;
+}
+
+// ---------- Model setters (haptics only on real changes) ----------
+
+/** @returns {boolean} whether the role changed */
+function setTieRole(role) {
+    if (wrestle.tieRole === role) return false;
+    wrestle.tieRole = role;
+    if (role === 'attacker') vibrate(WRESTLE_VIBRATION.tieUpAttacker);
+    else if (role === 'defender') vibrate(WRESTLE_VIBRATION.tieUpDefender);
+    else wrestle.tieMsLeft = 0;
+    return true;
+}
+
+function setPinRole(role) {
+    if (wrestle.pinRole === role) return;
+    wrestle.pinRole = role;
+    wrestle.pinCount = 0;
+    if (role === 'pinned') vibrate(WRESTLE_VIBRATION.pinStart);
+}
+
+function setPinCount(count) {
+    if (!wrestle.pinRole || !(count > wrestle.pinCount)) return;
+    wrestle.pinCount = count;
+    if (wrestle.pinRole === 'pinned') {
+        vibrate(count >= 3 ? WRESTLE_VIBRATION.pinThree : WRESTLE_VIBRATION.pinCount);
     } else {
-        // Back to normal "AGARRAR" (grab) mode
-        grabButton.classList.remove('grabbing');
-        grabButton.style.borderColor = '#9966ff';
-        grabButton.style.color = '#9966ff';
-        grabButton.style.animation = 'none';
-        if (labelSpan) labelSpan.textContent = 'AGARRAR';
+        vibrate(WRESTLE_VIBRATION.pinCountPinner);
     }
 }
 
 /**
- * Show escape UI when player is grabbed
+ * Open / update / close the mash screen. Taps only grow within one screen (a state frame
+ * can lag one tap behind the callback); switching screens starts from zero.
  */
-function showEscapeUI() {
-    // Remove existing escape UI if present
-    hideEscapeUI();
-    
-    // Create escape overlay
-    const escapeOverlay = document.createElement('div');
-    escapeOverlay.id = 'escape-overlay';
-    escapeOverlay.innerHTML = `
-        <div class="escape-container">
-            <div class="escape-title">¡ESTÁS AGARRADO!</div>
-            <div class="escape-instruction">¡PRESIONA RÁPIDO PARA ESCAPAR!</div>
-            <div class="escape-progress-bar">
-                <div class="escape-progress-fill" id="escape-fill"></div>
-            </div>
-            <button class="escape-btn" id="escape-btn">
-                <span class="escape-btn-icon">💪</span>
-                <span class="escape-btn-text">¡ESCAPAR!</span>
-            </button>
-        </div>
-    `;
-    
-    // Add styles
-    escapeOverlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(255, 0, 0, 0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        animation: pulseRed 0.5s infinite;
-    `;
-    
-    const style = document.createElement('style');
-    style.id = 'escape-styles';
-    style.textContent = `
-        @keyframes pulseRed {
-            0%, 100% { background: rgba(255, 0, 0, 0.2); }
-            50% { background: rgba(255, 0, 0, 0.4); }
+function setMash(info) {
+    if (!info) {
+        if (mash.mode) {
+            mash.mode = null;
+            mash.taps = 0;
+            mash.needed = 0;
+            mash.pending = 0;
+            mash.count = 0;
         }
-        .escape-container {
-            background: rgba(0, 0, 0, 0.9);
-            border: 4px solid #ff3366;
-            border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            max-width: 90%;
+        return;
+    }
+    if (info.mode !== mash.mode) {
+        mash.mode = info.mode;
+        mash.taps = 0;
+        mash.pending = 0;
+        mash.count = 0;
+        mash.needed = info.mode === 'tieup' ? WRESTLE.TIEUP_ESCAPE_TAPS :
+            info.mode === 'carry' ? WRESTLE.CARRY_ESCAPE_TAPS : 0;
+    }
+    const taps = Number(info.taps);
+    if (Number.isFinite(taps)) mash.taps = Math.max(mash.taps, taps);
+    const needed = Number(info.needed);
+    if (Number.isFinite(needed) && needed > 0) mash.needed = needed;
+    const count = Number(info.count);
+    if (Number.isFinite(count)) mash.count = Math.max(mash.count, count);
+}
+
+/** A downed rival I could cover (same filter as the server's findPinTarget) */
+function isCoverAvailable(me, players) {
+    if (!me || !me.position || me.isEliminated || me.isDown || me.isGettingUp || me.move ||
+        me.pin || me.tieUp || me.isGrabbing || me.isGrabbed) return false;
+    return players.some(other => other && other.id !== me.id && !other.isEliminated &&
+        other.isDown && !other.pin && !other.move && other.position &&
+        Math.hypot(other.position.x - me.position.x, other.position.z - me.position.z) <= WRESTLE.PIN_RANGE);
+}
+
+/**
+ * Mirror my 'arena-state' entry (called every tick)
+ */
+function syncWrestleFromState(me, players) {
+    const out = !!me.isEliminated;
+    const tie = !out && me.tieUp ? me.tieUp : null;
+    const pin = !out && me.pin ? me.pin : null;
+    const move = !out && me.move ? me.move : null;
+
+    wrestle.eliminated = out;
+
+    const tieChanged = setTieRole(tie ? tie.role : null);
+    if (tie) {
+        wrestle.tieMsLeft = Math.max(0, Number(tie.msLeft) || 0);
+        // Joined mid tie-up (no event seen, e.g. after a reconnection): size the bar from here
+        if (tieChanged || wrestle.tieMsLeft > wrestle.tieDuration) {
+            wrestle.tieDuration = Math.max(WRESTLE.TIEUP_MS, wrestle.tieMsLeft);
         }
-        .escape-title {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 1.8rem;
-            font-weight: bold;
-            color: #ff3366;
-            margin-bottom: 10px;
-            text-shadow: 0 0 10px rgba(255, 51, 102, 0.8);
-        }
-        .escape-instruction {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 1rem;
-            color: white;
-            margin-bottom: 20px;
-        }
-        .escape-progress-bar {
-            width: 100%;
-            height: 30px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 15px;
-            overflow: hidden;
-            margin-bottom: 20px;
-            border: 2px solid #00ffcc;
-        }
-        .escape-progress-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #00ffcc, #00ff88);
-            transition: width 0.1s ease;
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
-        }
-        .escape-btn {
-            width: 100%;
-            padding: 20px;
-            font-size: 1.5rem;
-            font-family: 'Orbitron', sans-serif;
-            font-weight: bold;
-            background: linear-gradient(45deg, #00ffcc, #00ff88);
-            color: #0a0a15;
-            border: none;
-            border-radius: 15px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            animation: escapeButtonPulse 0.3s infinite;
-        }
-        @keyframes escapeButtonPulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-        }
-        .escape-btn:active {
-            transform: scale(0.95) !important;
-            background: linear-gradient(45deg, #00ff88, #00ffcc);
-        }
-        .escape-btn-icon {
-            font-size: 2rem;
-        }
-    `;
-    
-    document.head.appendChild(style);
-    document.body.appendChild(escapeOverlay);
-    
-    // Add click handler for escape button
-    const escapeBtn = document.getElementById('escape-btn');
-    escapeBtn.addEventListener('click', handleEscapePress);
-    escapeBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        handleEscapePress();
+    }
+
+    setPinRole(pin ? pin.role : null);
+    if (pin) setPinCount(Number(pin.count) || 0);
+
+    wrestle.moveType = move ? move.type : null;
+    wrestle.moveRole = move ? move.role : null;
+    wrestle.isDown = !out && !!me.isDown;
+    wrestle.isGettingUp = !out && !!me.isGettingUp;
+    wrestle.coverAvailable = isCoverAvailable(me, players);
+
+    if (pin && pin.role === 'pinned') {
+        setMash({ mode: 'pin', taps: pin.taps, needed: pin.tapsNeeded, count: pin.count });
+    } else if (tie && tie.role === 'defender') {
+        setMash({ mode: 'tieup', taps: tie.escapeTaps, needed: tie.escapeNeeded });
+    } else if (isGrabbed) {
+        const carry = me.carryEscape || {};
+        setMash({ mode: 'carry', taps: carry.taps, needed: carry.needed });
+    } else {
+        setMash(null);
+    }
+
+    renderWrestleUI();
+}
+
+/**
+ * Forget every wrestling/grab state and hide its UI (rematch, next round, game over, leave)
+ */
+function clearArenaWrestling() {
+    isGrabbing = false;
+    isGrabbed = false;
+    if (wrestle.flashTimer) clearTimeout(wrestle.flashTimer);
+    Object.assign(wrestle, {
+        tieRole: null,
+        tieMsLeft: 0,
+        tieDuration: WRESTLE.TIEUP_MS,
+        pinRole: null,
+        pinCount: 0,
+        moveType: null,
+        moveRole: null,
+        isDown: false,
+        isGettingUp: false,
+        eliminated: false,
+        coverAvailable: false,
+        flash: null,
+        flashTimer: null
+    });
+    setMash(null);
+    mash.lastTapAt = 0;
+    mash.lastEmitAt = 0;
+
+    // Leftovers from the old escape overlay (older builds created it on the fly)
+    const oldOverlay = document.getElementById('escape-overlay');
+    if (oldOverlay) oldOverlay.remove();
+    const oldStyles = document.getElementById('escape-styles');
+    if (oldStyles) oldStyles.remove();
+
+    renderWrestleUI();
+    updateGrabButtonState(true);
+}
+
+// ---------- Rendering ----------
+
+function renderWrestleUI() {
+    renderMash();
+    renderHud();
+    renderActionLock();
+    updateGrabButtonState();
+}
+
+function setPinCountDisplay(container, count) {
+    if (!container) return;
+    const value = String(count || 0);
+    if (container.dataset.count === value) return;
+    container.dataset.count = value;
+    container.querySelectorAll('.pin-num').forEach(num => {
+        num.classList.toggle('on', Number(num.dataset.n) <= count);
     });
 }
 
-/**
- * Hide escape UI
- */
-function hideEscapeUI() {
-    const overlay = document.getElementById('escape-overlay');
-    const styles = document.getElementById('escape-styles');
-    if (overlay) overlay.remove();
-    if (styles) styles.remove();
-    escapeProgress = 0;
+function renderMash() {
+    const overlay = wEl('mash-overlay');
+    if (!overlay) return;
+
+    if (!mash.mode) {
+        if (!overlay.classList.contains('hidden')) overlay.classList.add('hidden');
+        overlay.dataset.mode = '';
+        overlay.dataset.progress = '';
+        return;
+    }
+
+    if (overlay.dataset.mode !== mash.mode) {
+        const screen = MASH_SCREENS[mash.mode] || MASH_SCREENS.carry;
+        overlay.dataset.mode = mash.mode;
+        overlay.dataset.progress = '';
+        const set = (id, text) => { const el = wEl(id); if (el) el.textContent = text; };
+        set('mash-title', screen.title);
+        set('mash-sub', screen.sub);
+        set('mash-btn-icon', screen.icon);
+        set('mash-btn-text', screen.button);
+        const countEl = wEl('mash-count');
+        if (countEl) {
+            countEl.classList.toggle('hidden', mash.mode !== 'pin');
+            countEl.dataset.count = '';
+        }
+        overlay.classList.remove('hidden');
+    }
+
+    // Taps whose ack never came (dropped connection) stop counting after a moment
+    if (mash.pending && performance.now() - mash.lastEmitAt > WRESTLE.PENDING_TIMEOUT_MS) {
+        mash.pending = 0;
+    }
+
+    const needed = mash.needed;
+    const raw = mash.taps + mash.pending;
+    const shown = needed > 0 ? Math.min(needed, raw) : raw;
+    const progressKey = `${shown}/${needed}`;
+    if (overlay.dataset.progress !== progressKey) {
+        overlay.dataset.progress = progressKey;
+        const fill = wEl('mash-fill');
+        if (fill) fill.style.transform = `scaleX(${needed > 0 ? shown / needed : 0})`;
+        const tapsEl = wEl('mash-taps');
+        if (tapsEl) tapsEl.textContent = needed > 0 ? `${shown} / ${needed}` : `${shown}`;
+    }
+
+    if (mash.mode === 'pin') setPinCountDisplay(wEl('mash-count'), mash.count);
+}
+
+/** What the small HUD above the buttons should say right now (null = hidden) */
+function getHudView() {
+    if (gameMode !== 'arena' || wrestle.eliminated) return null;
+
+    if (wrestle.tieRole === 'attacker') {
+        return { key: 'tie', title: '¡AMARRE! ELIGE TU LLAVE', tone: 'warn', guide: true, timer: true };
+    }
+    if (wrestle.pinRole === 'pinner') {
+        return { key: 'pinner', title: 'CONTANDO…', tone: 'danger', count: true };
+    }
+    if (wrestle.moveType) {
+        const attacking = wrestle.moveRole === 'attacker';
+        return {
+            key: `move:${wrestle.moveType}:${wrestle.moveRole}`,
+            title: GRAPPLE_MOVE_NAMES[wrestle.moveType] || '¡LLAVE!',
+            sub: attacking ? '¡Lo estás aplicando!' : '¡Te lo están aplicando!',
+            tone: attacking ? 'good' : 'danger'
+        };
+    }
+    if (isGrabbing) {
+        return { key: 'carry', title: '¡LO CARGAS!', sub: 'Apunta con 🕹 y pulsa LANZAR', tone: 'warn' };
+    }
+    if (wrestle.flash) {
+        return { key: `flash:${wrestle.flash.id}`, title: wrestle.flash.title, sub: wrestle.flash.sub, tone: wrestle.flash.tone };
+    }
+    if (wrestle.isGettingUp) {
+        return { key: 'getup', title: 'Levantándote…', tone: 'info' };
+    }
+    if (wrestle.isDown) {
+        return { key: 'down', title: '¡EN LA LONA!', sub: 'Espera a levantarte', tone: 'danger' };
+    }
+    if (wrestle.coverAvailable) {
+        return { key: 'cover', title: 'RIVAL EN LA LONA', sub: 'AGARRAR: Cubrir · GOLPE/PATADA: Pisotón', tone: 'good' };
+    }
+    return null;
+}
+
+function renderHud() {
+    const hud = wEl('arena-hud');
+    if (!hud) return;
+
+    const view = getHudView();
+    const key = view ? view.key : '';
+    if (key !== wrestle.hudKey) {
+        wrestle.hudKey = key;
+        if (!view) {
+            hud.classList.add('hidden');
+            return;
+        }
+        const title = wEl('arena-hud-title');
+        if (title) title.textContent = view.title;
+        const sub = wEl('arena-hud-sub');
+        if (sub) sub.textContent = view.sub || '';
+        const guide = wEl('arena-hud-guide');
+        if (guide) guide.classList.toggle('hidden', !view.guide);
+        const count = wEl('arena-hud-count');
+        if (count) {
+            count.classList.toggle('hidden', !view.count);
+            count.dataset.count = '';
+        }
+        const timer = wEl('arena-hud-timer');
+        if (timer) timer.classList.toggle('hidden', !view.timer);
+        hud.dataset.tone = view.tone || '';
+        hud.classList.remove('hidden');
+    }
+    if (!view) return;
+
+    if (view.timer) {
+        const fill = wEl('arena-hud-timer-fill');
+        const ratio = Math.max(0, Math.min(1, wrestle.tieMsLeft / (wrestle.tieDuration || WRESTLE.TIEUP_MS)));
+        if (fill) fill.style.transform = `scaleX(${ratio.toFixed(3)})`;
+    }
+    if (view.count) setPinCountDisplay(wEl('arena-hud-count'), wrestle.pinCount);
+}
+
+/** Dim the action buttons while the server ignores them */
+function renderActionLock() {
+    const locked = gameMode === 'arena' && !wrestle.eliminated && (
+        wrestle.isDown || wrestle.isGettingUp || !!wrestle.moveType || !!wrestle.pinRole ||
+        wrestle.tieRole === 'defender' || isGrabbed);
+    if (locked === wrestle.locked) return;
+    wrestle.locked = locked;
+    const buttons = document.querySelector('.action-buttons');
+    if (buttons) buttons.classList.toggle('locked', locked);
+    if (locked) {
+        document.querySelectorAll('.action-buttons .action-btn[data-action].pressed')
+            .forEach(btn => btn.classList.remove('pressed'));
+    }
+}
+
+/** Short HUD message (shown when nothing more important is on screen) */
+function flashHud(title, sub, tone) {
+    if (wrestle.flashTimer) clearTimeout(wrestle.flashTimer);
+    wrestle.flash = { id: ++flashSeq, title, sub: sub || '', tone: tone || '' };
+    wrestle.flashTimer = setTimeout(() => {
+        wrestle.flash = null;
+        wrestle.flashTimer = null;
+        renderHud();
+    }, WRESTLE.FLASH_MS);
+    renderHud();
+}
+
+function computeGrabButtonMode() {
+    if (isGrabbing) return 'throw';                       // Carrying: throw
+    if (wrestle.tieRole === 'attacker') return 'lift';    // Tie-up attacker: lift into the carry
+    if (wrestle.coverAvailable) return 'cover';           // Downed rival next to me: pin
+    return 'grab';
 }
 
 /**
- * Handle escape button press
+ * AGARRAR / CUBRIR / CARGAR / LANZAR label and color
+ * @param {boolean} force - rewrite the button even if the mode did not change
  */
-function handleEscapePress() {
-    if (!isGrabbed) {
-        console.log('[Escape] Not grabbed, ignoring');
+function updateGrabButtonState(force = false) {
+    const mode = computeGrabButtonMode();
+    if (mode === grabButtonMode && !force) return;
+    grabButtonMode = mode;
+
+    const grabButton = document.querySelector('.action-btn[data-action="grab"]');
+    if (!grabButton) return;
+
+    Object.values(GRAB_BUTTON_MODES).forEach(cfg => {
+        if (cfg.className) grabButton.classList.remove(cfg.className);
+    });
+    const cfg = GRAB_BUTTON_MODES[mode];
+    if (cfg.className) grabButton.classList.add(cfg.className);
+    // Colors/animation come from the CSS classes (older builds set them inline)
+    grabButton.style.borderColor = '';
+    grabButton.style.color = '';
+    grabButton.style.animation = '';
+
+    const labelSpan = grabButton.querySelector('.btn-action');
+    if (labelSpan) labelSpan.textContent = cfg.label;
+}
+
+// ---------- Mash input ----------
+
+function setupMashInput() {
+    const overlay = document.getElementById('mash-overlay');
+    if (!overlay || overlay.dataset.bound) return;
+    overlay.dataset.bound = '1';
+
+    if (window.PointerEvent) {
+        // One pointerdown per finger; no click/mouse listeners, so touch + click never double-fire
+        overlay.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            handleMashTap(e);
+        });
+    } else {
+        // preventDefault on touchstart suppresses the emulated mouse events
+        overlay.addEventListener('touchstart', handleMashTap, { passive: false });
+        overlay.addEventListener('mousedown', handleMashTap);
+    }
+}
+
+/**
+ * One tap = one 'arena-escape' (the server counts the taps)
+ */
+function handleMashTap(e) {
+    if (e && e.cancelable) e.preventDefault();
+    if (!mash.mode) return;
+
+    const now = performance.now();
+    if (now - mash.lastTapAt < WRESTLE.TAP_DEBOUNCE_MS) return;
+    mash.lastTapAt = now;
+
+    // Instant feedback: squash animation + light tick
+    const btn = wEl('mash-btn');
+    if (btn) {
+        btn.classList.remove('tap');
+        void btn.offsetWidth; // Restart the animation
+        btn.classList.add('tap');
+    }
+    vibrate(WRESTLE_VIBRATION.mashTap);
+
+    // While reconnecting socket.io would buffer the taps and replay them later
+    if (!socket || !socket.connected) return;
+
+    const mode = mash.mode;
+    mash.pending++;
+    mash.lastEmitAt = now;
+    renderMash();
+
+    socket.emit('arena-escape', (res) => {
+        if (mash.mode !== mode) return; // That screen is already gone
+        mash.pending = Math.max(0, mash.pending - 1);
+        if (res && res.success && res.mode === mode) {
+            if (res.escaped) {
+                onMashEscaped(mode);
+                return;
+            }
+            setMash({ mode, taps: res.taps, needed: res.needed });
+        }
+        renderMash();
+    });
+}
+
+function onMashEscaped(mode) {
+    if (mode === 'tieup') {
+        setTieRole(null);
+        flashHud('¡LIBRE!', 'Te zafaste del amarre', 'good');
+    } else if (mode === 'pin') {
+        setPinRole(null);
+        flashHud('¡TE ZAFASTE!', '¡Sigue peleando!', 'good');
+    } else {
+        isGrabbed = false;
+        flashHud('¡LIBRE!', 'Te soltaste', 'good');
+    }
+    setMash(null);
+    vibrate(WRESTLE_VIBRATION.escaped);
+    renderWrestleUI();
+}
+
+// ---------- Server events ----------
+
+function handleArenaTieUp(data) {
+    if (!data) return;
+    if (isMe(data.attackerId)) {
+        const duration = Number(data.duration);
+        wrestle.tieDuration = duration > 0 ? duration : WRESTLE.TIEUP_MS;
+        wrestle.tieMsLeft = wrestle.tieDuration;
+        setTieRole('attacker');
+    } else if (isMe(data.defenderId)) {
+        setTieRole('defender');
+        setMash({ mode: 'tieup', taps: 0 });
+    } else {
         return;
     }
-    
-    // Each press adds 33-40% progress
-    escapeProgress += (100 / escapeThreshold);
-    escapeProgress = Math.min(100, escapeProgress); // Cap at 100
-    console.log('[Escape] Progress:', escapeProgress);
-    
-    // Update progress bar immediately
-    const fill = document.getElementById('escape-fill');
-    if (fill) {
-        fill.style.width = escapeProgress + '%';
+    renderWrestleUI();
+}
+
+function handleArenaTieUpEnd(data) {
+    if (!data) return;
+    const meAttacker = isMe(data.attackerId);
+    const meDefender = isMe(data.defenderId);
+    if (!meAttacker && !meDefender) return;
+
+    const wasRole = wrestle.tieRole;
+    setTieRole(null);
+    if (meDefender) {
+        if (mash.mode === 'tieup') setMash(null);
+        // (When my own tap broke it, the escape callback already celebrated)
+        if (data.reason === 'escape' && wasRole === 'defender') {
+            vibrate(WRESTLE_VIBRATION.escaped);
+            flashHud('¡LIBRE!', 'Te zafaste del amarre', 'good');
+        }
+    } else if (wasRole === 'attacker') {
+        if (data.reason === 'escape') {
+            vibrate(WRESTLE_VIBRATION.partnerEscaped);
+            flashHud('¡SE ZAFÓ!', '', 'danger');
+        } else if (data.reason === 'timeout') {
+            flashHud('AMARRE ROTO', 'Se acabó el tiempo', 'info');
+        }
     }
-    
-    // Haptic feedback
-    triggerHaptic();
-    
-    // Check if escaped (at or above 100%)
-    if (escapeProgress >= 100) {
-        console.log('[Escape] Bar full! Sending escape request...');
-        
-        // Immediately hide UI and mark as escaped (optimistic)
-        isGrabbed = false;
-        hideEscapeUI();
-        
-        socket.emit('arena-escape', (response) => {
-            console.log('[Escape] Server response:', response);
-            if (response && response.success) {
-                console.log('[Escape] Successfully escaped!');
-                // Already handled above
-            } else {
-                console.log('[Escape] Server said no, but we escaped locally');
-                // Still escaped from user perspective - server will sync state
-            }
-        });
+    renderWrestleUI();
+}
+
+function handleArenaGrappleMove(data) {
+    if (!data) return;
+    const meAttacker = isMe(data.attackerId);
+    const meDefender = isMe(data.defenderId);
+    if (!meAttacker && !meDefender) return;
+
+    setTieRole(null);
+    if (mash.mode === 'tieup') setMash(null);
+    wrestle.moveType = data.move || null;
+    wrestle.moveRole = meAttacker ? 'attacker' : 'defender';
+    if (meAttacker) vibrate(WRESTLE_VIBRATION.moveStart);
+    renderWrestleUI();
+}
+
+function handleArenaGrappleImpact(data) {
+    if (!data) return;
+    if (isMe(data.defenderId)) {
+        vibrate(HEAVY_GRAPPLE_MOVES.includes(data.move) ? WRESTLE_VIBRATION.impactHeavy : WRESTLE_VIBRATION.impactLight);
+        if (data.down && !data.eliminated) {
+            wrestle.isDown = true;
+            renderWrestleUI();
+        }
+    } else if (isMe(data.attackerId)) {
+        vibrate(WRESTLE_VIBRATION.impactDealt);
     }
+}
+
+function handleArenaGetUp(data) {
+    if (!data || !isMe(data.playerId)) return;
+    wrestle.isDown = false;
+    wrestle.isGettingUp = true;
+    // Do not cut the "escaped" buzz of a kick-out (that also makes me get up)
+    if (!wrestle.flash) vibrate(WRESTLE_VIBRATION.getUp);
+    renderWrestleUI();
+}
+
+function handleArenaPinStart(data) {
+    if (!data) return;
+    if (isMe(data.victimId)) {
+        setPinRole('pinned');
+        setMash({ mode: 'pin', taps: 0, needed: data.tapsNeeded, count: 0 });
+    } else if (isMe(data.pinnerId)) {
+        setPinRole('pinner');
+    } else {
+        return;
+    }
+    renderWrestleUI();
+}
+
+function handleArenaPinCount(data) {
+    if (!data) return;
+    const meVictim = isMe(data.victimId);
+    if (!meVictim && !isMe(data.pinnerId)) return;
+
+    const count = Number(data.count) || 0;
+    if (!wrestle.pinRole) setPinRole(meVictim ? 'pinned' : 'pinner');
+    setPinCount(count);
+    if (meVictim) setMash({ mode: 'pin', count });
+    renderWrestleUI();
+}
+
+function handleArenaPinEnd(data) {
+    if (!data) return;
+    const meVictim = isMe(data.victimId);
+    const mePinner = isMe(data.pinnerId);
+    if (!meVictim && !mePinner) return;
+
+    const wasRole = wrestle.pinRole;
+    setPinRole(null);
+    if (meVictim) {
+        if (mash.mode === 'pin') setMash(null);
+        // (When my own tap kicked out, the escape callback already celebrated)
+        if (data.result === 'kickout' && wasRole === 'pinned') {
+            vibrate(WRESTLE_VIBRATION.escaped);
+            flashHud('¡TE ZAFASTE!', '¡Sigue peleando!', 'good');
+        }
+    } else if (wasRole === 'pinner') {
+        if (data.result === 'pinfall') {
+            vibrate(WRESTLE_VIBRATION.pinWin);
+            flashHud('¡1 · 2 · 3!', '¡Ganaste por conteo!', 'good');
+        } else if (data.result === 'kickout') {
+            vibrate(WRESTLE_VIBRATION.partnerEscaped);
+            flashHud('¡SE ZAFÓ!', 'Pateó antes del 3', 'danger');
+        }
+    }
+    renderWrestleUI();
 }
 
 function resetState() {
@@ -2593,9 +3062,6 @@ function resetState() {
     selectedCharacter = null;
     takenCharacters = {};
     gameMode = 'smash';
-    isGrabbing = false;
-    isGrabbed = false;
-    escapeProgress = 0;
     lastRaceTap = null;
     raceSpeed = 0;
     flappyAlive = true;
@@ -2603,9 +3069,8 @@ function resetState() {
     resetJoystick();
     Object.keys(inputState).forEach(key => inputState[key] = false);
 
-    // Hide escape UI if visible
-    hideEscapeUI();
-    updateGrabButtonState();
+    // Arena grab / wrestling state and its UI (mash screen, HUD, AGARRAR label)
+    clearArenaWrestling();
     hideReconnectNotice();
     resetRematchButtons();
 
@@ -2781,6 +3246,7 @@ function handleRoundEnded(data) {
     console.log('[Tournament] Round ended:', data);
     tournamentState.currentRound = data.currentRound;
     tournamentState.playerScores = data.playerScores || {};
+    clearArenaWrestling();
     
     showRoundEndOverlay(data);
 }
