@@ -89,8 +89,19 @@ class BalloonPlayerEntity {
         this.isPumping = false;
         this.pumpEndTime = 0;
         this.isPopped = false;
+        this.isTied = false;
+        this.tiedLabel = null;   // "🎀 AMARRADO" badge (created when the server says tied)
         this.lastServerState = null;
         this.isFinished = false; // Match over: keep the win/lose animation
+
+        // 💨 shown while the player is blowing (toggled with .visible, see CSS2DRenderer)
+        const blowDiv = document.createElement('div');
+        blowDiv.className = 'balloon-blow-label';
+        blowDiv.textContent = '💨';
+        this.blowLabel = new CSS2DObject(blowDiv);
+        this.blowLabel.position.set(70, 150, 60);
+        this.blowLabel.visible = false;
+        this.model.add(this.blowLabel);
 
         this.originalBalloonPos = this.balloon.position.clone();
         // Smoothed rise height (the tension shake is applied as an offset on top of it)
@@ -184,6 +195,29 @@ class BalloonPlayerEntity {
         label.position.set(0, 250, 0);
         return label;
     }
+
+    /**
+     * Balloon banked ("amarrado"): it stops shaking, keeps its color and shows a badge
+     */
+    tie() {
+        if (this.isTied) return;
+        this.isTied = true;
+        this.isPumping = false;
+        this.blowLabel.visible = false;
+        this.animController.play('idle', 0.2);
+
+        const div = document.createElement('div');
+        div.className = 'balloon-player-tied-label';
+        div.textContent = '🎀 AMARRADO';
+        this.tiedLabel = new CSS2DObject(div);
+        this.tiedLabel.position.set(0, 300, 0);
+        this.model.add(this.tiedLabel);
+
+        if (this.sfxManager) {
+            this.sfxManager.play('block', 0.6);
+        }
+        console.log(`[Balloon] ${this.name} tied the balloon`);
+    }
     
     applyColorTint(color) {
         const tintColor = new THREE.Color(color);
@@ -213,23 +247,28 @@ class BalloonPlayerEntity {
                 return;
             }
 
-            if (state.balloonSize > this.lastSize + 0.5) {
+            // Banked balloon: badge, no shake, base color (handled below)
+            if (state.tied && !this.isTied) {
+                this.tie();
+            }
+
+            // Blowing (held button) or a legacy tap puff: pump animation + whoosh on each blow start
+            const growing = !this.isTied && (state.blowing || state.balloonSize > this.lastSize + 0.5);
+            if (growing) {
+                if (!this.isPumping) {
+                    this.animController.play('pump', 0.1);
+                    // SFX: Pump/Air sound
+                    if (this.sfxManager) {
+                        this.sfxManager.play('punchWhoosh', 0.4);
+                    }
+                }
                 this.isPumping = true;
                 this.pumpEndTime = Date.now() + 300;
-                this.animController.play('pump', 0.1);
-                
-                // SFX: Pump/Air sound
-                if (this.sfxManager) {
-                    this.sfxManager.play('punchWhoosh', 0.4);
-                }
             }
+            this.blowLabel.visible = !!state.blowing && !this.isTied;
             this.lastSize = state.balloonSize;
-            
-            // Check for pop logic: if balloonSize hits 100 or server says finished
-            // Wait, server logic now uses burstSize which can be > 100.
-            // For now, let's trust the server's balloonSize.
-            
-            // Update balloon scale
+
+            // Update balloon scale (server balloonSize; the hidden burst is between 85 and 95)
             const progress = state.balloonSize / 100;
             // Use power function for exponential growth feel
             const targetScale = BALLOON_CONFIG.MIN_BALLOON_SCALE + Math.pow(progress, 1.3) * (BALLOON_CONFIG.MAX_BALLOON_SCALE - BALLOON_CONFIG.MIN_BALLOON_SCALE);
@@ -240,11 +279,14 @@ class BalloonPlayerEntity {
             const targetY = this.originalBalloonPos.y + Math.pow(Math.max(0, progress), 1.1) * 600;
             this.baseBalloonY = THREE.MathUtils.lerp(this.baseBalloonY, targetY, 0.1);
 
-            // TENSION VISUALS: shake is an offset on top of the risen position
+            // TENSION VISUALS: shake is an offset on top of the risen position.
+            // `tension` comes from the server (0 at size 70, 1 at 95); a tied balloon is calm.
             let shakeX = 0;
             let shakeY = 0;
-            if (state.balloonSize > 80) {
-                const tension = Math.min(1, (state.balloonSize - 80) / 20);
+            const tension = this.isTied ? 0 : (typeof state.tension === 'number'
+                ? state.tension
+                : THREE.MathUtils.clamp((state.balloonSize - 70) / 25, 0, 1));
+            if (tension > 0) {
                 const shakeIntensity = tension * 10;
                 shakeX = (Math.random() - 0.5) * shakeIntensity;
                 shakeY = (Math.random() - 0.5) * shakeIntensity;
@@ -734,16 +776,49 @@ class BalloonGame {
     }
 
     /**
-     * How the round ended, mirroring server/balloonState.js processTick:
+     * How the round ended. The server sends `endReason` ('all-popped', 'last-survivor',
+     * 'all-tied', 'time'); the fallback mirrors server/balloonState.js for older payloads:
      * no winner -> everyone popped; one survivor among several players -> last survivor;
-     * otherwise the timer ran out (biggest balloon wins).
+     * everyone left tied -> all tied; otherwise the timer ran out (biggest balloon wins).
      */
     getEndReason(data) {
         if (!data || !data.winner) return 'all-popped';
+        if (data.endReason) return data.endReason;
         const players = Array.isArray(data.players) ? data.players : [];
-        const survivors = players.filter(p => !p.isDQ).length;
-        if (players.length > 1 && survivors === 1) return 'last-survivor';
+        const survivors = players.filter(p => !p.isDQ);
+        if (players.length > 1 && survivors.length === 1) return 'last-survivor';
+        if (survivors.length > 0 && survivors.every(p => p.tied)) return 'all-tied';
         return 'time';
+    }
+
+    /**
+     * Final ranking: `results` from the server (survivors by size, then the popped ones),
+     * rebuilt from `players` for older payloads
+     */
+    getResults(data) {
+        if (Array.isArray(data.results) && data.results.length) return data.results;
+        const players = Array.isArray(data.players) ? data.players : [];
+        return players
+            .map(p => ({ id: p.id, name: p.name, balloonSize: Math.round(p.balloonSize || 0), tied: !!p.tied, isDQ: !!p.isDQ }))
+            .sort((a, b) => (a.isDQ - b.isDQ) || (b.balloonSize - a.balloonSize));
+    }
+
+    buildRanking(data) {
+        const results = this.getResults(data);
+        if (!results.length) return null;
+
+        const list = document.createElement('div');
+        list.className = 'balloon-ranking';
+        results.forEach((r, idx) => {
+            const row = document.createElement('div');
+            row.className = 'balloon-ranking-row' + (r.isDQ ? ' popped' : '') + (data.winner && r.id === data.winner.id ? ' winner' : '');
+            const size = r.isDQ ? '💥 ¡TRONÓ!' : `${Math.round(r.balloonSize)}${r.tied ? ' 🎀' : ''}`;
+            row.innerHTML = `<span class="balloon-ranking-pos">${idx + 1}.</span>` +
+                `<span class="balloon-ranking-name">${escapeHtml(r.name)}</span>` +
+                `<span class="balloon-ranking-size">${size}</span>`;
+            list.appendChild(row);
+        });
+        return list;
     }
 
     showGameOver(data, options = {}) {
@@ -764,11 +839,17 @@ class BalloonGame {
         const reason = this.getEndReason(data);
         if (reason === 'last-survivor') {
             status.innerHTML = `¡ÚLTIMO EN PIE!<br><span style="color: #ff66ff">${escapeHtml(data.winner.name)}</span><br>GANA LA FIESTA`;
+        } else if (reason === 'all-tied') {
+            status.innerHTML = `¡TODOS AMARRADOS!<br><span style="color: #ff66ff">${escapeHtml(data.winner.name)}</span><br>GANA LA FIESTA`;
         } else if (reason === 'time') {
             status.innerHTML = `¡TIEMPO!<br><span style="color: #ff66ff">${escapeHtml(data.winner.name)}</span><br>GANA LA FIESTA`;
         } else {
             status.innerHTML = `¡BOOM!<br><span style="color: #ff3366">TODOS ELIMINADOS</span><br>NADIE GANA`;
         }
+
+        // Ranking by balloon size (popped ones marked 💥, banked ones 🎀)
+        const ranking = this.buildRanking(data);
+        if (ranking) status.appendChild(ranking);
 
         if (subtitle) {
             const sub = document.createElement('div');

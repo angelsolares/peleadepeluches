@@ -661,13 +661,13 @@ io.on('connection', (socket) => {
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
         if (!roomCode) return;
         
-        // Update player's blocking state on server
-        gameStateManager.setPlayerBlocking(socket.id, roomCode, isBlocking);
-        
+        // Update player's blocking state on server (refused with a broken/empty shield)
+        const applied = gameStateManager.setPlayerBlocking(socket.id, roomCode, isBlocking);
+
         // Broadcast block state to all clients in room
         io.to(roomCode).emit('player-block-state', {
             playerId: socket.id,
-            isBlocking: isBlocking
+            isBlocking: applied
         });
     });
     
@@ -916,13 +916,34 @@ io.on('connection', (socket) => {
     });
 
     /**
-     * Balloon inflate action
+     * Balloon inflate action (legacy tap: a tiny puff)
      */
     socket.on('balloon-inflate', () => {
         const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
         if (!roomCode) return;
-        
+
         balloonStateManager.handleInflate(socket.id, roomCode);
+    });
+
+    /**
+     * Balloon blow: true while the button is held, false when released
+     */
+    socket.on('balloon-blow', (blowing) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+
+        balloonStateManager.handleBlow(socket.id, roomCode, blowing);
+    });
+
+    /**
+     * Balloon tie ("amarrar"): lock the balloon at its current size
+     */
+    socket.on('balloon-tie', (callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+
+        const tied = balloonStateManager.handleTie(socket.id, roomCode);
+        if (typeof callback === 'function') callback({ success: tied });
     });
     
     /**
@@ -1372,7 +1393,12 @@ function startGameLoop(roomCode) {
                 // Broadcast hit results
                 io.to(roomCode).emit('attack-hit', result);
             }
-            
+
+            // One-off events (shield breaks...)
+            for (const event of gameStateManager.drainEvents(roomCode)) {
+                io.to(roomCode).emit('smash-event', event);
+            }
+
             // Check for KOs
             const kos = gameStateManager.checkKOs(roomCode);
             if (kos.length > 0) {

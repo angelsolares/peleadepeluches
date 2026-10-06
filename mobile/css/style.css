@@ -772,6 +772,48 @@ input, textarea {
     box-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
 }
 
+/* Smash: the shield level fills the BLOQUEO button from the bottom */
+.btn-x {
+    --shield: 0%;              /* Only Smash fills it (see renderSmashShield) */
+    --shield-color: #00BFFF;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-x::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--shield);
+    background: var(--shield-color);
+    opacity: 0.28;
+    transition: height 0.1s linear, background 0.2s ease;
+    pointer-events: none;
+}
+
+.btn-x > * {
+    position: relative;
+}
+
+.btn-x.shield-low {
+    border-color: #ff3366;
+    color: #ff3366;
+}
+
+.btn-x.shield-broken {
+    border-color: #ff3366;
+    color: #ff3366;
+    opacity: 0.5;
+    animation: shield-broken-pulse 0.4s ease infinite alternate;
+}
+
+@keyframes shield-broken-pulse {
+    from { box-shadow: 0 0 0 rgba(255, 51, 102, 0); }
+    to { box-shadow: 0 0 16px rgba(255, 51, 102, 0.8); }
+}
+
 /* G button - Grab (Arena mode only - Purple) */
 .btn-grab {
     grid-column: 2;  /* Center column */
@@ -1623,15 +1665,24 @@ input, textarea {
     border: 2px solid rgba(255, 255, 255, 0.1);
 }
 
+/* The beat lands at 50%: good zone = +-300 ms (40% of the bar), perfect zone = +-150 ms (20%) */
 .rhythm-bar-target {
     position: absolute;
     height: 100%;
-    width: 20%;
-    background: rgba(0, 255, 204, 0.4);
-    left: 40%;
-    box-shadow: 0 0 15px rgba(0, 255, 204, 0.5);
-    border-left: 2px solid #00ffcc;
-    border-right: 2px solid #00ffcc;
+    width: 40%;
+    background: rgba(0, 255, 204, 0.25);
+    left: 30%;
+    border-left: 2px solid rgba(0, 255, 204, 0.6);
+    border-right: 2px solid rgba(0, 255, 204, 0.6);
+}
+
+.rhythm-bar-perfect {
+    position: absolute;
+    height: 100%;
+    width: 50%;
+    left: 25%;
+    background: rgba(0, 255, 204, 0.45);
+    box-shadow: 0 0 15px rgba(0, 255, 204, 0.6);
 }
 
 .rhythm-bar-cursor {
@@ -1642,6 +1693,60 @@ input, textarea {
     left: 0;
     box-shadow: 0 0 10px white;
     z-index: 2;
+}
+
+/* Flash on every beat (class toggled from the rhythm loop) */
+.rhythm-bar-container.beat {
+    border-color: #ffffff;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.6);
+}
+
+.tug-combo-info {
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+}
+
+.tug-streak {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.3rem;
+    font-weight: 900;
+    min-height: 1.4em;
+    color: #00ccff;
+    text-shadow: 0 0 10px rgba(0, 204, 255, 0.6);
+    transition: transform 0.1s ease;
+}
+
+.tug-streak.perfect {
+    color: #00ffcc;
+    text-shadow: 0 0 14px rgba(0, 255, 204, 0.8);
+}
+
+.tug-streak.mashed {
+    color: var(--primary);
+    font-size: 1rem;
+    text-shadow: none;
+}
+
+.tug-streak.pop {
+    transform: scale(1.15);
+}
+
+.tug-team-sync {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    min-height: 1.2em;
+    color: var(--text-muted);
+    transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+.tug-team-sync.active {
+    color: #ffcc00;
+    text-shadow: 0 0 14px rgba(255, 204, 0, 0.8);
 }
 
 .tug-tap-area {
@@ -1716,6 +1821,17 @@ input, textarea {
     100% { box-shadow: 0 0 20px #9966ff; border-color: #9966ff; }
 }
 
+/* Extra pull inside an already used beat window: wasted stamina */
+.tug-pull-btn.mashed {
+    animation: mashed-glow 0.3s ease;
+}
+
+@keyframes mashed-glow {
+    0% { box-shadow: 0 0 20px #ff3366; border-color: #ff3366; }
+    50% { box-shadow: 0 0 40px #ff3366; border-color: #ff3366; }
+    100% { box-shadow: 0 0 20px #9966ff; border-color: #9966ff; }
+}
+
 /* Tug mode - hide normal controls */
 .tug-mode .controller-body {
     display: none;
@@ -1785,11 +1901,58 @@ input, textarea {
     box-shadow: 0 0 15px rgba(255, 102, 255, 0.5);
 }
 
+/* Air (lung) bar: the only meter the player sees; the balloon size stays hidden */
+.balloon-lung {
+    width: 80%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.balloon-lung-header {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #7fe3ff;
+    text-shadow: 0 0 10px rgba(127, 227, 255, 0.5);
+}
+
+.balloon-lung-bar {
+    width: 100%;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9px;
+    overflow: hidden;
+    border: 2px solid rgba(127, 227, 255, 0.35);
+}
+
+.balloon-lung-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #3399ff, #7fe3ff);
+    box-shadow: 0 0 15px rgba(127, 227, 255, 0.5);
+    transition: width 0.08s linear, background 0.3s ease;
+}
+
+.balloon-lung-fill.low {
+    background: linear-gradient(90deg, #ff6633, #ffcc00);
+    box-shadow: 0 0 15px rgba(255, 153, 0, 0.6);
+}
+
+.balloon-lung-fill.empty {
+    background: #ff3366;
+    box-shadow: 0 0 15px rgba(255, 51, 102, 0.7);
+}
+
 .balloon-tap-area {
     flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 22px;
     width: 100%;
 }
 
@@ -1804,13 +1967,15 @@ input, textarea {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 6px;
     cursor: pointer;
     transition: all 0.1s;
     box-shadow: 0 0 30px rgba(255, 102, 255, 0.2);
     user-select: none;
     -webkit-user-select: none;
     touch-action: manipulation;
+    -webkit-touch-callout: none;
+    --shake: 0;
 }
 
 .balloon-inflate-btn:active,
@@ -1818,6 +1983,11 @@ input, textarea {
     transform: scale(0.9);
     background: rgba(255, 102, 255, 0.3);
     box-shadow: 0 0 50px rgba(255, 102, 255, 0.5);
+}
+
+.balloon-inflate-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 .balloon-inflate-btn.pulse {
@@ -1830,6 +2000,32 @@ input, textarea {
     100% { transform: scale(1); }
 }
 
+/* Tension: the button trembles more the closer the balloon is to bursting
+   (`translate` composes with the pressed scale transform; --shake is 0..1) */
+.balloon-inflate-btn.shaking {
+    animation: balloonShake 0.12s linear infinite;
+}
+
+@keyframes balloonShake {
+    0%, 100% { translate: 0 0; }
+    25% { translate: calc(var(--shake) * 7px) calc(var(--shake) * -4px); }
+    50% { translate: calc(var(--shake) * -6px) calc(var(--shake) * 5px); }
+    75% { translate: calc(var(--shake) * 5px) calc(var(--shake) * 3px); }
+}
+
+.balloon-inflate-btn.tense {
+    border-color: #ffcc00;
+    color: #ffcc00;
+    box-shadow: 0 0 40px rgba(255, 204, 0, 0.4);
+}
+
+.balloon-inflate-btn.danger {
+    border-color: #ff3366;
+    color: #ff3366;
+    background: rgba(255, 51, 102, 0.2);
+    box-shadow: 0 0 60px rgba(255, 51, 102, 0.6);
+}
+
 .balloon-icon {
     font-size: 5rem;
 }
@@ -1838,6 +2034,49 @@ input, textarea {
     font-family: 'Orbitron', sans-serif;
     font-size: 1.5rem;
     font-weight: 900;
+}
+
+.balloon-subtext {
+    font-size: 0.85rem;
+    font-weight: 600;
+    opacity: 0.8;
+}
+
+/* "Amarrar": bank the current size */
+.balloon-tie-btn {
+    padding: 16px 36px;
+    border-radius: 50px;
+    border: 4px solid #ffcc00;
+    background: rgba(255, 204, 0, 0.12);
+    color: #ffcc00;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 900;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.1s;
+    box-shadow: 0 0 25px rgba(255, 204, 0, 0.25);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+}
+
+.balloon-tie-btn:active,
+.balloon-tie-btn.pressed {
+    transform: scale(0.94);
+    background: rgba(255, 204, 0, 0.35);
+}
+
+.balloon-tie-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.balloon-tie-btn.tied {
+    opacity: 1;
+    background: #ffcc00;
+    color: #1a0a2e;
 }
 
 .balloon-hint {

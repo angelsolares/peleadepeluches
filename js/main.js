@@ -48,6 +48,7 @@ const PHYSICS = {
     MOVE_SPEED: 4,
     RUN_SPEED: 7,
     JUMP_FORCE: 15, // Increased to reach floating platforms (max height ~3.75 units)
+    AIR_JUMP_FORCE: 13, // Double jump (synced with server)
     GROUND_Y: 0,
     // 2D Stage boundaries (Smash Bros style)
     STAGE_LEFT: -8,  // Extended to match platform positions
@@ -100,7 +101,12 @@ class PlayerController {
         // Game state
         this.health = 0;
         this.stocks = 3;
-        
+        this.shield = 100;          // Server-driven: drains while blocking, breaks at 0
+        this.shieldStunned = false; // Dizzy after a shield break
+        this.airJumps = 1;          // Extra jumps left in the air (server-driven)
+        this.doubleJumpSeq = 0;     // Server counter: increases on every air jump (VFX trigger)
+        this.serverBlocking = null; // Blocking flag from the last server snapshot
+
         // Input state
         this.input = {
             left: false,
@@ -111,9 +117,10 @@ class PlayerController {
             run: false,
             block: false
         };
-        
+
         // Attack cooldown
         this.attackCooldown = 0;
+        this.jumpHeld = false;      // Edge detection for the local (keyboard) double jump
     }
     
     /**
@@ -184,13 +191,22 @@ class PlayerController {
             }
         }
         
-        // Jumping
-        if (this.input.jump && this.isGrounded) {
-            this.velocity.y = PHYSICS.JUMP_FORCE;
-            this.isGrounded = false;
-            this.isJumping = true;
+        // Jumping (edge triggered, one extra jump in the air like the server)
+        const jumpPressed = this.input.jump && !this.jumpHeld;
+        this.jumpHeld = !!this.input.jump;
+        if (this.isGrounded) this.airJumps = 1;
+        if (jumpPressed) {
+            if (this.isGrounded) {
+                this.velocity.y = PHYSICS.JUMP_FORCE;
+                this.isGrounded = false;
+                this.isJumping = true;
+            } else if (this.airJumps > 0) {
+                this.airJumps--;
+                this.velocity.y = PHYSICS.AIR_JUMP_FORCE;
+                this.doubleJumpSeq++;
+            }
         }
-        
+
         // Apply gravity
         if (!this.isGrounded) {
             this.velocity.y += PHYSICS.GRAVITY * delta;
@@ -300,6 +316,11 @@ class PlayerController {
         if (typeof state.stocks === 'number') this.stocks = state.stocks;
         if (typeof state.isGrounded === 'boolean') this.isGrounded = state.isGrounded;
         if (typeof state.facingRight === 'boolean') this.facingRight = state.facingRight;
+        if (typeof state.shield === 'number') this.shield = state.shield;
+        if (typeof state.shieldStunned === 'boolean') this.shieldStunned = state.shieldStunned;
+        if (typeof state.airJumps === 'number') this.airJumps = state.airJumps;
+        if (typeof state.doubleJumpSeq === 'number') this.doubleJumpSeq = state.doubleJumpSeq;
+        if (typeof state.isBlocking === 'boolean') this.serverBlocking = state.isBlocking;
         if (state.input) this.input = { ...this.input, ...state.input };
     }
 }
@@ -349,6 +370,62 @@ class PlayerEntity {
         
         // Controller for physics/input
         this.controller = new PlayerController(id, number, color);
+
+        // Shield bubble (shown while blocking, shrinks as the shield drains)
+        this.shieldMesh = null;
+        this._shieldColor = new THREE.Color();
+
+        // Hitstop: the pose freezes for a few ms on impact
+        this.hitstopUntil = 0;
+        this._lastDoubleJumpSeq = null; // Adopted from the first snapshot (no VFX for old jumps)
+    }
+
+    /**
+     * Lazily create the shield bubble
+     */
+    ensureShieldMesh() {
+        if (this.shieldMesh) return this.shieldMesh;
+        const geometry = new THREE.SphereGeometry(1, 20, 14);
+        const material = new THREE.MeshBasicMaterial({
+            color: 0x00bfff,
+            transparent: true,
+            opacity: 0.28,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        this.shieldMesh = new THREE.Mesh(geometry, material);
+        this.shieldMesh.visible = false;
+        scene.add(this.shieldMesh);
+        return this.shieldMesh;
+    }
+
+    /**
+     * Show/size the shield bubble from the server shield value
+     */
+    updateShieldVisual(delta) {
+        const blocking = this.controller.isBlocking && !this.controller.shieldStunned;
+        if (!blocking && !this.shieldMesh) return;
+        const mesh = this.ensureShieldMesh();
+        mesh.visible = blocking;
+        if (!blocking) return;
+
+        const ratio = Math.max(0, Math.min(1, (this.controller.shield ?? 100) / 100));
+        const radius = 0.55 + 0.75 * ratio;              // 1.3 at full, 0.55 when almost gone
+        mesh.position.copy(this.controller.position);
+        mesh.position.y += 1.0;
+        mesh.scale.setScalar(radius);
+        // Blue -> red as it drains, flickering when about to break
+        this._shieldColor.setHSL(0.55 * ratio, 1, 0.55);
+        mesh.material.color.copy(this._shieldColor);
+        const flicker = ratio < 0.25 ? 0.15 * Math.sin(performance.now() / 40) : 0;
+        mesh.material.opacity = 0.18 + 0.2 * ratio + flicker;
+    }
+
+    /**
+     * Freeze the pose for a few ms (hitstop)
+     */
+    applyHitstop(ms) {
+        this.hitstopUntil = Math.max(this.hitstopUntil, performance.now() + ms);
     }
     
     /**
@@ -495,9 +572,32 @@ class PlayerEntity {
         if (!skipPhysics) {
             this.controller.update(delta);
         }
-        
+
+        // Block animation follows the server flag (a shield break drops the guard server-side)
+        const serverBlocking = this.controller.serverBlocking;
+        if (skipPhysics && typeof serverBlocking === 'boolean' && serverBlocking !== this.controller.isBlocking) {
+            this.controller.isBlocking = serverBlocking;
+            if (serverBlocking) this.playAnimation('block');
+            else this.animController.releaseBlock();
+        }
+
+        // Double jump: VFX/SFX when the server counter moves
+        if (this.controller.doubleJumpSeq !== this._lastDoubleJumpSeq) {
+            const first = this._lastDoubleJumpSeq === null;
+            this._lastDoubleJumpSeq = this.controller.doubleJumpSeq;
+            if (!first) this.showDoubleJump();
+        }
+
+        // Hitstop: hold the pose (position still comes from the server, which is frozen too)
+        const inHitstop = performance.now() < this.hitstopUntil;
+
         // Update model position
         this.model.position.copy(this.controller.position);
+        if (inHitstop) {
+            this.model.position.x += (Math.random() - 0.5) * 0.06;
+            this.model.position.y += (Math.random() - 0.5) * 0.04;
+        }
+        this.updateShieldVisual(delta);
         
         // Update model facing direction using scale.z flip
         // After -90° rotation, scale.z controls left/right facing
@@ -578,13 +678,38 @@ class PlayerEntity {
         // Sync state flags from animController to controller
         // This ensures controller knows when animations finish
         this.controller.isTaunting = this.animController.isTaunting;
-        
-        // Update animation mixer
-        this.animController.update(delta);
+
+        // Update animation mixer (frozen during hitstop)
+        if (!inHitstop) {
+            this.animController.update(delta);
+        }
     }
-    
+
+    /**
+     * Air jump feedback: a ring of dust under the feet, a trail and a jump sound
+     */
+    showDoubleJump() {
+        const pos = this.controller.position.clone();
+        if (vfxManager) {
+            vfxManager.createLandingImpact(pos, 0.6);
+            const colorIndex = this.controller.playerNumber - 1;
+            const colors = [0xff3366, 0x00ffcc, 0xffcc00, 0x9966ff];
+            vfxManager.createJumpTrail(pos, colors[colorIndex] || 0xffffff);
+        }
+        if (sfxManager) {
+            sfxManager.playJump();
+        }
+    }
+
     dispose() {
         this.animController.dispose();
+
+        if (this.shieldMesh) {
+            scene.remove(this.shieldMesh);
+            this.shieldMesh.geometry.dispose();
+            this.shieldMesh.material.dispose();
+            this.shieldMesh = null;
+        }
         
         // Remove name label
         if (this.nameLabel) {
@@ -889,8 +1014,10 @@ function addPlayerNameStyles() {
  */
 async function loadVFXManager() {
     try {
-        // Load VFXManager script dynamically
+        // Load VFXManager script dynamically (the file has an `export`, so it must be a module;
+        // it also exposes window.VFXManager for this loader)
         const script = document.createElement('script');
+        script.type = 'module';
         script.src = 'js/effects/VFXManager.js';
         document.head.appendChild(script);
         
@@ -915,8 +1042,9 @@ async function loadVFXManager() {
  */
 async function loadSFXManager() {
     try {
-        // Load SFXManager script dynamically
+        // Load SFXManager script dynamically (module: the file has an `export`)
         const script = document.createElement('script');
+        script.type = 'module';
         script.src = 'js/audio/SFXManager.js';
         document.head.appendChild(script);
         
@@ -1758,6 +1886,7 @@ function initializeSocket() {
     // Block and taunt events
     socket.on('player-block-state', handlePlayerBlockState);
     socket.on('player-taunting', handlePlayerTaunt);
+    socket.on('smash-event', handleSmashEvent);
     
     // Tournament events - listen for round transitions (also used for rematches: data.rematch)
     socket.on('round-starting', (data) => {
@@ -2156,15 +2285,33 @@ function handleAttackStarted(data) {
  */
 function handleAttackHit(data) {
     console.log('[Game] Attack hit:', data);
-    
+
     const attacker = players.get(data.attackerId);
-    
+
     // Show hit animations and effects for targets
     data.hits.forEach(hit => {
         const target = players.get(hit.targetId);
         if (target) {
             target.playAnimation('hit');
             target.controller.health = hit.newHealth;
+            if (typeof hit.shield === 'number') target.controller.shield = hit.shield;
+
+            // Hitstop: attacker and victim hold the pose for a few ms
+            const hitstop = hit.hitstop || 0;
+            if (hitstop > 0) {
+                target.applyHitstop(hitstop);
+                if (attacker) attacker.applyHitstop(hitstop);
+            }
+
+            // Name of the directional move (SMASH, UPPERCUT, BARRIDA, METEORO)
+            if (data.moveName && !hit.blocked) {
+                showFloatingText(target, `¡${data.moveName}!`, '#FFD166');
+            }
+
+            // Shield break: the hit went through and the victim is dizzy
+            if (hit.shieldBroke) {
+                showShieldBreak(target);
+            }
             
             // Apply knockback - always push AWAY from attacker
             if (hit.knockback && attacker) {
@@ -2196,6 +2343,7 @@ function handlePlayerBlockState(data) {
     const player = players.get(data.playerId);
     if (player) {
         player.controller.isBlocking = data.isBlocking;
+        player.controller.serverBlocking = data.isBlocking;
         if (data.isBlocking) {
             player.playAnimation('block');
         } else {
@@ -2217,19 +2365,64 @@ function handlePlayerTaunt(data) {
 }
 
 /**
+ * One-off server events (shield breaks...)
+ */
+function handleSmashEvent(event) {
+    if (!event) return;
+    if (event.type === 'shield-break') {
+        const player = players.get(event.playerId);
+        if (player) {
+            player.controller.isBlocking = false;
+            player.controller.serverBlocking = false;
+            player.animController.releaseBlock();
+            showShieldBreak(player);
+        }
+    }
+}
+
+/**
+ * Shield break feedback: red shield burst, "¡ESCUDO ROTO!" and a dizzy pose
+ */
+function showShieldBreak(player) {
+    const pos = player.controller.position.clone();
+    pos.y += 1.0;
+    if (vfxManager) {
+        vfxManager.createBlockShield(pos, 0xff3366);
+        vfxManager.createBlockSparks(pos);
+        vfxManager.createCharacterFlash(player.model, 250);
+    }
+    player.playAnimation('hit');
+    showFloatingText(player, '¡ESCUDO ROTO!', '#FF3366');
+    triggerScreenShake(0.5, 350);
+    if (sfxManager) sfxManager.playHit(30, false);
+    const hud = document.getElementById(`hud-${player.id}`);
+    if (hud) {
+        hud.classList.add('shield-broken');
+        setTimeout(() => hud.classList.remove('shield-broken'), 2000);
+    }
+}
+
+/**
  * Show "BLOCKED!" text indicator above player
  */
 function showBlockedIndicator(player) {
+    showFloatingText(player, 'BLOCKED!', '#00FFFF');
+}
+
+/**
+ * Floating text above a player (move names, blocks, shield breaks)
+ */
+function showFloatingText(player, text, color = '#FFFFFF') {
     // Create floating text
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
-    
-    ctx.fillStyle = '#00FFFF';
+
+    ctx.fillStyle = color;
     ctx.font = 'bold 32px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('BLOCKED!', 128, 40);
+    ctx.fillText(text, 128, 40);
     
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ 
@@ -2337,12 +2530,17 @@ function resetForNextRound(data) {
             player.controller.isGrounded = false;
             player.controller.isAttacking = false;
             player.controller.isBlocking = false;
+            player.controller.serverBlocking = null;
             player.controller.isTaunting = false;
+            player.controller.shield = 100;
+            player.controller.shieldStunned = false;
             player.controller.input = {
                 left: false, right: false, jump: false, punch: false,
                 kick: false, run: false, block: false
             };
         }
+        player.hitstopUntil = 0;
+        if (player.shieldMesh) player.shieldMesh.visible = false;
 
         // Reset position and visibility (eliminated players were hidden by handleGameState)
         player.model.position.copy(spawnPoint);
@@ -2592,6 +2790,10 @@ function setupKeyboardControls() {
             case ' ':
                 input.jump = true;
                 break;
+            case 'arrowdown':
+            case 's':
+                input.down = true;
+                break;
             case 'shift':
                 input.run = true;
                 break;
@@ -2657,6 +2859,10 @@ function setupKeyboardControls() {
             case ' ':
                 input.jump = false;
                 break;
+            case 'arrowdown':
+            case 's':
+                input.down = false;
+                break;
             case 'shift':
                 input.run = false;
                 break;
@@ -2716,13 +2922,14 @@ function createPlayerHUD(player) {
             <span class="player-name">${escapeHtml(player.name)}</span>
         </div>
         <div class="player-damage low">0%</div>
+        <div class="player-shield" title="Escudo"><div class="player-shield-fill"></div></div>
         <div class="player-stocks">
             ${[0, 1, 2].map(i => `
                 <div class="stock-icon" style="border-color: ${color}; background: ${color};"></div>
             `).join('')}
         </div>
     `;
-    
+
     playerHudsContainer.appendChild(hud);
     return hud;
 }
@@ -2730,9 +2937,21 @@ function createPlayerHUD(player) {
 function updatePlayerHUD(player) {
     const hud = document.getElementById(`hud-${player.id}`);
     if (!hud) return;
-    
+
     const damageEl = hud.querySelector('.player-damage');
     const damage = Math.floor(player.controller.health);
+
+    // Shield bar (blue -> red as it drains, dimmed while broken)
+    const shieldFill = hud.querySelector('.player-shield-fill');
+    if (shieldFill) {
+        const shield = Math.max(0, Math.min(100, player.controller.shield ?? 100));
+        if (shieldFill.dataset.value !== String(shield)) {
+            shieldFill.dataset.value = String(shield);
+            shieldFill.style.width = `${shield}%`;
+            shieldFill.style.background = `hsl(${Math.round(200 * shield / 100)}, 100%, 55%)`;
+        }
+        hud.classList.toggle('blocking', player.controller.isBlocking === true);
+    }
     
     // Update damage text
     damageEl.textContent = `${damage}%`;

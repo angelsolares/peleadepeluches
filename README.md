@@ -1,134 +1,122 @@
 # 🥊 Pelea de Peluches
 
-Un juego de peleas 3D estilo Smash Bros hecho con Three.js, donde múltiples jugadores pueden unirse usando sus celulares como controles.
+Una fiesta de minijuegos 3D hecha con Three.js: la pantalla grande (PC o TV) es el escenario y cada quien usa su celular como control. Hasta 8 jugadores por sala.
 
-![Game Screenshot](https://via.placeholder.com/800x400/1a1a2e/ff3366?text=Pelea+de+Peluches)
+## 🎮 Modos de juego
 
-## 🎮 Características
+| Modo | Página | De qué va |
+|------|--------|-----------|
+| **Pelea (Smash)** | `smash.html` | Pelea de plataformas estilo Smash Bros: % de daño, knockback, 3 vidas. Doble salto, ataques direccionales, escudo que se desgasta y hitstop al golpear. |
+| **Arena (Lucha libre)** | `arena.html` | Ring de lucha libre estilo WCW vs NWO: amarres, llaves, cuerdas, látigo irlandés, lariats, barra de ánimo, remates por personaje, cuenta de 3 y battle royal. |
+| **Carrera** | `race.html` | Sprint de 100 m: alterna los pies en el celular para correr más rápido. |
+| **Flappy** | `flappy.html` | Vuela entre obstáculos tocando la pantalla. Último en pie gana. |
+| **La Trae** | `tag.html` | El clásico "la traes": quien la trae al final pierde. |
+| **Guerra de Cuerda** | `tug.html` | Dos equipos jalan la cuerda **al ritmo del beat**. Jalar en sincronía con el equipo multiplica la fuerza; machacar el botón no sirve. |
+| **Pinta el Piso** | `paint.html` | Pinta más territorio que los demás antes de que acabe el tiempo. |
+| **Infla el Globo** | `balloon.html` | Mantén presionado para soplar, suelta para respirar. El globo truena entre 85 y 95 (no se ve la barra): lee las señales y **amarra** a tiempo para asegurar tu tamaño. |
 
-- **Gráficos 3D** con Three.js y modelos FBX animados
-- **Multijugador local** usando WebSockets
-- **Control móvil** - usa tu celular como gamepad
-- **Sistema de combate** estilo Smash Bros (% de daño + knockback)
-- **Hasta 4 jugadores** simultáneos
+Todos los modos tienen revancha, torneo por rondas y reconexión del teléfono (30 s de gracia si se cae el WiFi).
 
-## 📁 Estructura del Proyecto
+Los modos de baby shower (`maze.html`, `trivia.html`, `word_puzzle.html`, `baby_shower.html`) siguen en el repo pero están ocultos de la landing.
+
+## 🕹️ Controles (celular)
+
+Todos los modos con movimiento usan un **joystick analógico** en la izquierda.
+
+### Pelea (Smash)
+
+| Acción | Control |
+|--------|---------|
+| Mover / correr | Joystick (a fondo = correr) |
+| Saltar | Joystick ↑ (otra vez en el aire = doble salto) |
+| Golpe / Patada | A / B |
+| Smash lateral | ← o → + A/B |
+| Uppercut | ↑ + A/B |
+| Barrida (en el piso) | ↓ + A/B |
+| Meteoro (en el aire) | ↓ + A/B — manda al rival hacia abajo |
+| Bloqueo | X (mantener). El escudo se desgasta al sostenerlo y con cada golpe; si llega a 0 se rompe y te deja mareado 2 s |
+| Burla | Y |
+
+### Arena (Lucha libre)
+
+| Acción | Control |
+|--------|---------|
+| Mover / correr | Joystick (a fondo = correr) |
+| Golpe / Patada | A / B — corriendo se vuelven lariat y dropkick |
+| Agarrar | G: amarre. En el amarre: A/B = llave, G = cargar, G + stick = látigo irlandés a las cuerdas |
+| Cubrir | G sobre un rival en la lona (cuenta de 3, el rival machaca para zafarse) |
+| Burla | Y: llena la barra de ánimo. Con la barra llena, Y = **REMATE** (distinto por personaje) |
+| Bloqueo | X |
+
+### Teclado en el host (solo pruebas)
+
+Flechas / WASD mover, ↑ o espacio saltar, ↓ o S para barrida/meteoro, J golpe, K patada, L bloqueo, T burla, Shift correr.
+
+## 📁 Estructura del proyecto
 
 ```
 pelea-de-peluches/
-├── index.html          # Pantalla principal del juego
-├── css/
-│   └── style.css       # Estilos del juego
+├── index.html              # Landing con todos los modos
+├── smash.html, arena.html, race.html, flappy.html, tag.html, tug.html, paint.html, balloon.html
+├── css/                    # Estilos del host
 ├── js/
-│   ├── main.js         # Lógica principal del juego
-│   └── config.js       # Configuración de URLs
-├── assets/             # Modelos y animaciones FBX
-├── mobile/             # Control móvil (PWA)
-│   ├── index.html
-│   ├── css/style.css
-│   ├── js/controller.js
-│   └── manifest.json
-└── server/             # Servidor WebSocket
-    ├── index.js
-    ├── lobbyManager.js
-    ├── gameState.js
-    └── package.json
+│   ├── main.js             # Host de Pelea (Smash)
+│   ├── arena/, race/, flappy/, tag/, tug/, paint/, balloon/   # Host de cada modo
+│   ├── animation/          # AnimationController y retarget Mixamo -> Meshy
+│   ├── assets/AssetLoader.js  # Carga en paralelo y caché de modelos/animaciones
+│   ├── effects/, audio/    # VFX, SFX y BGM
+│   └── config.js           # URL del servidor
+├── assets/
+│   ├── *.fbx               # Modelos de los personajes (Meshy AI)
+│   ├── anims/*.json        # Animaciones convertidas (24-109 KB en vez de 5-8 MB)
+│   └── mixamo/*.fbx        # Animaciones de lucha libre (Mixamo)
+├── mobile/                 # Control móvil (PWA): index.html, js/controller.js, css/
+├── server/                 # Servidor Socket.IO: index.js + un *State.js por modo
+├── tools/convert-anims.mjs # Convierte animaciones FBX a clips JSON
+└── playground/             # Pruebas de animaciones y retarget
 ```
 
-## 🚀 Despliegue
+## 🚀 Cómo correrlo
 
-### Opción 1: Desarrollo Local (Misma WiFi)
+### Local (misma WiFi)
 
-1. **Instala las dependencias del servidor:**
+1. Servidor WebSocket:
    ```bash
-   cd server
-   npm install
+   cd server && npm install && npm start
    ```
-
-2. **Inicia el servidor WebSocket:**
-   ```bash
-   cd server
-   npm start
-   ```
-
-3. **En otra terminal, sirve los archivos estáticos:**
+2. Archivos estáticos, en otra terminal (desde la raíz):
    ```bash
    npx http-server -p 8080 -c-1 --cors
    ```
+3. Abre `http://localhost:8080` en la PC/TV y `http://TU-IP-LOCAL:8080/mobile/` en los celulares (o escanea el QR de la sala).
 
-4. **Abre el juego:**
-   - PC: `http://localhost:8080`
-   - Celular (misma WiFi): `http://TU-IP-LOCAL:8080/mobile/`
+### Producción
 
-### Opción 2: Producción (Internet)
+- **Frontend** → Vercel / Netlify / GitHub Pages (sube el repo tal cual).
+- **Backend** → Railway (carpeta `server/`, detecta Node automáticamente).
+- Pon la URL de Railway en `PRODUCTION_SERVER_URL` dentro de `js/config.js` y `mobile/js/controller.js`.
 
-Necesitas desplegar **dos servicios**:
+| Variable (server) | Descripción | Default |
+|-------------------|-------------|---------|
+| `PORT` | Puerto del servidor | 3001 |
 
-#### A) Frontend → Vercel / GitHub Pages / Netlify
+## 🧩 Cómo funciona
 
-1. Sube el repositorio a GitHub
-2. Conecta con Vercel/Netlify
-3. Deploy automático
-
-#### B) Backend → Railway
-
-1. Ve a [railway.app](https://railway.app)
-2. Crea nuevo proyecto desde GitHub
-3. Selecciona la carpeta `server/`
-4. Railway detectará Node.js automáticamente
-5. Copia la URL generada (ej: `https://tu-proyecto.railway.app`)
-
-#### C) Actualiza las URLs
-
-Edita estos archivos con tu URL de Railway:
-
-**`js/config.js`:**
-```javascript
-const PRODUCTION_SERVER_URL = 'https://TU-PROYECTO.railway.app';
-```
-
-**`mobile/js/controller.js`:**
-```javascript
-const PRODUCTION_SERVER_URL = 'https://TU-PROYECTO.railway.app';
-```
-
-## 🎯 Cómo Jugar
-
-1. **Pantalla principal (PC):**
-   - Abre el juego en tu computadora
-   - Se mostrará un código de sala de 4 letras
-
-2. **Control móvil (Celular):**
-   - Abre `/mobile/` en el navegador de tu celular
-   - Ingresa el código de sala
-   - Escribe tu nombre y presiona "UNIRSE"
-
-3. **Controles:**
-   | Acción | Móvil | Teclado (pruebas) |
-   |--------|-------|-------------------|
-   | Mover | D-Pad ◀▶ | Flechas / WASD |
-   | Saltar | ▲ | Espacio / W |
-   | Correr | ▼ RUN | Shift |
-   | Golpe | A | J |
-   | Patada | B | K |
+- **Servidor autoritativo.** Cada modo tiene su `server/*State.js` con la física y las reglas; el host solo dibuja y los teléfonos solo mandan input. Los ticks usan el delta real (en Windows `setInterval` a 16 ms corre a ~36 Hz).
+- **Animaciones ligeras.** Los FBX de animación traen el modelo completo; `tools/convert-anims.mjs` los convierte a clips JSON que `AssetLoader` carga en paralelo. Los personajes se descargan hasta que alguien los elige. Para regenerar los clips:
+  ```bash
+  cd tools && npm install && node convert-anims.mjs
+  ```
+- **Lucha libre.** Las animaciones de Mixamo se retargetean al esqueleto de Meshy en tiempo real (`js/animation/MixamoRetarget.js`).
+- **Pinta el Piso** manda solo las casillas que cambian más un keyframe por segundo (~46 KB/s por cliente).
 
 ## 🛠️ Tecnologías
 
-- **Frontend:** Three.js, ES6 Modules, CSS3
-- **Backend:** Node.js, Socket.IO, Express
-- **Modelos:** FBX (Meshy AI)
+Three.js r160 (ES modules vía importmap) · Socket.IO 4.7 · Node.js + Express · Modelos FBX de Meshy AI · Animaciones de Mixamo
 
 ## 📱 PWA
 
-El control móvil está configurado como Progressive Web App. Los usuarios pueden "Añadir a pantalla de inicio" para una experiencia de app nativa.
-
-## 🔧 Variables de Entorno (Server)
-
-El servidor acepta estas variables de entorno:
-
-| Variable | Descripción | Default |
-|----------|-------------|---------|
-| `PORT` | Puerto del servidor | 3001 |
+El control móvil se puede "Añadir a pantalla de inicio" para usarlo como app. Soporta vibración (háptica) en golpes, beats y globos a punto de tronar.
 
 ## 📄 Licencia
 
@@ -137,4 +125,3 @@ MIT License - Haz lo que quieras con el código 🎉
 ---
 
 Hecho con ❤️ y Three.js
-

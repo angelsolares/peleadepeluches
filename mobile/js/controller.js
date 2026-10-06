@@ -103,14 +103,23 @@ let raceSpeed = 0; // Current speed display
 // Flappy mode state
 let flappyAlive = true;
 
-// Tug of War state
+// Tug of War state (the beat is server-driven: pulse k = startTime + k * pulseInterval)
 let tugStamina = 100;
 let tugNextPulse = 0;
 let tugPulseInterval = 1500; // ms
-let tugRhythmStart = 0;
+let tugClockOffset = 0;      // serverTime - Date.now(), smoothed from every tug-state
+let tugClockSynced = false;
+let tugBeat = -1;            // Last beat index reported by the server
+let tugBeatFlashUntil = 0;   // Bar flash deadline (ms, local clock)
+let tugStreakShown = null;   // Last rendered streak line, to skip DOM writes
+let tugTeamSyncShown = null; // Last rendered team sync line
 
 // Balloon state
 let balloonProgress = 0;
+let balloonBlowing = false;     // button held (what we last told the server)
+let balloonTied = false;        // "amarrado": banked, both buttons disabled
+let balloonTension = 0;         // 0..1 from the server (size 70 -> 95)
+let balloonLastVibe = 0;        // last tension vibration (throttle)
 
 // Available characters
 const CHARACTERS = {
@@ -273,6 +282,7 @@ function connectToServer() {
     socket.on('game-started', handleGameStarted);
     socket.on('game-state', handleGameState);
     socket.on('player-ko', handlePlayerKO);
+    socket.on('smash-event', handleSmashEvent);
     socket.on('game-over', handleGameOver);
     socket.on('game-reset', handleGameReset);
     socket.on('room-closed', handleRoomClosed);
@@ -721,7 +731,31 @@ function handleTagGameOver(data) {
 
 function handleTugState(data) {
     if (!data || !data.players) return;
-    
+
+    // Server clock: the cursor and the beat haptic run on server time (see startTugRhythmAnimation)
+    if (typeof data.serverTime === 'number') {
+        const sample = data.serverTime - Date.now();
+        if (!tugClockSynced) {
+            tugClockOffset = sample;
+            tugClockSynced = true;
+        } else {
+            tugClockOffset += (sample - tugClockOffset) * 0.1;
+        }
+    }
+    if (data.pulseInterval > 0) tugPulseInterval = data.pulseInterval;
+    if (data.nextPulseTime) tugNextPulse = data.nextPulseTime;
+
+    // New beat: short buzz so the whole room feels the same rhythm
+    if (typeof data.beat === 'number' && data.beat !== tugBeat) {
+        // Consecutive beat = it just happened (a jump means we rejoined mid-match: no buzz)
+        const justHappened = data.beat === tugBeat + 1;
+        tugBeat = data.beat;
+        if (justHappened) {
+            vibrate(20);
+            tugBeatFlashUntil = Date.now() + 120;
+        }
+    }
+
     const myState = data.players.find(p => p.id === socket.id);
     if (myState) {
         // Update stamina
@@ -732,62 +766,241 @@ function handleTugState(data) {
             // Change color if low
             fill.style.background = tugStamina < 30 ? 'var(--primary)' : 'linear-gradient(90deg, #9966ff, #ff3366)';
         }
-        
-        // Visual feedback for pull quality
-        if (myState.pullQuality !== undefined && myState.pullQuality > 0) {
-            const btn = document.getElementById('tug-pull-btn');
-            if (btn) {
-                const qualityClass = myState.pullQuality === 2 ? 'perfect' : 'good';
-                btn.classList.add(qualityClass);
-                setTimeout(() => btn.classList.remove(qualityClass), 300);
-            }
+
+        // Visual feedback for pull quality (or a wasted extra pull)
+        const btn = document.getElementById('tug-pull-btn');
+        if (btn && ((myState.pullQuality !== undefined && myState.pullQuality > 0) || myState.mashed)) {
+            const qualityClass = myState.mashed ? 'mashed' : (myState.pullQuality === 2 ? 'perfect' : 'good');
+            btn.classList.add(qualityClass);
+            setTimeout(() => btn.classList.remove(qualityClass), 300);
         }
+
+        updateTugStreak(myState);
+        updateTugTeamSync(data.teams ? data.teams[myState.team] : null);
     }
-    
-    // Sync rhythm pulse
-    if (data.nextPulseTime) {
-        tugNextPulse = data.nextPulseTime;
+}
+
+/** Personal streak line: "x3 PERFECTO" (last pull quality), or a short warning on a wasted pull */
+let tugStreakMsgTimer = null;
+
+function updateTugStreak(myState) {
+    const el = document.getElementById('tug-streak');
+    if (!el) return;
+    const streak = myState.streak || 0;
+
+    if (myState.mashed) {
+        // Extra pull in an already used beat window: warn for a moment (the server only flags one tick)
+        if (tugStreakShown !== 'mashed') {
+            tugStreakShown = 'mashed';
+            el.textContent = '¡ESPERA EL BEAT!';
+            el.className = 'tug-streak mashed';
+        }
+        clearTimeout(tugStreakMsgTimer);
+        tugStreakMsgTimer = setTimeout(() => {
+            if (tugStreakShown !== 'mashed') return;
+            tugStreakShown = null;
+            el.textContent = '';
+            el.className = 'tug-streak';
+        }, 1500);
+        return;
+    }
+
+    if (streak === 0) {
+        if (tugStreakShown !== null && tugStreakShown !== 'mashed') {
+            tugStreakShown = null;
+            el.textContent = '';
+            el.className = 'tug-streak';
+        }
+        return;
+    }
+
+    // Rewrite only on a counted pull (pullQuality > 0) or when the streak itself changed
+    const prevWord = tugStreakShown && tugStreakShown.includes('|') ? tugStreakShown.split('|')[1] : 'BIEN';
+    const word = myState.pullQuality === 2 ? 'PERFECTO' : (myState.pullQuality === 1 ? 'BIEN' : prevWord);
+    const key = `${streak}|${word}`;
+    if (key === tugStreakShown) return;
+    tugStreakShown = key;
+    el.textContent = `x${streak} ${word}`;
+    el.className = word === 'PERFECTO' ? 'tug-streak perfect pop' : 'tug-streak pop';
+    clearTimeout(tugStreakMsgTimer);
+    tugStreakMsgTimer = setTimeout(() => el.classList.remove('pop'), 120);
+}
+
+/** Team line: "¡EQUIPO EN SINCRONÍA x2!" when the team keeps landing the beat together */
+function updateTugTeamSync(team) {
+    const el = document.getElementById('tug-team-sync');
+    if (!el || !team) return;
+    const combo = team.syncCombo || 0;
+    const key = `${combo}|${team.hits}|${team.size}`;
+    if (key === tugTeamSyncShown) return;
+    tugTeamSyncShown = key;
+    if (combo >= 2) {
+        el.textContent = `¡EQUIPO EN SINCRONÍA x${combo}!`;
+        el.className = 'tug-team-sync active';
+    } else if (combo === 1) {
+        el.textContent = '¡Equipo en sincronía! Sigan así';
+        el.className = 'tug-team-sync';
+    } else {
+        el.textContent = team.size > 1 ? `Equipo: ${team.hits || 0}/${team.size} en el beat` : 'Sigue el beat';
+        el.className = 'tug-team-sync';
+    }
+}
+
+/** Fresh rhythm UI for a new match (game-started); the clock offset survives, same server */
+function resetTugRhythmUI() {
+    tugBeat = -1;
+    tugBeatFlashUntil = 0;
+    tugNextPulse = 0;
+    tugStreakShown = null;
+    tugTeamSyncShown = null;
+    clearTimeout(tugStreakMsgTimer);
+    const streak = document.getElementById('tug-streak');
+    if (streak) { streak.textContent = ''; streak.className = 'tug-streak'; }
+    const sync = document.getElementById('tug-team-sync');
+    if (sync) { sync.textContent = ''; sync.className = 'tug-team-sync'; }
+    document.getElementById('rhythm-bar-container')?.classList.remove('beat');
+    document.getElementById('tug-pull-btn')?.classList.remove('perfect', 'good', 'mashed');
+}
+
+/**
+ * Tell the server whether the blow button is held. Only sends on a change, so it is safe
+ * to call from every release path (touchend, mode change, game over, reset).
+ */
+function sendBalloonBlow(on) {
+    on = !!on;
+    if (balloonBlowing === on) return;
+    balloonBlowing = on;
+    if (socket && socket.connected) {
+        socket.emit('balloon-blow', on);
+    }
+}
+
+/**
+ * Tension vibration: short pulses that get stronger and closer together as the balloon
+ * nears its (hidden) burst size. Never more often than every 250 ms.
+ */
+function pulseBalloonTension(tension, now) {
+    if (tension <= 0) return;
+    const interval = 250 + (1 - tension) * 650;      // 900 ms (barely stretched) -> 250 ms (about to pop)
+    if (now - balloonLastVibe < interval) return;
+    balloonLastVibe = now;
+    const ms = Math.round(12 + tension * 50);          // 12 ms -> 62 ms
+    vibrate(tension >= 0.7 ? [ms, 40, ms] : ms);
+}
+
+/**
+ * Phone UI for a banked balloon (from the tie button or the server state)
+ */
+function showBalloonTied() {
+    balloonTied = true;
+    sendBalloonBlow(false);
+    const btn = document.getElementById('balloon-inflate-btn');
+    const tieBtn = document.getElementById('balloon-tie-btn');
+    const label = document.querySelector('.balloon-label');
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.remove('pressed', 'shaking', 'tense', 'danger');
+        btn.style.setProperty('--shake', 0);
+    }
+    if (tieBtn) {
+        tieBtn.disabled = true;
+        tieBtn.classList.remove('pressed');
+        tieBtn.classList.add('tied');
+        tieBtn.textContent = '🎀 AMARRADO';
+    }
+    if (label) {
+        label.textContent = '🎀 Amarrado. ¡A esperar!';
+        label.style.color = '#ffcc00';
     }
 }
 
 function handleBalloonState(data) {
     if (!data || !data.players) return;
-    
+
     const myState = data.players.find(p => p.id === socket.id);
-    if (myState) {
-        // Use normalized progress (0-100) from server
-        balloonProgress = myState.progress !== undefined ? myState.progress : myState.balloonSize;
-        const fill = document.getElementById('balloon-progress-fill');
-        const btn = document.getElementById('balloon-inflate-btn');
-        const label = document.querySelector('.balloon-label');
-        const progressContainer = document.querySelector('.balloon-progress-container');
+    if (!myState) return;
 
-        // Hide progress bar as requested by user to increase tension
-        if (progressContainer) {
-            progressContainer.style.display = 'none';
-        }
+    // Use normalized progress (0-100) from server
+    balloonProgress = myState.progress !== undefined ? myState.progress : myState.balloonSize;
+    balloonTension = typeof myState.tension === 'number' ? myState.tension : 0;
+    const fill = document.getElementById('balloon-progress-fill');
+    const btn = document.getElementById('balloon-inflate-btn');
+    const tieBtn = document.getElementById('balloon-tie-btn');
+    const label = document.querySelector('.balloon-label');
+    const progressContainer = document.querySelector('.balloon-progress-container');
+    const lungFill = document.getElementById('balloon-lung-fill');
+    const lungValue = document.getElementById('balloon-lung-value');
 
+    // The size bar stays hidden (tension!); the player only sees their air
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+    if (fill) fill.style.width = `${balloonProgress}%`;
+
+    // Air bar
+    const lung = typeof myState.lung === 'number' ? Math.max(0, Math.min(100, myState.lung)) : 100;
+    if (lungFill) {
+        lungFill.style.width = `${lung}%`;
+        lungFill.classList.toggle('low', lung > 0 && lung <= 35);
+        lungFill.classList.toggle('empty', lung <= 0);
+    }
+    if (lungValue) lungValue.textContent = `${Math.round(lung)}%`;
+
+    if (myState.isDQ) {
+        // Popped: the bar shows up full and red, everything else is locked
+        sendBalloonBlow(false);
+        if (progressContainer) progressContainer.style.display = 'block';
         if (fill) {
-            fill.style.width = `${balloonProgress}%`;
-            
-            if (myState.isDQ) {
-                // When DQ, we can show the bar or some visual feedback that they popped
-                if (progressContainer) progressContainer.style.display = 'block';
-                fill.style.width = '100%';
-                fill.style.background = '#ff3366';
-                fill.style.boxShadow = '0 0 20px #ff0000';
-                if (btn) {
-                    btn.disabled = true;
-                    btn.style.opacity = '0.5';
-                    btn.querySelector('.balloon-text').textContent = '¡BOOM!';
-                }
-                if (label) {
-                    label.textContent = '💀 ¡ELIMINADO!';
-                    label.style.color = '#ff3366';
-                }
-            }
+            fill.style.width = '100%';
+            fill.style.background = '#ff3366';
+            fill.style.boxShadow = '0 0 20px #ff0000';
+        }
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.remove('pressed', 'shaking', 'tense', 'danger');
+            btn.style.setProperty('--shake', 0);
+            const text = btn.querySelector('.balloon-text');
+            if (text) text.textContent = '¡BOOM!';
+            const sub = btn.querySelector('.balloon-subtext');
+            if (sub) sub.textContent = '';
+        }
+        if (tieBtn) {
+            tieBtn.disabled = true;
+            tieBtn.classList.remove('pressed');
+        }
+        if (label) {
+            label.textContent = '💀 ¡ELIMINADO!';
+            label.style.color = '#ff3366';
+        }
+        return;
+    }
+
+    if (myState.tied) {
+        if (!balloonTied) showBalloonTied();
+        return;
+    }
+
+    // Tension feedback (no numbers: label, trembling button and vibration)
+    const t = balloonTension;
+    if (label) {
+        if (t >= 0.7) {
+            label.textContent = '¡¡VA A TRONAR!!';
+            label.style.color = '#ff3366';
+        } else if (t >= 0.3) {
+            label.textContent = 'Se está estirando…';
+            label.style.color = '#ffcc00';
+        } else {
+            label.textContent = 'Sopla con calma…';
+            label.style.color = 'white';
         }
     }
+    if (btn) {
+        btn.style.setProperty('--shake', t.toFixed(2));
+        btn.classList.toggle('shaking', t > 0);
+        btn.classList.toggle('tense', t >= 0.3 && t < 0.7);
+        btn.classList.toggle('danger', t >= 0.7);
+    }
+    pulseBalloonTension(t, Date.now());
 }
 
 function handlePaintState(data) {
@@ -1268,9 +1481,14 @@ function resetMatchState() {
         tugFill.style.width = '100%';
         tugFill.style.background = '';
     }
+    resetTugRhythmUI();
 
-    // Balloon (button/label are rebuilt in setupBalloonControls)
+    // Balloon (buttons/label/air bar are rebuilt in setupBalloonControls)
+    sendBalloonBlow(false);
     balloonProgress = 0;
+    balloonTied = false;
+    balloonTension = 0;
+    balloonLastVibe = 0;
 
     // Trivia
     document.querySelectorAll('.trivia-btn').forEach(btn => btn.classList.remove('selected', 'pressed'));
@@ -1302,6 +1520,7 @@ function updateControllerUIForMode() {
     const controllerScreen = document.getElementById('controller-screen');
     
     // Start from a neutral layout so switching modes never leaves stale pieces behind
+    sendBalloonBlow(false);
     if (raceControls) raceControls.style.display = 'none';
     if (flappyControls) flappyControls.style.display = 'none';
     if (tugControls) tugControls.style.display = 'none';
@@ -1313,7 +1532,8 @@ function updateControllerUIForMode() {
     if (grabBtn) grabBtn.style.display = 'none';
     if (stocksDisplay) stocksDisplay.style.display = 'none';
     if (joystickHint) joystickHint.textContent = '';
-    
+    resetSmashShieldUI();
+
     if (gameMode === 'trivia') {
         // Trivia mode
         if (controllerBody) controllerBody.style.display = 'none';
@@ -1417,7 +1637,8 @@ function updateControllerUIForMode() {
         if (controllerBody) controllerBody.style.display = 'flex';
         if (healthLabel) healthLabel.textContent = 'DAÑO';
         if (stocksDisplay) stocksDisplay.style.display = 'flex';
-        if (joystickHint) joystickHint.textContent = '↑ SALTA · A FONDO CORRE';
+        if (joystickHint) joystickHint.textContent = '↑ SALTA (×2 EN EL AIRE) · DIRECCIÓN + GOLPE = MOVIMIENTO';
+        renderSmashShield(100, false, false);
 
         console.log('[Controller] Smash mode UI configured');
     }
@@ -1631,67 +1852,115 @@ let puzzleEnterHandler = null;
 
 function setupBalloonControls() {
     const inflateBtn = document.getElementById('balloon-inflate-btn');
+    const tieBtn = document.getElementById('balloon-tie-btn');
     const fill = document.getElementById('balloon-progress-fill');
     const label = document.querySelector('.balloon-label');
     const progressContainer = document.querySelector('.balloon-progress-container');
-    
+    const lungFill = document.getElementById('balloon-lung-fill');
+    const lungValue = document.getElementById('balloon-lung-value');
+
     // Hide progress bar as requested by user to increase tension
     if (progressContainer) {
         progressContainer.style.display = 'none';
     }
-    
+
     // Reset UI state for new game
     if (fill) {
         fill.style.width = '0%';
         fill.style.background = 'linear-gradient(90deg, #9966ff, #ff66ff)';
         fill.style.boxShadow = '0 0 15px rgba(255, 102, 255, 0.5)';
     }
+    if (lungFill) {
+        lungFill.style.width = '100%';
+        lungFill.classList.remove('low', 'empty');
+    }
+    if (lungValue) lungValue.textContent = '100%';
     if (label) {
-        label.textContent = '¡Toca para inflar!';
+        label.textContent = 'Sopla con calma…';
         label.style.color = 'white';
     }
-    
+    balloonProgress = 0;
+    balloonTied = false;
+    balloonTension = 0;
+    balloonLastVibe = 0;
+    sendBalloonBlow(false);
+
     if (inflateBtn) {
         // Remove old listeners
         inflateBtn.replaceWith(inflateBtn.cloneNode(true));
         const newInflateBtn = document.getElementById('balloon-inflate-btn');
-        
+
         // Reset button state
         newInflateBtn.disabled = false;
-        newInflateBtn.style.opacity = '1';
+        newInflateBtn.style.opacity = '';
+        newInflateBtn.style.setProperty('--shake', 0);
+        newInflateBtn.classList.remove('pressed', 'pulse', 'shaking', 'tense', 'danger');
         const btnText = newInflateBtn.querySelector('.balloon-text');
-        if (btnText) btnText.textContent = '¡INFLAR!';
-        
-        const handleInflate = (e) => {
+        if (btnText) btnText.textContent = 'SOPLA';
+        const btnSub = newInflateBtn.querySelector('.balloon-subtext');
+        if (btnSub) btnSub.textContent = '(mantén)';
+
+        // Hold to blow: true on press, false on every way the press can end
+        const startBlow = (e) => {
             if (e) e.preventDefault();
             if (gameMode !== 'balloon') return;
-            if (newInflateBtn.disabled) return; // Don't process if DQ'd
-            
+            if (newInflateBtn.disabled || balloonTied) return; // popped or banked
+
             newInflateBtn.classList.add('pressed');
-            newInflateBtn.classList.add('pulse');
-            
-            // Send inflate action to server
-            if (socket && socket.connected) {
-                socket.emit('balloon-inflate');
-            }
-            
+            sendBalloonBlow(true);
             triggerHaptic();
-            
-            setTimeout(() => {
-                newInflateBtn.classList.remove('pulse');
-            }, 200);
         };
-        
-        newInflateBtn.addEventListener('touchstart', handleInflate, { passive: false });
-        newInflateBtn.addEventListener('touchend', () => newInflateBtn.classList.remove('pressed'), { passive: false });
-        newInflateBtn.addEventListener('mousedown', handleInflate);
-        newInflateBtn.addEventListener('mouseup', () => newInflateBtn.classList.remove('pressed'));
+        const stopBlow = (e) => {
+            if (e && e.cancelable) e.preventDefault();
+            newInflateBtn.classList.remove('pressed');
+            sendBalloonBlow(false);
+        };
+
+        newInflateBtn.addEventListener('touchstart', startBlow, { passive: false });
+        newInflateBtn.addEventListener('touchend', stopBlow, { passive: false });
+        newInflateBtn.addEventListener('touchcancel', stopBlow, { passive: false });
+        newInflateBtn.addEventListener('mousedown', startBlow);
+        newInflateBtn.addEventListener('mouseup', stopBlow);
+        newInflateBtn.addEventListener('mouseleave', stopBlow);
     }
-    
-    // Reset balloon progress state
-    balloonProgress = 0;
-    
+
+    if (tieBtn) {
+        tieBtn.replaceWith(tieBtn.cloneNode(true));
+        const newTieBtn = document.getElementById('balloon-tie-btn');
+        newTieBtn.disabled = false;
+        newTieBtn.classList.remove('pressed', 'tied');
+        newTieBtn.textContent = '🎀 AMARRAR';
+
+        // Bank the current size: sent once, then both buttons are done for this match
+        const handleTie = (e) => {
+            if (e) e.preventDefault();
+            if (gameMode !== 'balloon') return;
+            if (newTieBtn.disabled || balloonTied) return;
+
+            newTieBtn.classList.add('pressed');
+            if (socket && socket.connected) {
+                socket.emit('balloon-tie');
+            }
+            showBalloonTied();
+            triggerHaptic(true);
+        };
+
+        newTieBtn.addEventListener('touchstart', handleTie, { passive: false });
+        newTieBtn.addEventListener('mousedown', handleTie);
+    }
+
+    // Releasing the finger outside the button (slid off) must also stop the blow
+    document.addEventListener('touchend', stopBalloonBlowIfNeeded, { passive: true });
+    document.addEventListener('touchcancel', stopBalloonBlowIfNeeded, { passive: true });
+
     console.log('[Balloon] Controls setup complete');
+}
+
+function stopBalloonBlowIfNeeded() {
+    if (!balloonBlowing) return;
+    const btn = document.getElementById('balloon-inflate-btn');
+    if (btn) btn.classList.remove('pressed');
+    sendBalloonBlow(false);
 }
 
 // Client-side rhythm animation for the Tug of War bar
@@ -1703,20 +1972,32 @@ function startTugRhythmAnimation() {
     if (tugRhythmRunning) return; // One loop is enough (game-started fires every round)
     tugRhythmRunning = true;
 
+    const container = document.getElementById('rhythm-bar-container');
+    let flashing = false;
+
     const animate = () => {
         if (gameMode !== 'tug') {
             tugRhythmRunning = false;
+            if (container) container.classList.remove('beat');
             return;
         }
-        
+
         const now = Date.now();
-        // Calculate progress within the current pulse interval (0 to 1)
-        // We use tugPulseInterval = 1500ms
-        const progress = (now % tugPulseInterval) / tugPulseInterval;
-        
-        // Move cursor from 0% to 100%
-        cursor.style.left = `${progress * 100}%`;
-        
+        if (tugNextPulse > 0) {
+            // Server time, so the pulse lands exactly at 50% of the bar (the green zone center)
+            const serverNow = now + tugClockOffset;
+            const interval = tugPulseInterval;
+            const progress = ((((serverNow - tugNextPulse + interval / 2) % interval) + interval) % interval) / interval;
+            cursor.style.left = `${progress * 100}%`;
+        }
+
+        // Beat flash (class only toggled on change)
+        const shouldFlash = now < tugBeatFlashUntil;
+        if (container && shouldFlash !== flashing) {
+            flashing = shouldFlash;
+            container.classList.toggle('beat', flashing);
+        }
+
         requestAnimationFrame(animate);
     };
     
@@ -1785,7 +2066,7 @@ function handleGameState(data) {
         } else {
             // Smash mode: Show damage (higher = worse)
             elements.playerDamage.textContent = `${Math.floor(myState.health)}%`;
-            
+
             // Change color based on damage
             if (myState.health > 100) {
                 elements.playerDamage.style.color = 'var(--primary)';
@@ -1794,7 +2075,64 @@ function handleGameState(data) {
             } else {
                 elements.playerDamage.style.color = 'var(--secondary)';
             }
+
+            // Shield level on the BLOQUEO button
+            if (typeof myState.shield === 'number') {
+                renderSmashShield(myState.shield, myState.shieldStunned === true, myState.isBlocking === true);
+            }
         }
+    }
+}
+
+// =================================
+// Smash: shield on the BLOQUEO button
+// =================================
+
+let smashShieldLast = -1;
+
+/**
+ * Plain BLOQUEO button (other modes have no shield meter)
+ */
+function resetSmashShieldUI() {
+    const btn = document.querySelector('.action-btn[data-input="block"]');
+    if (!btn) return;
+    smashShieldLast = -1;
+    btn.style.removeProperty('--shield');
+    btn.style.removeProperty('--shield-color');
+    btn.classList.remove('shield-broken', 'shield-low');
+    const label = btn.querySelector('.btn-action');
+    if (label) label.textContent = 'BLOQUEO';
+}
+
+/**
+ * Fill the BLOQUEO button with the shield level (blue -> red) and mark it when broken
+ */
+function renderSmashShield(shield, stunned, blocking) {
+    const btn = document.querySelector('.action-btn[data-input="block"]');
+    if (!btn) return;
+    const value = Math.max(0, Math.min(100, Math.round(shield)));
+    const label = btn.querySelector('.btn-action');
+    if (value !== smashShieldLast) {
+        smashShieldLast = value;
+        btn.style.setProperty('--shield', `${value}%`);
+        btn.style.setProperty('--shield-color', `hsl(${Math.round(200 * value / 100)}, 100%, 55%)`);
+    }
+    btn.classList.toggle('shield-broken', stunned);
+    btn.classList.toggle('shield-low', !stunned && value < 25);
+    if (label) label.textContent = stunned ? 'ROTO' : 'BLOQUEO';
+}
+
+/**
+ * One-off Smash events from the server (shield breaks)
+ */
+function handleSmashEvent(event) {
+    if (!event || !socket) return;
+    if (event.type === 'shield-break' && event.playerId === socket.id) {
+        vibrate([60, 40, 60, 40, 120]);
+        renderSmashShield(0, true, false);
+        // The server already dropped the guard: release the local flag too
+        inputState.block = false;
+        document.querySelector('.action-btn[data-input="block"]')?.classList.remove('pressed');
     }
 }
 
@@ -1942,7 +2280,9 @@ function handleGameOver(data) {
     // No mash screen / wrestling HUD left behind the end-of-match screen
     clearArenaWrestling();
     setEliminationInfo('game-over-elim', elimText);
-    
+    // Balloon: a finger still on the blow button must not keep "blowing" into the next match
+    sendBalloonBlow(false);
+
     elements.gameOverOverlay.classList.remove('hidden');
     
     // Handle Tug of War team winner
@@ -2182,6 +2522,8 @@ function applyJoystickVector(nx, ny) {
             next.left = dirLeft;
             next.right = dirRight;
             next.jump = dirUp && -ny >= JOYSTICK.JUMP_THRESHOLD;
+            // Stick down + GOLPE/PATADA = barrida (en el piso) o meteoro (en el aire)
+            next.down = dirDown && ny >= JOYSTICK.JUMP_THRESHOLD;
             next.run = (dirLeft || dirRight) && Math.abs(nx) >= JOYSTICK.RUN_THRESHOLD;
         } else {
             next.left = dirLeft;
@@ -3921,6 +4263,9 @@ function resetState() {
     raceSpeed = 0;
     flappyAlive = true;
     balloonProgress = 0;
+    balloonBlowing = false;
+    balloonTied = false;
+    balloonTension = 0;
     resetJoystick();
     Object.keys(inputState).forEach(key => inputState[key] = false);
 
@@ -4103,6 +4448,7 @@ function handleRoundEnded(data) {
     tournamentState.playerScores = data.playerScores || {};
     const elimText = gameMode === 'arena' ? describeMyElimination(true) : '';
     clearArenaWrestling();
+    sendBalloonBlow(false);
 
     showRoundEndOverlay(data);
     setEliminationInfo('round-elim-info', elimText);

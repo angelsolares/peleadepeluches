@@ -39,6 +39,94 @@
     pointer-events: none;
 }
 
+/* Banked balloon ("amarrado") badge */
+.balloon-player-tied-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 900;
+    color: #ffcc00;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 4px 10px;
+    border: 2px solid #ffcc00;
+    border-radius: 6px;
+    text-shadow: 0 0 10px rgba(255, 204, 0, 0.8);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: balloonBadgeIn 0.3s ease-out;
+}
+
+@keyframes balloonBadgeIn {
+    0% { transform: scale(0); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* 💨 while the player is blowing */
+.balloon-blow-label {
+    font-size: 26px;
+    pointer-events: none;
+    animation: balloonBlowPuff 0.5s ease-out infinite;
+}
+
+@keyframes balloonBlowPuff {
+    0% { transform: translate(-6px, 0) scale(0.6); opacity: 0.2; }
+    60% { opacity: 1; }
+    100% { transform: translate(14px, -6px) scale(1.2); opacity: 0; }
+}
+
+/* End-of-match ranking */
+.balloon-ranking {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 25px auto 0;
+    min-width: 380px;
+    max-width: 560px;
+    font-size: 1.3rem;
+    text-shadow: none;
+}
+
+.balloon-ranking-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 18px;
+    background: rgba(0, 0, 0, 0.55);
+    border: 2px solid rgba(255, 102, 255, 0.35);
+    border-radius: 12px;
+}
+
+.balloon-ranking-row.winner {
+    border-color: #ffcc00;
+    box-shadow: 0 0 20px rgba(255, 204, 0, 0.4);
+}
+
+.balloon-ranking-row.popped {
+    opacity: 0.6;
+}
+
+.balloon-ranking-pos {
+    color: #ff66ff;
+    font-weight: 900;
+    min-width: 2ch;
+}
+
+.balloon-ranking-name {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.balloon-ranking-size {
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+.balloon-ranking-row.popped .balloon-ranking-size {
+    color: #ff3366;
+}
+
 /* Controller Styles */
 #controller-screen.balloon-mode {
     background: linear-gradient(135deg, #1a0a2e 0%, #2e0a2e 100%);

@@ -76,13 +76,26 @@ class TugPlayerEntity {
         
         this.nameLabel = this.createNameLabel(color);
         this.model.add(this.nameLabel);
-        
+
+        // Floating "¡PERFECTO!" / "¡BIEN!" feedback (one element per player, toggled, never re-created)
+        this.qualityLabel = this.createQualityLabel();
+        this.model.add(this.qualityLabel);
+        this.qualityUntil = 0;
+
         this.animController = new AnimationController(this.model, baseAnimations);
         this.animController.play('idle'); // Ensure idle plays immediately
         this.isPulling = false;
         this.pullEndTime = 0;
         this.homeX = 0;          // Position relative to the rope center
         this.finalAnim = null;   // 'win' / 'lose' once the match is over
+    }
+
+    createQualityLabel() {
+        const div = document.createElement('div');
+        div.className = 'tug-quality-label';
+        const label = new CSS2DObject(div);
+        label.position.set(0, 290, 0); // Above the name label
+        return label;
     }
     
     createNameLabel(color) {
@@ -127,10 +140,23 @@ class TugPlayerEntity {
      * Apply a server snapshot (no animation work here)
      */
     applyState(state) {
-        if (state && state.pullQuality > 0) {
+        if (!state) return;
+        if (state.pullQuality > 0) {
             this.isPulling = true;
             this.pullEndTime = Date.now() + 500;
+            const streak = state.streak >= 2 ? ` x${state.streak}` : '';
+            this.showQuality(state.pullQuality === 2 ? `¡PERFECTO!${streak}` : `¡BIEN!${streak}`,
+                state.pullQuality === 2 ? 'perfect' : 'good');
+        } else if (state.mashed) {
+            this.showQuality('¡ESPERA EL BEAT!', 'mashed');
         }
+    }
+
+    showQuality(text, kind) {
+        const el = this.qualityLabel.element;
+        el.textContent = text;
+        el.className = `tug-quality-label show ${kind}`;
+        this.qualityUntil = Date.now() + 600;
     }
 
     /**
@@ -167,12 +193,17 @@ class TugPlayerEntity {
             // play() is a no-op if the animation is already running
             this.animController.play(this.isPulling ? 'pull' : 'idle', 0.1);
         }
+        if (this.qualityUntil && Date.now() > this.qualityUntil) {
+            this.qualityUntil = 0;
+            this.qualityLabel.element.classList.remove('show');
+        }
         this.animController.update(delta);
     }
 
     dispose() {
         this.animController?.dispose();
         this.nameLabel?.element?.parentNode?.removeChild(this.nameLabel.element);
+        this.qualityLabel?.element?.parentNode?.removeChild(this.qualityLabel.element);
     }
 }
 
@@ -205,6 +236,16 @@ class TugGame {
         this.ropeTargetX = 0;   // World X the rope should reach (from server markerPos)
         this.ropeX = 0;         // Smoothed world X of rope, marker and teams
         this.rematchPending = false;
+
+        // Beat clock from the server (pulse k = startTime + k * pulseInterval; see tugState.js)
+        this.clockOffset = 0;       // serverTime - Date.now(), smoothed
+        this.clockSynced = false;
+        this.pulseInterval = 1500;
+        this.greenZoneWindow = 300;
+        this.nextPulseTime = 0;
+        this.lastBeat = -1;
+        this.beatFlashUntil = 0;
+        this.teamSyncShown = { left: null, right: null }; // Last rendered "combo|hits|size" per team
 
         this.init();
     }
@@ -273,11 +314,41 @@ class TugGame {
                 pointer-events: none;
                 text-transform: uppercase;
             }
-            .rhythm-hud {
+            .tug-quality-label {
+                font-family: 'Orbitron', sans-serif;
+                font-size: 14px;
+                font-weight: 900;
+                white-space: nowrap;
+                pointer-events: none;
+                opacity: 0;
+                transform: translateY(8px);
+                transition: opacity 0.15s ease, transform 0.15s ease;
+                text-shadow: 0 0 10px rgba(0,0,0,0.9);
+            }
+            .tug-quality-label.show { opacity: 1; transform: translateY(0); }
+            .tug-quality-label.perfect { color: #00ffcc; text-shadow: 0 0 12px #00ffcc; }
+            .tug-quality-label.good { color: #00ccff; text-shadow: 0 0 10px #00ccff; }
+            .tug-quality-label.mashed { color: #ff3366; font-size: 11px; }
+            /* Rhythm HUD: [team sync] [metronome + bar] [team sync] */
+            #tug-rhythm-wrap {
                 position: fixed;
                 top: 15%; /* Adjusted to be above the modal title area */
                 left: 50%;
                 transform: translateX(-50%);
+                display: flex;
+                align-items: center;
+                gap: 18px;
+                z-index: 10;
+                pointer-events: none;
+            }
+            .rhythm-center {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;
+            }
+            .rhythm-hud {
+                position: relative;
                 width: 400px;
                 height: 40px;
                 background: rgba(0,0,0,0.5);
@@ -286,17 +357,29 @@ class TugGame {
                 overflow: hidden;
                 display: flex;
                 align-items: center;
-                z-index: 10;
             }
+            .rhythm-hud.beat { animation: rhythm-beat 0.25s ease-out; }
+            @keyframes rhythm-beat {
+                0% { border-color: #ffffff; box-shadow: 0 0 25px rgba(255,255,255,0.8); }
+                100% { border-color: rgba(255,255,255,0.2); box-shadow: none; }
+            }
+            /* Good zone: +-300 ms of the beat (40% of the bar), perfect zone: +-150 ms (20%) */
             .rhythm-target {
                 position: absolute;
-                width: 80px;
+                width: 40%;
                 height: 100%;
-                background: rgba(0, 255, 204, 0.4);
-                left: 160px;
-                box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
-                border-left: 2px solid #00ffcc;
-                border-right: 2px solid #00ffcc;
+                background: rgba(0, 255, 204, 0.25);
+                left: 30%;
+                border-left: 2px solid rgba(0, 255, 204, 0.6);
+                border-right: 2px solid rgba(0, 255, 204, 0.6);
+            }
+            .rhythm-perfect {
+                position: absolute;
+                width: 50%;
+                height: 100%;
+                left: 25%;
+                background: rgba(0, 255, 204, 0.45);
+                box-shadow: 0 0 20px rgba(0, 255, 204, 0.6);
             }
             .rhythm-cursor {
                 position: absolute;
@@ -305,6 +388,38 @@ class TugGame {
                 background: white;
                 box-shadow: 0 0 10px white;
             }
+            /* Metronome ring: pumps on every beat (driven from the server clock in animate) */
+            .tug-metronome {
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                border: 3px solid #00ffcc;
+                background: rgba(0, 255, 204, 0.15);
+                box-shadow: 0 0 12px rgba(0, 255, 204, 0.5);
+                will-change: transform, opacity;
+            }
+            .tug-sync-indicator {
+                width: 190px;
+                font-family: 'Orbitron', sans-serif;
+                font-size: 1rem;
+                font-weight: 900;
+                letter-spacing: 1px;
+                color: rgba(255,255,255,0.45);
+                text-shadow: 0 0 8px rgba(0,0,0,0.8);
+                transition: color 0.2s ease, text-shadow 0.2s ease, transform 0.2s ease;
+            }
+            .tug-sync-indicator.left { text-align: right; }
+            .tug-sync-indicator.right { text-align: left; }
+            .tug-sync-indicator small {
+                display: block;
+                font-size: 0.7rem;
+                font-weight: 700;
+                letter-spacing: 0;
+                color: rgba(255,255,255,0.5);
+            }
+            .tug-sync-indicator.active { transform: scale(1.08); }
+            .tug-sync-indicator.left.active { color: #ff3366; text-shadow: 0 0 18px #ff3366; }
+            .tug-sync-indicator.right.active { color: #00ffcc; text-shadow: 0 0 18px #00ffcc; }
             .tug-status {
                 position: fixed;
                 top: 80px; /* Adjusted to avoid overlap */
@@ -697,11 +812,12 @@ class TugGame {
 
         // Clear existing UI elements to prevent overlap
         const elementsToRemove = [
-            '.rhythm-hud',
+            '#tug-rhythm-wrap',
             '#tug-game-status',
             '#tug-countdown',
             '#tug-timer',
-            '.tug-player-name-label' // Clear player labels from previous game
+            '.tug-player-name-label', // Clear player labels from previous game
+            '.tug-quality-label'
         ];
         
         elementsToRemove.forEach(selector => {
@@ -715,6 +831,12 @@ class TugGame {
         this.ropeX = 0;
         if (this.marker) this.marker.position.x = 0;
         if (this.rope) this.rope.position.x = 0;
+
+        // Beat state (the clock offset survives: same server)
+        this.nextPulseTime = 0;
+        this.lastBeat = -1;
+        this.beatFlashUntil = 0;
+        this.teamSyncShown = { left: null, right: null };
     }
 
     setupPlayers(playersData) {
@@ -781,13 +903,20 @@ class TugGame {
     }
 
     setupRhythmHUD() {
-        const hud = document.createElement('div');
-        hud.className = 'rhythm-hud';
-        hud.innerHTML = `
-            <div class="rhythm-target"></div>
-            <div id="tug-rhythm-cursor" class="rhythm-cursor"></div>
+        const wrap = document.createElement('div');
+        wrap.id = 'tug-rhythm-wrap';
+        wrap.innerHTML = `
+            <div id="tug-sync-left" class="tug-sync-indicator left">SINCRONÍA</div>
+            <div class="rhythm-center">
+                <div id="tug-metronome" class="tug-metronome"></div>
+                <div id="tug-rhythm-bar" class="rhythm-hud">
+                    <div class="rhythm-target"><div class="rhythm-perfect"></div></div>
+                    <div id="tug-rhythm-cursor" class="rhythm-cursor"></div>
+                </div>
+            </div>
+            <div id="tug-sync-right" class="tug-sync-indicator right">SINCRONÍA</div>
         `;
-        document.body.appendChild(hud);
+        document.body.appendChild(wrap);
 
         const status = document.createElement('div');
         status.id = 'tug-game-status';
@@ -809,11 +938,13 @@ class TugGame {
     updateGameState(state) {
         if (!state) return;
 
+        this.syncBeatClock(state);
+
         // Handle countdown and timer
         const countdownEl = document.getElementById('tug-countdown');
         const timerEl = document.getElementById('tug-timer');
         const statusEl = document.getElementById('tug-game-status');
-        
+
         if (state.gameState === 'countdown') {
             if (countdownEl) {
                 countdownEl.style.display = 'block';
@@ -846,6 +977,12 @@ class TugGame {
         this.markerPos = state.markerPos || 0;
         this.ropeTargetX = (this.markerPos / 100) * 25;
 
+        // Team sync indicators
+        if (state.teams) {
+            this.updateTeamSync('left', state.teams.left);
+            this.updateTeamSync('right', state.teams.right);
+        }
+
         // Apply player state and sync names if they changed (animations run in animate())
         (state.players || []).forEach(pState => {
             const entity = this.players.get(pState.id);
@@ -856,6 +993,54 @@ class TugGame {
                 entity.applyState(pState);
             }
         });
+    }
+
+    /**
+     * Keep a smoothed server clock offset and flash the bar when the server reports a new beat.
+     * The metronome and the cursor are then driven locally from this offset (see animate()).
+     */
+    syncBeatClock(state) {
+        if (typeof state.serverTime === 'number') {
+            const sample = state.serverTime - Date.now();
+            if (!this.clockSynced) {
+                this.clockOffset = sample;
+                this.clockSynced = true;
+            } else {
+                this.clockOffset += (sample - this.clockOffset) * 0.1;
+            }
+        }
+        if (state.pulseInterval > 0) this.pulseInterval = state.pulseInterval;
+        if (state.greenZoneWindow > 0) this.greenZoneWindow = state.greenZoneWindow;
+        if (typeof state.nextPulseTime === 'number') this.nextPulseTime = state.nextPulseTime;
+
+        if (typeof state.beat === 'number' && state.beat !== this.lastBeat) {
+            // Consecutive beat = it just happened (a jump means we joined mid-match: no flash)
+            const justHappened = state.beat === this.lastBeat + 1;
+            this.lastBeat = state.beat;
+            if (justHappened) {
+                const bar = document.getElementById('tug-rhythm-bar');
+                if (bar) {
+                    // Restart the CSS flash (0.67 Hz, so the forced reflow is harmless)
+                    bar.classList.remove('beat');
+                    void bar.offsetWidth;
+                    bar.classList.add('beat');
+                }
+                // No SFX manager is loaded on this page; the flash + metronome carry the beat
+            }
+        }
+    }
+
+    updateTeamSync(side, team) {
+        if (!team) return;
+        const key = `${team.syncCombo}|${team.hits}|${team.size}`;
+        if (this.teamSyncShown[side] === key) return; // No DOM writes unless something changed
+        this.teamSyncShown[side] = key;
+
+        const el = document.getElementById(`tug-sync-${side}`);
+        if (!el) return;
+        const active = team.syncCombo >= 2;
+        el.classList.toggle('active', active);
+        el.innerHTML = `${active ? `¡SINCRONÍA x${team.syncCombo}!` : 'SINCRONÍA'}<small>${team.hits}/${team.size} en el beat</small>`;
     }
 
     showGameOver(data) {
@@ -886,7 +1071,7 @@ class TugGame {
         }
 
         // Hide HUD elements that are no longer needed
-        const rhythmHud = document.querySelector('.rhythm-hud');
+        const rhythmHud = document.getElementById('tug-rhythm-wrap');
         if (rhythmHud) rhythmHud.style.display = 'none';
         const timer = document.getElementById('tug-timer');
         if (timer) timer.style.display = 'none';
@@ -973,12 +1158,22 @@ class TugGame {
             entity.tick(delta);
         });
 
-        // Rhythm cursor (purely visual, independent of server ticks)
+        // Rhythm cursor and metronome, aligned to the server beat: the pulse lands at 50%
         const cursor = document.getElementById('tug-rhythm-cursor');
-        if (cursor) {
-            const pulseInterval = 1500;
-            const progress = (Date.now() % pulseInterval) / pulseInterval;
+        if (cursor && this.nextPulseTime > 0) {
+            const interval = this.pulseInterval;
+            const serverNow = Date.now() + this.clockOffset;
+            const progress = ((((serverNow - this.nextPulseTime + interval / 2) % interval) + interval) % interval) / interval;
             cursor.style.left = `${progress * 100}%`;
+
+            const ring = document.getElementById('tug-metronome');
+            if (ring) {
+                // 1 at the beat, fading out over 250 ms on both sides
+                const msFromBeat = Math.abs(progress - 0.5) * interval;
+                const hit = Math.max(0, 1 - msFromBeat / 250);
+                ring.style.transform = `scale(${1 + hit * 0.5})`;
+                ring.style.opacity = `${0.45 + hit * 0.55}`;
+            }
         }
 
         this.renderer.render(this.scene, this.camera);

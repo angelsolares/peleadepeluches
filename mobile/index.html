@@ -318,8 +318,10 @@
                     </div>
                 </div>
                 <div class="tug-rhythm-area">
-                    <div class="rhythm-bar-container">
-                        <div id="rhythm-bar-target" class="rhythm-bar-target"></div>
+                    <div id="rhythm-bar-container" class="rhythm-bar-container">
+                        <div id="rhythm-bar-target" class="rhythm-bar-target">
+                            <div class="rhythm-bar-perfect"></div>
+                        </div>
                         <div id="rhythm-bar-cursor" class="rhythm-bar-cursor"></div>
                     </div>
                 </div>
@@ -329,8 +331,12 @@
                         <span class="tug-text">¡JALAR!</span>
                     </button>
                 </div>
+                <div class="tug-combo-info">
+                    <div id="tug-streak" class="tug-streak"></div>
+                    <div id="tug-team-sync" class="tug-team-sync"></div>
+                </div>
                 <div class="tug-hint">
-                    <span>¡Jala rítmicamente cuando la barra esté en verde!</span>
+                    <span>Jala justo en el beat. Si todo el equipo cae en verde, jalan más fuerte.</span>
                 </div>
             </div>
 
@@ -341,15 +347,27 @@
                     <div class="balloon-progress-container">
                         <div id="balloon-progress-fill" class="balloon-progress-fill"></div>
                     </div>
+                    <!-- Air left: drains while blowing, refills while the button is released -->
+                    <div class="balloon-lung">
+                        <div class="balloon-lung-header">
+                            <span>🫁 Aire</span>
+                            <span id="balloon-lung-value">100%</span>
+                        </div>
+                        <div class="balloon-lung-bar">
+                            <div id="balloon-lung-fill" class="balloon-lung-fill"></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="balloon-tap-area">
                     <button class="balloon-inflate-btn" id="balloon-inflate-btn">
                         <span class="balloon-icon">💨</span>
-                        <span class="balloon-text">¡INFLAR!</span>
+                        <span class="balloon-text">SOPLA</span>
+                        <span class="balloon-subtext">(mantén)</span>
                     </button>
+                    <button class="balloon-tie-btn" id="balloon-tie-btn">🎀 AMARRAR</button>
                 </div>
                 <div class="balloon-hint">
-                    <span>¡Presiona repetidamente para inflar tu globo!</span>
+                    <span>Mantén 💨 para soplar y suelta para respirar. Si tiembla, ¡AMARRA antes de que truene!</span>
                 </div>
             </div>
 
