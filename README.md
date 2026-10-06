@@ -100,6 +100,19 @@ pelea-de-peluches/
 |-------------------|-------------|---------|
 | `PORT` | Puerto del servidor | 3001 |
 
+## 🧪 Pruebas
+
+```bash
+npm install          # una vez, en la raíz (instala socket.io-client para las pruebas)
+npm test             # todo: simulaciones + pruebas contra un servidor real
+npm run test:sim     # solo simulaciones (segundos, sin red)
+npm run test:server  # solo las de servidor (levanta server/index.js en el puerto 3199)
+```
+
+- `tests/sim/` simula los `server/*State.js` con un reloj falso: física de Smash y Arena, lucha libre (amarres, ánimo, cuerdas), ritmo de la Cuerda, pulmones del Globo y regresiones de bugs viejos.
+- `tests/server/` conecta bots por Socket.IO a un servidor real: sanitización, revancha, reconexión, Carrera, y partidas completas de Cuerda y Globo. Necesita `cd server && npm install` hecho.
+- `node tests/run.mjs sim smash` corre solo los archivos cuyo nombre contenga `smash`. Cada prueba imprime `PASS`/`FAIL` por check y termina con `N/M passed`.
+
 ## 🧩 Cómo funciona
 
 - **Servidor autoritativo.** Cada modo tiene su `server/*State.js` con la física y las reglas; el host solo dibuja y los teléfonos solo mandan input. Los ticks usan el delta real (en Windows `setInterval` a 16 ms corre a ~36 Hz).

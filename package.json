@@ -1,0 +1,16 @@
+{
+  "name": "pelea-de-peluches",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pelea de Peluches - host pages, phone controller and tests (the server lives in server/)",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "test:sim": "node tests/run.mjs sim",
+    "test:server": "node tests/run.mjs server",
+    "serve": "npx http-server -p 8080 -c-1 --cors"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.2"
+  }
+}
