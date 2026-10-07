@@ -498,6 +498,8 @@ class FlappyGame {
         
         this.pipes = [];
         this.pipeAssets = null; // Shared pipe geometry/material (created once)
+        this.movingPipesAnnounced = false; // "¡TUBOS MÓVILES!" banner shown once per run
+        this.movingBannerTimer = null;
         this.ground = null;
         this.gameStarted = false;
         
@@ -1249,7 +1251,8 @@ class FlappyGame {
         
         this.gameStarted = true;
         this.gameOver = false;
-        
+        this.movingPipesAnnounced = false;
+
         document.getElementById('state-text').textContent = '¡VOLANDO!';
         
         // Start battle BGM
@@ -1316,11 +1319,47 @@ class FlappyGame {
                 pipe = this.createPipe(serverPipe);
                 this.pipes.push(pipe);
             }
-            
-            // Update position
+
+            // Update position (moving pipes change gapY every tick, so both halves follow it)
+            const gapSize = Number.isFinite(serverPipe.gapSize) ? serverPipe.gapSize : pipe.gapSize;
             pipe.topMesh.position.x = serverPipe.x;
             pipe.bottomMesh.position.x = serverPipe.x;
+            pipe.topMesh.position.y = serverPipe.gapY + gapSize / 2 + 10;
+            pipe.bottomMesh.position.y = serverPipe.gapY - gapSize / 2 - 10;
+
+            if (serverPipe.moving && !pipe.moving) this.setPipeMoving(pipe);
         }
+    }
+
+    /**
+     * Tint a pipe as a moving one and announce the first of the run
+     */
+    setPipeMoving(pipe) {
+        const { movingMaterial } = this.getPipeAssets();
+        pipe.moving = true;
+        pipe.topMesh.material = movingMaterial;
+        pipe.bottomMesh.material = movingMaterial;
+        pipe.topMesh.children.forEach((cap) => { cap.material = movingMaterial; });
+        pipe.bottomMesh.children.forEach((cap) => { cap.material = movingMaterial; });
+
+        if (!this.movingPipesAnnounced) {
+            this.movingPipesAnnounced = true;
+            this.showMovingPipesBanner();
+        }
+    }
+
+    showMovingPipesBanner() {
+        const banner = document.getElementById('moving-pipes-banner');
+        if (!banner) return;
+        clearTimeout(this.movingBannerTimer);
+        banner.classList.remove('hidden');
+        // Restart the pop-in animation when shown again (new round / rematch)
+        void banner.offsetWidth;
+        banner.classList.add('show');
+        this.movingBannerTimer = setTimeout(() => {
+            banner.classList.add('hidden');
+            banner.classList.remove('show');
+        }, 2500);
     }
     
     /**
@@ -1330,11 +1369,20 @@ class FlappyGame {
         if (!this.pipeAssets) {
             const isBabyShower = document.documentElement.classList.contains('baby-theme');
             const pipeColor = isBabyShower ? 0xA2D2FF : 0x2ECC71;
+            const movingColor = isBabyShower ? 0xFFD6A5 : 0xF5A623;
             this.pipeAssets = {
                 pipeGeometry: new THREE.BoxGeometry(GAME_CONFIG.pipeWidth, 20, GAME_CONFIG.pipeWidth),
                 capGeometry: new THREE.BoxGeometry(GAME_CONFIG.pipeWidth + 0.5, 0.8, GAME_CONFIG.pipeWidth + 0.5),
                 material: new THREE.MeshStandardMaterial({
                     color: pipeColor,
+                    roughness: 0.5,
+                    metalness: 0.2
+                }),
+                // Moving pipes glow orange so players see them coming
+                movingMaterial: new THREE.MeshStandardMaterial({
+                    color: movingColor,
+                    emissive: 0xE67E22,
+                    emissiveIntensity: 0.35,
                     roughness: 0.5,
                     metalness: 0.2
                 })
@@ -1388,12 +1436,16 @@ class FlappyGame {
         const bottomCap = new THREE.Mesh(capGeometry, pipeMaterial);
         bottomCap.position.y = 10;
         bottomMesh.add(bottomCap);
-        
-        return {
+
+        const pipe = {
             id: pipeData.id,
+            gapSize,
+            moving: false,
             topMesh,
             bottomMesh
         };
+        if (pipeData.moving) this.setPipeMoving(pipe);
+        return pipe;
     }
     
     handlePlayerDeath(data) {

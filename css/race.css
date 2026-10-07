@@ -373,6 +373,29 @@
     text-shadow: 0 0 5px rgba(0, 255, 136, 0.5);
 }
 
+/* Floating text above a runner (hurdle stumble) */
+.race-float-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    font-weight: 900;
+    color: #fff;
+    white-space: nowrap;
+    text-shadow: 0 0 10px rgba(0, 0, 0, 0.8), 0 0 20px currentColor;
+    animation: raceFloatUp 1.2s ease-out forwards;
+    pointer-events: none;
+}
+
+.race-float-text.stumble {
+    color: #ff3366;
+}
+
+@keyframes raceFloatUp {
+    0% { opacity: 0; transform: translateY(10px) scale(0.6); }
+    20% { opacity: 1; transform: translateY(0) scale(1.15); }
+    70% { opacity: 1; transform: translateY(-20px) scale(1); }
+    100% { opacity: 0; transform: translateY(-45px) scale(0.9); }
+}
+
 /* ==================================
    Responsive
    ================================== */

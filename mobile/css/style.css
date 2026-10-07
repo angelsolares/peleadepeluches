@@ -1340,6 +1340,97 @@ input, textarea {
     background: rgba(255, 102, 0, 0.3);
 }
 
+/* Hurdles: big jump button between the speed and the feet */
+.race-jump-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.jump-btn {
+    width: 240px;
+    height: 84px;
+    border-radius: 42px;
+    border: 4px solid #ffcc00;
+    background: var(--panel);
+    color: #ffcc00;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: transform 0.08s ease, background 0.15s ease;
+}
+
+.jump-btn .jump-icon {
+    font-size: 2rem;
+}
+
+.jump-btn:active,
+.jump-btn.pressed {
+    transform: scale(0.94);
+    background: rgba(255, 204, 0, 0.35);
+    box-shadow: 0 0 40px #ffcc00;
+}
+
+/* In the jump window (1.5-5 m before a hurdle): glow and pulse */
+.jump-btn.ready {
+    background: rgba(255, 204, 0, 0.25);
+    animation: jumpGlow 0.5s ease-in-out infinite;
+}
+
+.jump-btn.jumping {
+    border-color: var(--secondary);
+    color: var(--secondary);
+    background: rgba(0, 255, 136, 0.2);
+}
+
+@keyframes jumpGlow {
+    0%, 100% { box-shadow: 0 0 10px #ffcc00; transform: scale(1); }
+    50% { box-shadow: 0 0 40px 10px rgba(255, 204, 0, 0.9); transform: scale(1.06); }
+}
+
+.race-hurdle-info {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    min-height: 1.3em;
+    color: var(--text-muted);
+}
+
+.race-hurdle-info.near {
+    color: #ffcc00;
+    text-shadow: 0 0 12px rgba(255, 204, 0, 0.7);
+}
+
+/* Tripped on a hurdle: shake, feet dimmed while the taps don't count */
+.race-controls.stumbled {
+    animation: stumbleShake 0.35s ease;
+}
+
+.race-controls.stumbled .race-feet {
+    opacity: 0.4;
+}
+
+.race-controls.stumbled .race-hurdle-info {
+    color: #ff3366;
+    text-shadow: 0 0 12px rgba(255, 51, 102, 0.7);
+}
+
+@keyframes stumbleShake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-10px); }
+    75% { transform: translateX(10px); }
+}
+
 .race-hint {
     font-size: 0.9rem;
     color: var(--text-muted);
@@ -1376,12 +1467,27 @@ input, textarea {
 }
 
 /* Responsive for race mode */
+@media (max-height: 700px) {
+    .foot-btn {
+        height: 160px;
+    }
+
+    .jump-btn {
+        height: 64px;
+        font-size: 1.2rem;
+    }
+}
+
 @media (max-height: 600px) {
     .foot-btn {
         width: 120px;
-        height: 160px;
+        height: 130px;
     }
-    
+
+    .race-hint {
+        display: none;
+    }
+
     .foot-icon {
         font-size: 3rem;
     }

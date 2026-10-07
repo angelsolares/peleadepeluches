@@ -52,16 +52,50 @@ class GameStateManager {
         // One-off events for the room loop to broadcast (shield breaks, double jumps...)
         this.pendingEvents = new Map(); // roomCode -> [{ type, ... }]
 
-        // Stage platforms (synced with client - js/main.js createArena)
-        // Must match floatingPlatformConfigs + main platform
-        this.platforms = [
-            { x: 0, y: 0, width: 20, isMainGround: true },      // Main ground (20 units for 8 players)
-            { x: -6, y: 2.6, width: 4, isMainGround: false },   // Left high (y: 2.5 + 0.1)
-            { x: 6, y: 2.6, width: 4, isMainGround: false },    // Right high
-            { x: 0, y: 4.6, width: 3.5, isMainGround: false },  // Center top
-            { x: -3, y: 5.6, width: 2.5, isMainGround: false }, // Upper left
-            { x: 3, y: 5.6, width: 2.5, isMainGround: false }   // Upper right
-        ];
+        // Stages (synced with client - js/main.js STAGES). Platform y = top surface
+        // (the client draws floating platforms 0.1 lower). The host picks one in the lobby.
+        this.STAGES = {
+            clasico: [
+                { x: 0, y: 0, width: 20, isMainGround: true },      // Main ground (20 units for 8 players)
+                { x: -6, y: 2.6, width: 4, isMainGround: false },   // Left high (y: 2.5 + 0.1)
+                { x: 6, y: 2.6, width: 4, isMainGround: false },    // Right high
+                { x: 0, y: 4.6, width: 3.5, isMainGround: false },  // Center top
+                { x: -3, y: 5.6, width: 2.5, isMainGround: false }, // Upper left
+                { x: 3, y: 5.6, width: 2.5, isMainGround: false }   // Upper right
+            ],
+            torres: [
+                { x: 0, y: 0, width: 14, isMainGround: true },      // Narrow ground: more ring-outs
+                { x: -7, y: 3.3, width: 3, isMainGround: false },   // Left tower (over the edge!)
+                { x: 7, y: 3.3, width: 3, isMainGround: false },    // Right tower
+                { x: 0, y: 2.4, width: 4, isMainGround: false },    // Center low
+                { x: 0, y: 6.1, width: 3, isMainGround: false }     // Center top
+            ]
+        };
+        this.DEFAULT_STAGE = 'clasico';
+        this.platforms = this.STAGES[this.DEFAULT_STAGE]; // Set per room at the start of each tick
+
+        // Items that fall onto the stage
+        this.ITEM_SPAWN_FIRST_MS = [8000, 12000];   // First item after the match starts
+        this.ITEM_SPAWN_NEXT_MS = [12000, 18000];   // After an item leaves the stage
+        this.ITEM_LIFETIME_MS = 10000;              // On the floor before vanishing
+        this.ITEM_PICKUP_RANGE = 0.9;
+        this.ITEM_WEIGHTS = { bate: 4, bomba: 3, pollo: 3 };
+        this.BAT_DURATION_MS = 10000;
+        this.BAT_HITS = 3;
+        this.BAT_DAMAGE_MULT = 1.6;
+        this.BAT_KB_MULT = 1.5;
+        this.BAT_RANGE_BONUS = 0.4;
+        this.BOMB_FUSE_MS = 2500;
+        this.BOMB_RADIUS = 2.5;
+        this.BOMB_DAMAGE = 20;
+        this.BOMB_SELF_DAMAGE = 10;
+        this.BOMB_KNOCKBACK = 9;
+        this.FOOD_HEAL = 30;
+
+        // KO slow motion: the whole room runs at this speed for a moment
+        this.SLOWMO_SCALE = 0.3;
+        this.SLOWMO_MS = 800;
+        this.SLOWMO_ELIMINATION_MS = 1300;
         
         // Stage boundaries (expanded for larger stage)
         this.STAGE_LEFT = -12;
@@ -95,8 +129,12 @@ class GameStateManager {
         const delta = (now - lastTick) / 1000;
         this.lastTickTimes.set(roomCode, now);
 
-        // Cap delta to prevent physics explosions
-        const cappedDelta = Math.min(delta, 0.1);
+        // Cap delta to prevent physics explosions; slow motion after a KO
+        const slowMo = (room.slowMoUntil || 0) > now;
+        const cappedDelta = Math.min(delta, 0.1) * (slowMo ? this.SLOWMO_SCALE : 1);
+
+        // This room's stage
+        this.platforms = this.STAGES[room.stage] || this.STAGES[this.DEFAULT_STAGE];
 
         // Update each player's physics (eliminated players are out of the match)
         for (const player of room.players.values()) {
@@ -106,6 +144,9 @@ class GameStateManager {
 
         // Push overlapping players apart (server-authoritative, so the host doesn't fight it)
         this.resolvePlayerCollisions(room);
+
+        // Items: fall, land, get picked up, explode, expire
+        this.updateItems(room, roomCode, cappedDelta, now);
 
         const playerUpdates = [];
         for (const [playerId, player] of room.players) {
@@ -118,8 +159,170 @@ class GameStateManager {
         return {
             roomCode: roomCode,
             timestamp: now,
+            stage: room.stage || this.DEFAULT_STAGE,
+            slowMo,
+            items: (room.items || []).map(item => ({ id: item.id, kind: item.kind, x: item.x, y: item.y, landed: item.landed })),
             players: playerUpdates
         };
+    }
+
+    /**
+     * Pick the stage of a room (host only; before/between matches)
+     * @returns {string|null} The stage applied, or null if unknown
+     */
+    setStage(roomCode, stageId) {
+        const room = this.lobbyManager.rooms.get(roomCode);
+        if (!room || !this.STAGES[stageId]) return null;
+        room.stage = stageId;
+        return stageId;
+    }
+
+    getStage(roomCode) {
+        const room = this.lobbyManager.rooms.get(roomCode);
+        return (room && room.stage) || this.DEFAULT_STAGE;
+    }
+
+    // =================================
+    // Items
+    // =================================
+
+    randomBetween([min, max]) {
+        return min + Math.random() * (max - min);
+    }
+
+    pickItemKind() {
+        const total = Object.values(this.ITEM_WEIGHTS).reduce((s, w) => s + w, 0);
+        let roll = Math.random() * total;
+        for (const [kind, weight] of Object.entries(this.ITEM_WEIGHTS)) {
+            roll -= weight;
+            if (roll < 0) return kind;
+        }
+        return 'pollo';
+    }
+
+    /**
+     * Spawn, drop, pick up, explode and expire items. One item on the stage at a time;
+     * the next one is scheduled when it leaves (picked up, expired or fell off).
+     */
+    updateItems(room, roomCode, delta, now) {
+        if (!room.items) room.items = [];
+        if (!room.nextItemAt) room.nextItemAt = now + this.randomBetween(this.ITEM_SPAWN_FIRST_MS);
+        if (!room.itemSeq) room.itemSeq = 0;
+
+        const ground = this.platforms.find(p => p.isMainGround) || this.platforms[0];
+
+        // Spawn
+        if (room.items.length === 0 && now >= room.nextItemAt) {
+            const item = {
+                id: `item-${++room.itemSeq}`,
+                kind: this.pickItemKind(),
+                x: Math.round((Math.random() * 2 - 1) * (ground.width / 2 - 1.5) * 10) / 10,
+                y: 9,
+                vy: 0,
+                landed: false,
+                landedAt: 0
+            };
+            room.items.push(item);
+            this.pushEvent(roomCode, { type: 'item-spawn', id: item.id, kind: item.kind, x: item.x });
+            room.nextItemAt = Infinity; // re-armed when the item leaves
+        }
+
+        const leave = (item, type) => {
+            room.items = room.items.filter(i => i !== item);
+            if (type) this.pushEvent(roomCode, { type, id: item.id, kind: item.kind });
+            room.nextItemAt = now + this.randomBetween(this.ITEM_SPAWN_NEXT_MS);
+        };
+
+        for (const item of [...room.items]) {
+            if (!item.landed) {
+                // Falls a bit slower than players
+                const prevY = item.y;
+                item.vy += this.GRAVITY * 0.6 * delta;
+                item.y += item.vy * delta;
+                for (const platform of this.platforms) {
+                    const half = platform.width / 2;
+                    if (item.x < platform.x - half || item.x > platform.x + half) continue;
+                    if (prevY >= platform.y && item.y <= platform.y) {
+                        item.y = platform.y;
+                        item.vy = 0;
+                        item.landed = true;
+                        item.landedAt = now;
+                        break;
+                    }
+                }
+                if (!item.landed && item.y < -10) { leave(item, 'item-lost'); continue; }
+            } else if (now - item.landedAt >= this.ITEM_LIFETIME_MS) {
+                leave(item, 'item-expire');
+                continue;
+            }
+
+            if (!item.landed) continue;
+
+            // Pickup: the first player standing on it (not launched, not frozen)
+            for (const player of room.players.values()) {
+                if (player.stocks <= 0 || player.heldItem) continue;
+                if ((player.hitstunUntil || 0) > now || (player.freezeUntil || 0) > now) continue;
+                if (Math.abs(player.position.x - item.x) > this.ITEM_PICKUP_RANGE) continue;
+                if (Math.abs(player.position.y - item.y) > 1.2) continue;
+
+                if (item.kind === 'pollo') {
+                    const before = player.health;
+                    player.health = Math.max(0, player.health - this.FOOD_HEAL);
+                    this.pushEvent(roomCode, { type: 'item-heal', id: item.id, kind: item.kind, playerId: player.id, healed: before - player.health, newHealth: player.health });
+                } else {
+                    player.heldItem = {
+                        kind: item.kind,
+                        until: now + (item.kind === 'bate' ? this.BAT_DURATION_MS : this.BOMB_FUSE_MS),
+                        hitsLeft: item.kind === 'bate' ? this.BAT_HITS : 0
+                    };
+                    this.pushEvent(roomCode, { type: 'item-pickup', id: item.id, kind: item.kind, playerId: player.id });
+                }
+                leave(item, null);
+                break;
+            }
+        }
+
+        // Held items: bat wears off, bomb explodes
+        for (const player of room.players.values()) {
+            const held = player.heldItem;
+            if (!held || player.stocks <= 0) continue;
+            if (now < held.until) continue;
+            if (held.kind === 'bate') {
+                player.heldItem = null;
+                this.pushEvent(roomCode, { type: 'item-break', kind: 'bate', playerId: player.id });
+            } else if (held.kind === 'bomba') {
+                this.explodeBomb(room, roomCode, player, now);
+            }
+        }
+    }
+
+    /**
+     * The bomb a player is holding goes off: everyone nearby is launched (the holder too)
+     */
+    explodeBomb(room, roomCode, holder, now) {
+        holder.heldItem = null;
+        const x = holder.position.x;
+        const y = holder.position.y;
+        const hits = [];
+        for (const target of room.players.values()) {
+            if (target.stocks <= 0) continue;
+            const dx = target.position.x - x;
+            const dy = target.position.y - y;
+            if (Math.sqrt(dx * dx + dy * dy) > this.BOMB_RADIUS) continue;
+
+            const self = target === holder;
+            const damage = self ? this.BOMB_SELF_DAMAGE : this.BOMB_DAMAGE;
+            target.health += damage;
+            target.isBlocking = false;
+            const dirX = dx === 0 ? (holder.facingRight ? -1 : 1) : Math.sign(dx);
+            const power = this.BOMB_KNOCKBACK * (1 + target.health / 100);
+            target.velocity.x = dirX * power * 0.9;
+            target.velocity.y = power * 0.9;
+            target.hitstunUntil = Math.max(target.hitstunUntil || 0, now + 500 + power * this.HITSTUN_PER_KNOCKBACK * 1000);
+            target.freezeUntil = now + 80;
+            hits.push({ targetId: target.id, damage, newHealth: target.health, self });
+        }
+        this.pushEvent(roomCode, { type: 'item-explode', kind: 'bomba', playerId: holder.id, x, y, hits });
     }
     
     /**
@@ -296,6 +499,9 @@ class GameStateManager {
             shieldStunned: (player.shieldStunUntil || 0) > now,
             airJumps: player.airJumps === undefined ? this.AIR_JUMPS : player.airJumps,
             doubleJumpSeq: player.doubleJumpSeq || 0,
+            heldItem: player.heldItem
+                ? { kind: player.heldItem.kind, msLeft: Math.max(0, player.heldItem.until - now), hitsLeft: player.heldItem.hitsLeft }
+                : null,
             input: { ...player.input }
         };
     }
@@ -569,17 +775,20 @@ class GameStateManager {
 
         const base = attackProps[attackType] || attackProps.punch;
         const move = this.MOVES[variant] || this.MOVES.neutral;
+        const now = Date.now();
+
+        // Swinging a bat: harder, further, and the bat wears out after a few hits
+        const bat = attacker.heldItem && attacker.heldItem.kind === 'bate' && attacker.heldItem.until > now ? attacker.heldItem : null;
         const props = {
-            damage: Math.round(base.damage * move.damage),
-            baseKnockback: base.baseKnockback * move.kb,
+            damage: Math.round(base.damage * move.damage * (bat ? this.BAT_DAMAGE_MULT : 1)),
+            baseKnockback: base.baseKnockback * move.kb * (bat ? this.BAT_KB_MULT : 1),
             knockbackGrowth: base.knockbackGrowth * move.growth,
-            range: base.range * move.range,
+            range: base.range * move.range + (bat ? this.BAT_RANGE_BONUS : 0),
             hitstun: base.hitstun * move.hitstun
         };
 
         // Check for hits
         const hits = [];
-        const now = Date.now();
 
         // Determine attacker facing direction (use facingRight property, not velocity)
         const facingDir = attacker.facingRight ? 1 : -1;
@@ -671,11 +880,21 @@ class GameStateManager {
             }
         }
 
+        // Each landed bat hit wears it out
+        if (bat && hits.length > 0) {
+            bat.hitsLeft -= 1;
+            if (bat.hitsLeft <= 0) {
+                attacker.heldItem = null;
+                this.pushEvent(roomCode, { type: 'item-break', kind: 'bate', playerId: attackerId });
+            }
+        }
+
         return {
             attackerId: attackerId,
             attackType: attackType,
             variant,
-            moveName: move.name,
+            moveName: bat ? 'BATAZO' : move.name,
+            bat: !!bat,
             attackerPosition: { ...attacker.position },
             hits: hits
         };
@@ -712,6 +931,7 @@ class GameStateManager {
             }
             
             if (isKO) {
+                const koPosition = { ...player.position };
                 player.stocks--;
                 player.health = 0;
                 player.velocity = { x: 0, y: 0, z: 0 };
@@ -722,17 +942,25 @@ class GameStateManager {
                 player.shieldRefillPending = false;
                 player.isBlocking = false;
                 player.airJumps = this.AIR_JUMPS;
+                player.heldItem = null;
 
                 // Respawn only if the player still has stocks; eliminated players stay out
                 if (player.stocks > 0) {
                     player.position = { x: 0, y: 5, z: 0 };
                     player.previousY = player.position.y;
                 }
-                
+
+                // Slow motion for everyone (longer when it was the last stock)
+                const now = Date.now();
+                const eliminated = player.stocks <= 0;
+                room.slowMoUntil = Math.max(room.slowMoUntil || 0, now + (eliminated ? this.SLOWMO_ELIMINATION_MS : this.SLOWMO_MS));
+
                 kos.push({
                     playerId: playerId,
                     stocksRemaining: player.stocks,
-                    eliminated: player.stocks <= 0
+                    eliminated,
+                    position: koPosition,
+                    slowMoMs: eliminated ? this.SLOWMO_ELIMINATION_MS : this.SLOWMO_MS
                 });
             }
         }
@@ -788,7 +1016,11 @@ class GameStateManager {
         }
         
         room.state = 'lobby';
-        
+        room.items = [];
+        room.nextItemAt = 0;
+        room.slowMoUntil = 0;
+        this.pendingEvents.delete(roomCode);
+
         const playerArray = Array.from(room.players.values());
         playerArray.forEach((player, index) => {
             player.position = {
@@ -807,6 +1039,7 @@ class GameStateManager {
             player.isBlocking = false;
             player.airJumps = this.AIR_JUMPS;
             player.jumpHeld = false;
+            player.heldItem = null;
             player.health = 0;
             player.stocks = 3;
             player.ready = false;

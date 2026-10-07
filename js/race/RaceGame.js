@@ -34,7 +34,14 @@ const RACE_CONFIG = {
     CAMERA_LERP: 0.05,
     
     // Network smoothing: how fast models chase the server position (higher = snappier)
-    POSITION_SMOOTHING: 15
+    POSITION_SMOOTHING: 15,
+
+    // Hurdles (vallas): the server decides who clears or trips; this is only the look
+    HURDLE_HEIGHT: 0.8,     // World units (characters are ~2 tall)
+    JUMP_DURATION: 600,     // ms, same as the server's jump
+    JUMP_HEIGHT: 1.2,       // Peak of the hop arc
+    STUMBLE_DURATION: 700,  // ms, same as the server's stumble
+    STUMBLE_TILT: 0.6       // Radians the runner pitches forward when tripping
 };
 
 // Character models (same as other modes)
@@ -104,7 +111,13 @@ class RacePlayerEntity {
         this.tapCount = 0;        // Total valid taps
         this.finished = false;    // Crossed finish line
         this.finishTime = 0;      // Time when finished
-        
+
+        // Hurdles (mirrors the server flags; the hop/tilt are timed locally)
+        this.jumping = false;     // Server flag from the last race-state
+        this.stumbled = false;    // Server flag from the last race-state
+        this.jumpStartedAt = 0;   // performance.now() of the current hop (0 = none)
+        this.stumbleStartedAt = 0; // performance.now() of the current stumble (0 = none)
+
         // 3D position (latest server position; the model is smoothed toward it)
         this.worldPosition = new THREE.Vector3();
         this.targetPosition = new THREE.Vector3();
@@ -205,11 +218,42 @@ class RacePlayerEntity {
         this.currentAnimation = name;
     }
 
+    /**
+     * Hop over a hurdle: a small vertical arc over JUMP_DURATION (there is no jump clip)
+     */
+    startJump() {
+        this.jumpStartedAt = performance.now();
+    }
+
+    /**
+     * Trip on a hurdle: pitch forward and back over STUMBLE_DURATION. Idempotent while running,
+     * so the race-state flag and the 'race-stumble' event don't stack.
+     * @returns {boolean} Whether a new stumble started
+     */
+    startStumble() {
+        const now = performance.now();
+        if (this.stumbleStartedAt && now - this.stumbleStartedAt < RACE_CONFIG.STUMBLE_DURATION) return false;
+        this.stumbleStartedAt = now;
+        this.jumpStartedAt = 0;
+        return true;
+    }
+
+    /**
+     * Back on the ground, upright (rematch / next round)
+     */
+    resetHurdleState() {
+        this.jumping = false;
+        this.stumbled = false;
+        this.jumpStartedAt = 0;
+        this.stumbleStartedAt = 0;
+        if (this.model) this.model.rotation.x = 0;
+    }
+
     update(delta) {
         if (this.mixer) {
             this.mixer.update(delta);
         }
-        
+
         // Smoothly move the model toward the last server position (updates arrive at 30 Hz)
         if (this.model) {
             const t = 1 - Math.exp(-RACE_CONFIG.POSITION_SMOOTHING * delta);
@@ -217,8 +261,26 @@ class RacePlayerEntity {
             if (this.model.position.distanceToSquared(this.targetPosition) < 1e-6) {
                 this.model.position.copy(this.targetPosition);
             }
+
+            // Hurdles: hop arc while jumping, forward tilt while stumbling (both timed locally)
+            const nowMs = performance.now();
+            let hop = 0;
+            if (this.jumpStartedAt) {
+                const k = (nowMs - this.jumpStartedAt) / RACE_CONFIG.JUMP_DURATION;
+                if (k >= 1) this.jumpStartedAt = 0;
+                else hop = Math.sin(Math.PI * k) * RACE_CONFIG.JUMP_HEIGHT;
+            }
+            this.model.position.y = this.targetPosition.y + hop;
+
+            let tilt = 0;
+            if (this.stumbleStartedAt) {
+                const k = (nowMs - this.stumbleStartedAt) / RACE_CONFIG.STUMBLE_DURATION;
+                if (k >= 1) this.stumbleStartedAt = 0;
+                else tilt = Math.sin(Math.PI * k) * RACE_CONFIG.STUMBLE_TILT;
+            }
+            this.model.rotation.x = tilt;
         }
-        
+
         // Determine target animation based on speed and mode
         let targetAnimation;
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
@@ -291,10 +353,14 @@ class RaceGame {
         
         // Rematch request in flight
         this.rematchPending = false;
-        
+
+        // Hurdles of the current race (one bar across every lane per hurdle)
+        this.hurdleGroup = null;
+        this.hurdleSignature = '';
+
         this.init();
     }
-    
+
     async init() {
         // Apply baby theme if needed
         if (this.isBabyShower) {
@@ -574,6 +640,92 @@ class RaceGame {
         }
     }
     
+    /**
+     * Build the hurdles the server placed (same bar across every lane): white with red stripes.
+     * Called from 'race-start' and from every 'race-state' (late joins); rebuilt only when they change.
+     * @param {Array<{ id: number, position: number }>} hurdles
+     */
+    setHurdles(hurdles) {
+        if (!Array.isArray(hurdles)) return;
+        const signature = JSON.stringify(hurdles.map(h => [h.id, h.position]));
+        if (signature === this.hurdleSignature) return;
+        this.clearHurdles();
+        this.hurdleSignature = signature;
+
+        const height = RACE_CONFIG.HURDLE_HEIGHT;
+        const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+        const red = new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: 0xff2244, emissiveIntensity: 0.25, roughness: 0.5 });
+        const legGeo = new THREE.BoxGeometry(0.12, height, 0.12);
+        const footGeo = new THREE.BoxGeometry(0.5, 0.06, 0.7);
+        const stripeGeo = new THREE.BoxGeometry(1, 0.18, 0.18);
+        const stripes = Math.round(RACE_CONFIG.TRACK_WIDTH);
+
+        this.hurdleGroup = new THREE.Group();
+        hurdles.forEach((hurdle) => {
+            const bar = new THREE.Group();
+            bar.position.set(0, 0, hurdle.position);
+
+            // One leg (with a foot) on every lane line
+            for (let i = 0; i <= RACE_CONFIG.MAX_PLAYERS; i++) {
+                const x = (i - RACE_CONFIG.MAX_PLAYERS / 2) * RACE_CONFIG.LANE_WIDTH;
+                const leg = new THREE.Mesh(legGeo, white);
+                leg.position.set(x, height / 2, 0);
+                leg.castShadow = true;
+                bar.add(leg);
+                const foot = new THREE.Mesh(footGeo, white);
+                foot.position.set(x, 0.03, 0);
+                bar.add(foot);
+            }
+
+            // Top bar in 1 m white/red stripes
+            for (let s = 0; s < stripes; s++) {
+                const stripe = new THREE.Mesh(stripeGeo, s % 2 === 0 ? white : red);
+                stripe.position.set(s - stripes / 2 + 0.5, height, 0);
+                stripe.castShadow = true;
+                bar.add(stripe);
+            }
+
+            this.hurdleGroup.add(bar);
+        });
+        this.scene.add(this.hurdleGroup);
+        console.log('[Race] Hurdles at', hurdles.map(h => h.position).join(', '));
+    }
+
+    clearHurdles() {
+        if (this.hurdleGroup) {
+            this.scene.remove(this.hurdleGroup);
+            this.hurdleGroup = null;
+        }
+        this.hurdleSignature = '';
+    }
+
+    /**
+     * Short floating text above a runner ("¡TROPEZÓN!")
+     */
+    showFloatingText(player, text, className = '') {
+        if (!player.model) return;
+        const div = document.createElement('div');
+        div.className = `race-float-text ${className}`.trim();
+        div.textContent = text;
+        const label = new CSS2DObject(div);
+        label.position.set(0, 330, 0); // Above the name label (model scale 0.01)
+        player.model.add(label);
+        setTimeout(() => {
+            label.removeFromParent();
+            div.remove();
+        }, 1200);
+    }
+
+    /**
+     * A runner tripped on a hurdle ('race-stumble' or the race-state flag): tilt, text and sound
+     */
+    handleStumble(playerId) {
+        const player = this.players.get(playerId);
+        if (!player || !player.startStumble()) return;
+        this.showFloatingText(player, '¡TROPEZÓN!', 'stumble');
+        if (this.sfxManager) this.sfxManager.playHit(5);
+    }
+
     animateDecoration(mesh) {
         const speed = 0.5 + Math.random() * 0.5;
         const update = () => {
@@ -722,6 +874,7 @@ class RaceGame {
                 // Session could not be recovered: the old room is gone, start clean in a new one
                 console.warn(`[Race] Previous room ${this.roomCode} lost, creating a new room`);
                 this.clearAllPlayers();
+                this.clearHurdles();
                 document.getElementById('race-winner-overlay')?.remove();
                 this.gameState = 'lobby';
             }
@@ -773,7 +926,8 @@ class RaceGame {
             // Clear existing players and add all from server
             this.clearAllPlayers();
             this.finishedPlayers.clear();
-            
+            this.clearHurdles(); // the new ones arrive with 'race-start'
+
             // Add all players with their correct characters
             if (data.players) {
                 data.players.forEach((playerData, index) => {
@@ -806,10 +960,14 @@ class RaceGame {
             this.showCountdown(data.count);
         });
         
-        this.socket.on('race-start', () => {
-            this.startRace();
+        this.socket.on('race-start', (data) => {
+            this.startRace(data);
         });
-        
+
+        this.socket.on('race-stumble', (data) => {
+            if (data?.playerId) this.handleStumble(data.playerId);
+        });
+
         this.socket.on('race-finish', (data) => {
             this.handleRaceFinish(data);
         });
@@ -1248,11 +1406,12 @@ class RaceGame {
         if (roomOverlay) roomOverlay.classList.add('hidden');
     }
     
-    startRace() {
+    startRace(data) {
         console.log('[Race] Race started!');
         this.gameState = 'racing';
         this.raceStartTime = Date.now();
-        
+        this.setHurdles(data?.hurdles);
+
         document.getElementById('animation-name').textContent = '¡CARRERA EN CURSO!';
         
         // Start battle BGM
@@ -1263,15 +1422,24 @@ class RaceGame {
     
     handleRaceState(state) {
         if (!state || !state.players) return;
-        
+
+        // Late hosts (reconnection) get the hurdles from the state too
+        if (state.hurdles) this.setHurdles(state.hurdles);
+
         state.players.forEach(playerState => {
             const player = this.players.get(playerState.id);
             if (player) {
                 player.position = playerState.position;
                 player.speed = playerState.speed;
                 player.finished = playerState.finished;
-                
-                // Update target 3D position (the model is smoothed toward it every frame)
+
+                // Hurdles: hop on the jumping edge, trip on the stumbled edge (self-heals a missed event)
+                if (playerState.jumping && !player.jumping) player.startJump();
+                if (playerState.stumbled && !player.stumbled) this.handleStumble(player.id);
+                player.jumping = !!playerState.jumping;
+                player.stumbled = !!playerState.stumbled;
+
+// Update target 3D position (the model is smoothed toward it every frame)
                 const laneX = getLaneX(player.lane);
                 player.targetPosition.set(laneX, 0, player.position);
                 player.worldPosition.set(laneX, 0, player.position);
@@ -1369,8 +1537,9 @@ class RaceGame {
         this.raceStartTime = null;
         this.finishedPlayers.clear();
 
-        // Reset track elements
+        // Reset track elements (the next race brings its own hurdles)
         this.currentTrackPosition = 0;
+        this.clearHurdles();
 
         // Reset all players
         let laneIndex = 0;
@@ -1382,6 +1551,7 @@ class RaceGame {
             player.progress = 0;
             player.speed = 0;
             player.lane = laneIndex;
+            player.resetHurdleState();
 
             // Reset position to start (snap, no smoothing back from the finish line)
             const laneX = getLaneX(laneIndex);

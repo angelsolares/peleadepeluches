@@ -26,6 +26,8 @@ class TagPlayerController {
         // State flags
         this.isIt = false;
         this.hasGrace = false;
+        this.boosted = false;   // 'rayo' power-up active
+        this.shielded = false;  // 'escudo' power-up active
         this.penaltyTime = 0;
         
         // Input state (4 directions)
@@ -100,6 +102,8 @@ class TagPlayerController {
         if (typeof state.facingAngle === 'number') this.facingAngle = state.facingAngle;
         if (typeof state.isIt === 'boolean') this.isIt = state.isIt;
         if (typeof state.hasGrace === 'boolean') this.hasGrace = state.hasGrace;
+        if (typeof state.boosted === 'boolean') this.boosted = state.boosted;
+        if (typeof state.shielded === 'boolean') this.shielded = state.shielded;
         if (typeof state.penaltyTime === 'number') this.penaltyTime = state.penaltyTime;
         if (state.input) this.input = { ...this.input, ...state.input };
     }
@@ -110,7 +114,7 @@ class TagPlayerController {
     getMovementState() {
         const speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
         if (speed > 1) {
-            return this.isIt ? 'run' : 'walk';
+            return (this.isIt || this.boosted) ? 'run' : 'walk';
         }
         return 'idle';
     }

@@ -23,7 +23,16 @@ const FLAPPY_CONFIG = {
     maxPlayers: 4,
     tickRate: 60,
     pipeStartX: 40,         // First pipe very far away - time to get used to controls
-    initialVelocity: 4      // Strong initial upward boost
+    initialVelocity: 4,     // Strong initial upward boost
+    maxTickDelta: 0.05,     // Clamp for the real per-tick delta (a stalled timer never teleports anyone)
+    gapJitter: 1,           // Each pipe's gap is currentGap +/- this much (never below minPipeGap)
+    movingPipesFrom: 60,    // Distance (m) after which every third spawned pipe oscillates vertically
+    movingPipesDenseFrom: 150, // Distance (m) after which every other spawned pipe oscillates
+    movingAmplitudeMin: 1.5,
+    movingAmplitudeMax: 2.5,
+    movingPeriodMin: 2.5,   // Seconds per full oscillation
+    movingPeriodMax: 3.5,
+    movingMargin: 1         // Moving gaps always stay this far inside ground/ceiling
 };
 
 class FlappyStateManager {
@@ -70,6 +79,10 @@ class FlappyStateManager {
             gameOver: false,
             lastPipeX: FLAPPY_CONFIG.pipeStartX,
             startTime: null,
+            lastTickAt: null,   // Wall clock of the previous tick (real delta per tick)
+            elapsed: 0,         // Game seconds actually simulated (drives the moving pipes)
+            movingEvery: 0,     // Current moving-pipe cadence (0 none, 3 every third, 2 every other)
+            movingCount: 0,     // Pipes spawned since that cadence began
             speedMultiplier: pendingMultiplier // Apply pending or default to 1
         };
         
@@ -132,7 +145,9 @@ class FlappyStateManager {
         
         game.gameStarted = true;
         game.startTime = Date.now();
-        
+        game.lastTickAt = game.startTime;
+        game.elapsed = 0;
+
         // Spawn initial pipes
         this.spawnPipe(game);
         this.spawnPipe(game);
@@ -149,14 +164,20 @@ class FlappyStateManager {
         if (!game) return;
         
         const tickInterval = 1000 / FLAPPY_CONFIG.tickRate;
-        const deltaTime = tickInterval / 1000;
-        
+
+        // setInterval(16.7 ms) fires closer to 36 Hz on Windows, so each tick integrates
+        // the time that really went by (clamped so a stalled timer never teleports anyone)
         game.loopInterval = setInterval(() => {
             if (!game.gameStarted || game.gameOver) {
                 clearInterval(game.loopInterval);
                 return;
             }
-            
+
+            const now = Date.now();
+            const last = game.lastTickAt ?? now;
+            const deltaTime = Math.min(Math.max((now - last) / 1000, 0), FLAPPY_CONFIG.maxTickDelta);
+            game.lastTickAt = now;
+
             this.processTick(roomCode, deltaTime, io);
         }, tickInterval);
     }
@@ -185,7 +206,13 @@ class FlappyStateManager {
         game.currentSpeed = currentSpeed;
         game.currentGap = currentGap;
         game.currentSpacing = currentSpacing;
-        
+
+        // Moving pipes follow the simulated game time, so collisions use their real position
+        game.elapsed = (game.elapsed || 0) + deltaTime;
+        for (const pipe of game.pipes) {
+            if (pipe.moving) this.updateMovingPipe(pipe, game.elapsed);
+        }
+
         let aliveCount = 0;
         
         // Update each player
@@ -244,7 +271,8 @@ class FlappyStateManager {
         io.to(roomCode).emit('flappy-state', {
             players: game.players,
             pipes: game.pipes,
-            distance: game.distance
+            distance: game.distance,
+            serverTime: Date.now()
         });
         
         // Check for game over
@@ -264,22 +292,80 @@ class FlappyStateManager {
         // Use dynamic gap based on current difficulty
         const currentGap = game.currentGap || FLAPPY_CONFIG.pipeGap;
         const currentSpacing = game.currentSpacing || FLAPPY_CONFIG.pipeSpacing;
-        
-        // Calculate gap position (random within safe bounds)
-        const minGapY = FLAPPY_CONFIG.groundY + currentGap / 2 + 2;
-        const maxGapY = FLAPPY_CONFIG.ceilingY - currentGap / 2 - 2;
-        const gapY = minGapY + Math.random() * (maxGapY - minGapY);
-        
-        const pipeX = game.pipes.length === 0 
-            ? FLAPPY_CONFIG.pipeStartX 
+
+        // Every pipe gets its own gap: currentGap +/- gapJitter, never tighter than minPipeGap
+        const jitter = (Math.random() * 2 - 1) * FLAPPY_CONFIG.gapJitter;
+        const gapSize = Math.max(currentGap + jitter, FLAPPY_CONFIG.minPipeGap);
+
+        const pipeX = game.pipes.length === 0
+            ? FLAPPY_CONFIG.pipeStartX
             : game.pipes[game.pipes.length - 1].x + currentSpacing;
-        
-        game.pipes.push({
-            id: game.nextPipeId++,
+
+        const id = game.nextPipeId++;
+        const pipe = {
+            id,
             x: pipeX,
-            gapY: gapY,
-            gapSize: currentGap  // Store the gap size for this specific pipe
-        });
+            gapY: 0,
+            gapSize,            // Store the gap size for this specific pipe
+            moving: false
+        };
+
+        // Far enough into the run, every third pipe (later every other) oscillates vertically.
+        // The first pipe spawned after each threshold moves, so the change shows up right away.
+        const every = game.distance >= FLAPPY_CONFIG.movingPipesDenseFrom ? 2
+            : game.distance >= FLAPPY_CONFIG.movingPipesFrom ? 3
+            : 0;
+        if (every !== game.movingEvery) {
+            game.movingEvery = every;
+            game.movingCount = 0;
+        }
+        const moving = every > 0 && game.movingCount++ % every === 0;
+        
+        if (moving) {
+            const { movingAmplitudeMin: aMin, movingAmplitudeMax: aMax, movingPeriodMin: pMin, movingPeriodMax: pMax } = FLAPPY_CONFIG;
+            const amplitude = aMin + Math.random() * (aMax - aMin);
+            // The whole swing stays inside the safe band (ground/ceiling + movingMargin)
+            const { min, max } = this.movingGapBounds(gapSize);
+            const baseMin = min + amplitude;
+            const baseMax = max - amplitude;
+            const baseGapY = baseMax > baseMin
+                ? baseMin + Math.random() * (baseMax - baseMin)
+                : (min + max) / 2;
+
+            pipe.moving = true;
+            pipe.baseGapY = baseGapY;
+            pipe.amplitude = amplitude;
+            pipe.period = pMin + Math.random() * (pMax - pMin);
+            pipe.phase = Math.random() * Math.PI * 2;
+            this.updateMovingPipe(pipe, game.elapsed || 0);
+        } else {
+            // Static gap position (random within safe bounds)
+            const minGapY = FLAPPY_CONFIG.groundY + gapSize / 2 + 2;
+            const maxGapY = FLAPPY_CONFIG.ceilingY - gapSize / 2 - 2;
+            pipe.gapY = minGapY + Math.random() * (maxGapY - minGapY);
+        }
+
+        game.pipes.push(pipe);
+    }
+
+    /**
+     * Band a moving gap centre may occupy (gap edges stay movingMargin inside ground/ceiling)
+     */
+    movingGapBounds(gapSize) {
+        return {
+            min: FLAPPY_CONFIG.groundY + gapSize / 2 + FLAPPY_CONFIG.movingMargin,
+            max: FLAPPY_CONFIG.ceilingY - gapSize / 2 - FLAPPY_CONFIG.movingMargin
+        };
+    }
+
+    /**
+     * Place a moving pipe's gap for the given game time (sine around baseGapY, clamped to the safe band)
+     */
+    updateMovingPipe(pipe, elapsed) {
+        const angle = pipe.phase + (Math.PI * 2 * elapsed) / pipe.period;
+        const { min, max } = this.movingGapBounds(pipe.gapSize || FLAPPY_CONFIG.pipeGap);
+        const gapY = pipe.baseGapY + pipe.amplitude * Math.sin(angle);
+        pipe.gapY = Math.min(Math.max(gapY, min), max);
     }
     
     checkPipeCollision(player, pipe, game) {

@@ -6,11 +6,11 @@ Una fiesta de minijuegos 3D hecha con Three.js: la pantalla grande (PC o TV) es 
 
 | Modo | Página | De qué va |
 |------|--------|-----------|
-| **Pelea (Smash)** | `smash.html` | Pelea de plataformas estilo Smash Bros: % de daño, knockback, 3 vidas. Doble salto, ataques direccionales, escudo que se desgasta y hitstop al golpear. |
+| **Pelea (Smash)** | `smash.html` | Pelea de plataformas estilo Smash Bros: % de daño, knockback, 3 vidas. Doble salto, ataques direccionales, escudo que se desgasta y hitstop al golpear. Caen **ítems** (🏏 bate: 3 golpes al 160 %, 💣 bomba: explota 2.5 s después de tomarla, 🍗 pollo: −30 % daño), dos **escenarios** (Clásico y Torres, se eligen en el lobby) y **cámara lenta con zoom** en cada KO. |
 | **Arena (Lucha libre)** | `arena.html` | Ring de lucha libre estilo WCW vs NWO: amarres, llaves, cuerdas, látigo irlandés, lariats, barra de ánimo, remates por personaje, cuenta de 3 y battle royal. |
-| **Carrera** | `race.html` | Sprint de 100 m: alterna los pies en el celular para correr más rápido. |
-| **Flappy** | `flappy.html` | Vuela entre obstáculos tocando la pantalla. Último en pie gana. |
-| **La Trae** | `tag.html` | El clásico "la traes": quien la trae al final pierde. |
+| **Carrera** | `race.html` | Sprint de 100 m: alterna los pies en el celular para correr más rápido y **salta** las tres vallas justo antes de llegar; si las pisas, tropiezas. |
+| **Flappy** | `flappy.html` | Vuela entre tubos tocando la pantalla. Desde los 60 m aparecen **tubos móviles** que suben y bajan, y los huecos varían. Último en pie gana. |
+| **La Trae** | `tag.html` | El clásico "la traes": quien la trae al final pierde. Cada ~12 s aparece un **power-up**: ⚡ rayo (velocidad ×1.5) o 🛡 escudo (nadie te puede tocar) durante 4 s. |
 | **Guerra de Cuerda** | `tug.html` | Dos equipos jalan la cuerda **al ritmo del beat**. Jalar en sincronía con el equipo multiplica la fuerza; machacar el botón no sirve. |
 | **Pinta el Piso** | `paint.html` | Pinta más territorio que los demás antes de que acabe el tiempo. |
 | **Infla el Globo** | `balloon.html` | Mantén presionado para soplar, suelta para respirar. El globo truena entre 85 y 95 (no se ve la barra): lee las señales y **amarra** a tiempo para asegurar tu tamaño. |
@@ -115,12 +115,15 @@ npm run test:server  # solo las de servidor (levanta server/index.js en el puert
 
 ## 🧩 Cómo funciona
 
-- **Servidor autoritativo.** Cada modo tiene su `server/*State.js` con la física y las reglas; el host solo dibuja y los teléfonos solo mandan input. Los ticks usan el delta real (en Windows `setInterval` a 16 ms corre a ~36 Hz).
+- **Servidor autoritativo.** Cada modo tiene su `server/*State.js` con la física y las reglas; el host solo dibuja y los teléfonos solo mandan input. Todos los modos con física usan el delta real del tick (en Windows `setInterval` a 16 ms corre a ~36 Hz, así que un paso fijo de 1/60 iría ~40 % lento).
 - **Animaciones ligeras.** Los FBX de animación traen el modelo completo; `tools/convert-anims.mjs` los convierte a clips JSON que `AssetLoader` carga en paralelo. Los personajes se descargan hasta que alguien los elige. Para regenerar los clips:
   ```bash
   cd tools && npm install && node convert-anims.mjs
   ```
-- **Lucha libre.** Las animaciones de Mixamo se retargetean al esqueleto de Meshy en tiempo real (`js/animation/MixamoRetarget.js`).
+- **Animaciones de Mixamo.** Se retargetean al esqueleto de Meshy en tiempo real (`js/animation/MixamoRetarget.js`); Arena y Smash las usan. Para bajar más clips, `tools/mixamo-download.py` exporta por la API de Mixamo con la sesión del MCP (la descarga normal crashea Chrome en ese perfil):
+  ```bash
+  python tools/mixamo-download.py assets/mixamo "118110903=jump_up=jumping up"
+  ```
 - **Pinta el Piso** manda solo las casillas que cambian más un keyframe por segundo (~46 KB/s por cliente).
 
 ## 🛠️ Tecnologías

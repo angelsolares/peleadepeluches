@@ -69,6 +69,16 @@ const BASE_EMISSIVE_INTENSITY = 0.2;
 const TAG_FLASH_DURATION = 0.6; // seconds
 const TAG_BURST_DURATION = 0.7; // seconds
 
+// Power-ups ('tag-state'.powerUp / 'tag-powerup' events): look, label and shout per kind
+const POWERUP_STYLE = {
+    rayo:   { color: 0xffcc00, css: '#ffcc00', emoji: '⚡', shout: '¡RAYO!' },
+    escudo: { color: 0x00e5ff, css: '#00e5ff', emoji: '🛡', shout: '¡ESCUDO!' }
+};
+const BOOST_EMISSIVE_INTENSITY = 0.7;
+const BOOST_TRAIL_INTERVAL = 0.07;  // seconds between trail puffs while boosted and moving
+const BOOST_TRAIL_DURATION = 0.45;  // seconds each puff lasts
+const FLOAT_TEXT_DURATION = 1100;   // ms the "¡RAYO!" / "¡ESCUDO!" shout stays over the player
+
 class TagPlayerEntity {
     constructor(id, number, color, baseModel, baseAnimations) {
         this.id = id;
@@ -110,6 +120,22 @@ class TagPlayerEntity {
         this.shield = this.createShield();
         this.shield.visible = false;
         this.root.add(this.shield);
+
+        // Power-up effects: 'escudo' bubble and 'rayo' ring + trail (same approach as the aura)
+        this.bubble = this.createBubble();
+        this.bubble.visible = false;
+        this.root.add(this.bubble);
+
+        this.boostRing = this.createBoostRing();
+        this.boostRing.visible = false;
+        this.root.add(this.boostRing);
+
+        this.boosted = false;
+        this.shielded = false;
+        this.trail = [];          // { mesh, t } puffs left behind while boosted (added to the scene)
+        this.trailTimer = 0;
+        this.floatLabels = [];    // CSS2D shouts over the player ("¡RAYO!")
+        this.baseEmissive = new THREE.Color(color);
 
         // Tag feedback effects
         this.bursts = [];
@@ -164,6 +190,91 @@ class TagPlayerEntity {
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.y = 1; // Centered on character (world units)
         return mesh;
+    }
+
+    /**
+     * 'escudo' power-up: translucent bubble around the character
+     */
+    createBubble() {
+        const geometry = new THREE.SphereGeometry(1.35, 24, 16);
+        const material = new THREE.MeshBasicMaterial({
+            color: POWERUP_STYLE.escudo.color,
+            transparent: true,
+            opacity: 0.28,
+            depthWrite: false
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.y = 1;
+        return mesh;
+    }
+
+    /**
+     * 'rayo' power-up: yellow ring on the floor (the trail puffs are spawned in tick)
+     */
+    createBoostRing() {
+        const geometry = new THREE.TorusGeometry(0.9, 0.08, 12, 48);
+        const material = new THREE.MeshBasicMaterial({
+            color: POWERUP_STYLE.rayo.color,
+            transparent: true,
+            opacity: 0.9
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.y = 0.12;
+        return mesh;
+    }
+
+    /**
+     * Short shout over the player ("¡RAYO!" / "¡ESCUDO!"), removed after FLOAT_TEXT_DURATION
+     */
+    showFloatText(text, cssColor) {
+        const div = document.createElement('div');
+        div.className = 'tag-float-text';
+        div.textContent = text;
+        div.style.color = cssColor;
+        const label = new CSS2DObject(div);
+        label.position.set(0, 400, 0);
+        this.model.add(label);
+        this.floatLabels.push(label);
+        setTimeout(() => this.removeFloatLabel(label), FLOAT_TEXT_DURATION);
+    }
+
+    removeFloatLabel(label) {
+        const index = this.floatLabels.indexOf(label);
+        if (index !== -1) this.floatLabels.splice(index, 1);
+        this.model.remove(label);
+        label.element?.parentNode?.removeChild(label.element);
+    }
+
+    /**
+     * Character glow: yellow while boosted, the player color otherwise
+     */
+    applyEmissive(color, intensity) {
+        this.tintMaterials.forEach(mat => {
+            if (!mat.emissive) return;
+            mat.emissive.copy(color);
+            mat.emissiveIntensity = intensity;
+        });
+    }
+
+    /**
+     * Fading puff left on the floor behind a boosted runner
+     */
+    spawnTrailPuff() {
+        const scene = this.root.parent;
+        if (!scene) return;
+        const geometry = new THREE.CircleGeometry(0.32, 16);
+        const material = new THREE.MeshBasicMaterial({
+            color: POWERUP_STYLE.rayo.color,
+            transparent: true,
+            opacity: 0.7,
+            depthWrite: false
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(this.root.position.x, 0.06, this.root.position.z);
+        scene.add(mesh);
+        this.trail.push({ mesh, t: 0 });
     }
 
     applyColorTint(color) {
@@ -238,11 +349,39 @@ class TagPlayerEntity {
         if (this.flashTime > 0) {
             this.flashTime = Math.max(0, this.flashTime - delta);
             const k = this.flashTime / TAG_FLASH_DURATION;
-            const intensity = BASE_EMISSIVE_INTENSITY + k * 2.0;
+            const rest = this.boosted ? BOOST_EMISSIVE_INTENSITY : BASE_EMISSIVE_INTENSITY;
+            const intensity = rest + k * 2.0;
             this.tintMaterials.forEach(mat => {
                 if (mat.emissive) mat.emissiveIntensity = intensity;
             });
         }
+
+        // Boost trail: fading puffs behind a moving runner
+        if (this.boosted) {
+            this.trailTimer += delta;
+            const speed = Math.hypot(this.controller.velocity.x, this.controller.velocity.z);
+            if (speed > 1 && this.trailTimer >= BOOST_TRAIL_INTERVAL) {
+                this.trailTimer = 0;
+                this.spawnTrailPuff();
+            }
+        }
+        for (let i = this.trail.length - 1; i >= 0; i--) {
+            const puff = this.trail[i];
+            puff.t += delta;
+            const k = Math.min(1, puff.t / BOOST_TRAIL_DURATION);
+            const s = 1 - k * 0.6;
+            puff.mesh.scale.set(s, s, s);
+            puff.mesh.material.opacity = 0.7 * (1 - k);
+            if (k >= 1) this.removeTrailPuff(i);
+        }
+    }
+
+    removeTrailPuff(index) {
+        const puff = this.trail[index];
+        puff.mesh.parent?.remove(puff.mesh);
+        puff.mesh.geometry.dispose();
+        puff.mesh.material.dispose();
+        this.trail.splice(index, 1);
     }
 
     /**
@@ -259,17 +398,19 @@ class TagPlayerEntity {
 
         // CSS2D label elements are not removed from the DOM automatically
         // when their parent group is removed from the scene
-        [this.nameLabel, this.itLabel].forEach(label => {
+        [this.nameLabel, this.itLabel, ...this.floatLabels].forEach(label => {
             label?.element?.parentNode?.removeChild(label.element);
         });
+        this.floatLabels = [];
 
         this.bursts.forEach(b => {
             b.mesh.geometry.dispose();
             b.mesh.material.dispose();
         });
         this.bursts = [];
+        while (this.trail.length) this.removeTrailPuff(this.trail.length - 1);
 
-        [this.aura, this.shield].forEach(mesh => {
+        [this.aura, this.shield, this.bubble, this.boostRing].forEach(mesh => {
             mesh?.geometry?.dispose();
             mesh?.material?.dispose();
         });
@@ -305,6 +446,30 @@ class TagPlayerEntity {
                 mat.opacity = hasGrace ? 0.6 : 1.0;
             });
         }
+
+        // Power-up effects (bubble / yellow glow + ring) - only when they change
+        const shielded = !!state.shielded;
+        if (shielded !== this.shielded) {
+            this.shielded = shielded;
+            this.bubble.visible = shielded;
+        }
+        const boosted = !!state.boosted;
+        if (boosted !== this.boosted) {
+            this.boosted = boosted;
+            this.boostRing.visible = boosted;
+            this.trailTimer = 0;
+            if (this.flashTime <= 0) {
+                this.applyEmissive(
+                    boosted ? new THREE.Color(POWERUP_STYLE.rayo.color) : this.baseEmissive,
+                    boosted ? BOOST_EMISSIVE_INTENSITY : BASE_EMISSIVE_INTENSITY
+                );
+            } else {
+                // Keep the flash running; only swap the glow color
+                this.tintMaterials.forEach(mat => {
+                    if (mat.emissive) mat.emissive.copy(boosted ? new THREE.Color(POWERUP_STYLE.rayo.color) : this.baseEmissive);
+                });
+            }
+        }
     }
 
     /**
@@ -320,6 +485,17 @@ class TagPlayerEntity {
         if (this.shield.visible) {
             this.shield.rotation.y += delta * 3;
             this.shield.rotation.x += delta * 1.5;
+        }
+
+        if (this.bubble.visible) {
+            const pulse = 1 + Math.sin(Date.now() * 0.006) * 0.06;
+            this.bubble.scale.set(pulse, pulse, pulse);
+        }
+
+        if (this.boostRing.visible) {
+            this.boostRing.rotation.z -= delta * 4;
+            const pulse = 1 + Math.sin(Date.now() * 0.012) * 0.12;
+            this.boostRing.scale.set(pulse, pulse, 1);
         }
 
         this.root.position.copy(this.controller.position);
@@ -365,6 +541,12 @@ class TagGame {
         this.rematchPending = false;
         this.sfx = null;
 
+        // Power-up on the map (one at a time): visual built once in createPowerUpVisual
+        this.powerUpVisual = null;
+        this.powerUpId = null;
+        this.powerUpKind = null;
+        this.powerUpTime = 0;
+
         this.init();
     }
 
@@ -398,7 +580,8 @@ class TagGame {
         this.setupScene();
         this.setupLights();
         this.createFloor();
-        
+        this.createPowerUpVisual();
+
         await this.loadAssets();
         this.loadSFX();
         this.setupRematchButton();
@@ -502,6 +685,145 @@ class TagGame {
         );
         grid.position.y = 0.01;
         this.scene.add(grid);
+    }
+
+    // =================================
+    // Power-up on the map
+    // =================================
+
+    /**
+     * Floating, rotating glowing object with an emoji label above it. Built once and
+     * hidden; showPowerUp/hidePowerUp toggle it. The light is always in the scene
+     * (intensity toggled) so the light count stays constant (no shader recompiles).
+     */
+    createPowerUpVisual() {
+        const group = new THREE.Group();
+        group.visible = false;
+
+        const makeMesh = (geometry, color) => {
+            const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.y = 1;
+            mesh.visible = false;
+            group.add(mesh);
+            return mesh;
+        };
+        const meshes = {
+            rayo: makeMesh(new THREE.OctahedronGeometry(0.55, 0), POWERUP_STYLE.rayo.color),
+            escudo: makeMesh(new THREE.IcosahedronGeometry(0.55, 1), POWERUP_STYLE.escudo.color)
+        };
+
+        // Wireframe halo around the solid core for the glow look
+        const halo = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(0.8, 1),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, wireframe: true })
+        );
+        halo.position.y = 1;
+        group.add(halo);
+
+        // Ring on the floor marking the pickup spot
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.75, 0.95, 48),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.05;
+        group.add(ring);
+
+        const light = new THREE.PointLight(POWERUP_STYLE.rayo.color, 0, 7);
+        light.position.y = 1.5;
+        group.add(light);
+
+        const div = document.createElement('div');
+        div.className = 'tag-powerup-label';
+        const label = new CSS2DObject(div);
+        label.position.set(0, 2.2, 0);
+        group.add(label);
+
+        this.scene.add(group);
+        this.powerUpVisual = { group, meshes, halo, ring, light, label };
+    }
+
+    showPowerUp(powerUp) {
+        const visual = this.powerUpVisual;
+        if (!visual || !powerUp) return;
+        const style = POWERUP_STYLE[powerUp.kind] || POWERUP_STYLE.rayo;
+
+        this.powerUpId = powerUp.id;
+        this.powerUpKind = powerUp.kind;
+        this.powerUpTime = 0;
+
+        Object.entries(visual.meshes).forEach(([kind, mesh]) => { mesh.visible = kind === powerUp.kind; });
+        visual.halo.material.color.setHex(style.color);
+        visual.ring.material.color.setHex(style.color);
+        visual.light.color.setHex(style.color);
+        visual.light.intensity = 2.5;
+        visual.label.element.textContent = style.emoji;
+        visual.label.element.style.color = style.css;
+        visual.label.element.style.display = '';
+        visual.group.position.set(powerUp.position.x, 0, powerUp.position.z);
+        visual.group.visible = true;
+    }
+
+    hidePowerUp() {
+        const visual = this.powerUpVisual;
+        this.powerUpId = null;
+        this.powerUpKind = null;
+        if (!visual) return;
+        visual.group.visible = false;
+        visual.light.intensity = 0;
+        // CSS2D elements of hidden objects are hidden by the renderer, but keep the DOM clean
+        visual.label.element.style.display = 'none';
+    }
+
+    /**
+     * Keep the map object in sync with the server snapshot (spawn/expire/collect)
+     */
+    syncPowerUp(powerUp) {
+        if (powerUp) {
+            if (powerUp.id !== this.powerUpId) this.showPowerUp(powerUp);
+        } else if (this.powerUpId) {
+            this.hidePowerUp();
+        }
+    }
+
+    updatePowerUpVisual(delta) {
+        const visual = this.powerUpVisual;
+        if (!visual || !visual.group.visible) return;
+        this.powerUpTime += delta;
+        const t = this.powerUpTime;
+        const mesh = visual.meshes[this.powerUpKind];
+        const y = 1 + Math.sin(t * 3) * 0.2;
+        if (mesh) {
+            mesh.position.y = y;
+            mesh.rotation.y += delta * 1.5;
+            mesh.rotation.x = Math.sin(t * 1.2) * 0.3;
+        }
+        visual.halo.position.y = y;
+        visual.halo.rotation.y -= delta * 0.8;
+        const pulse = 1 + Math.sin(t * 4) * 0.08;
+        visual.ring.scale.set(pulse, pulse, 1);
+        visual.light.intensity = 2.2 + Math.sin(t * 6) * 0.6;
+    }
+
+    /**
+     * 'tag-powerup' { type: 'spawn' | 'collect' | 'expire', id, kind, playerId?, playerName? }
+     */
+    handlePowerUpEvent(event) {
+        if (!event) return;
+        const style = POWERUP_STYLE[event.kind] || POWERUP_STYLE.rayo;
+
+        if (event.type === 'collect') {
+            const entity = this.players.get(event.playerId);
+            if (entity) entity.showFloatText(style.shout, style.css);
+            this.hidePowerUp();
+            try {
+                this.sfx?.play?.(event.kind === 'rayo' ? 'jump' : 'block');
+            } catch (e) { /* ignore audio errors */ }
+        } else if (event.type === 'expire') {
+            if (event.id === this.powerUpId) this.hidePowerUp();
+        }
+        // 'spawn' is shown from the next 'tag-state' snapshot (which carries the position)
     }
 
     /**
@@ -669,6 +991,10 @@ class TagGame {
 
         this.socket.on('tag-transfer', (data) => {
             this.handleTagTransfer(data);
+        });
+
+        this.socket.on('tag-powerup', (event) => {
+            this.handlePowerUpEvent(event);
         });
 
         this.socket.on('tag-game-over', (data) => {
@@ -861,6 +1187,7 @@ class TagGame {
         this.playerListKey = null;
         this.penaltyEls.clear();
 
+        this.hidePowerUp();
         this.setRematchButtonState(false);
     }
 
@@ -927,6 +1254,9 @@ class TagGame {
 
         // The final 'finished' snapshot carries winner/ranking instead of players
         const players = Array.isArray(state.players) ? state.players : null;
+
+        if (state.gameState === 'finished') this.hidePowerUp();
+        else if ('powerUp' in state) this.syncPowerUp(state.powerUp);
 
         if (players) {
             this.updatePlayerList(players);
@@ -1064,6 +1394,7 @@ class TagGame {
         const delta = Math.min(this.clock.getDelta(), 0.1);
 
         this.players.forEach(entity => entity.tick(delta));
+        this.updatePowerUpVisual(delta);
 
         this.renderer.render(this.scene, this.camera);
         this.labelRenderer.render(this.scene, this.camera);

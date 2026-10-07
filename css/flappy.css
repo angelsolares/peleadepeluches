@@ -287,6 +287,37 @@
     text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
 
+/* Moving pipes banner */
+#moving-pipes-banner {
+    position: absolute;
+    top: 22%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Orbitron', monospace;
+    font-size: 3.2rem;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: #f5a623;
+    text-shadow: 0 0 30px rgba(245, 166, 35, 0.9), 0 0 6px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+    z-index: 150;
+}
+
+#moving-pipes-banner.hidden {
+    display: none;
+}
+
+#moving-pipes-banner.show {
+    animation: movingPipesPop 2.5s ease-out forwards;
+}
+
+@keyframes movingPipesPop {
+    0% { transform: translateX(-50%) scale(1.8); opacity: 0; }
+    15% { transform: translateX(-50%) scale(1); opacity: 1; }
+    75% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
 /* Current State */
 #current-state {
     position: absolute;

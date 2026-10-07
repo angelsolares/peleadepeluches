@@ -99,6 +99,7 @@ let isGrabbed = false; // Track if player is currently grabbed by someone (Arena
 // Race mode state
 let lastRaceTap = null; // 'left' or 'right' - track last tap for alternating
 let raceSpeed = 0; // Current speed display
+const RACE_JUMP_WINDOW = [1.5, 5]; // Metres before a hurdle where a jump counts (same as the server)
 
 // Flappy mode state
 let flappyAlive = true;
@@ -325,7 +326,8 @@ function connectToServer() {
     socket.on('race-start', handleRaceStart);
     socket.on('race-finish', handleRaceFinish);
     socket.on('race-winner', handleRaceWinner);
-    
+    socket.on('race-stumble', handleRaceStumble);
+
     // Flappy mode events
     socket.on('flappy-countdown', handleFlappyCountdown);
     socket.on('flappy-start', handleFlappyStart);
@@ -336,6 +338,7 @@ function connectToServer() {
     // Tag mode events
     socket.on('tag-state', handleTagState);
     socket.on('tag-transfer', handleTagTransfer);
+    socket.on('tag-powerup', handleTagPowerUp);
     socket.on('tag-game-over', handleTagGameOver);
     
     // Tug mode events
@@ -365,7 +368,50 @@ function handleRaceState(data) {
     const myState = data.players.find(p => p.id === socket.id);
     if (myState) {
         updateRaceSpeed(myState.speed);
+        updateRaceHurdleUI(myState);
     }
+}
+
+// Hurdles: the jump button glows in the jump window and shows the distance to the next hurdle
+function updateRaceHurdleUI(me) {
+    const btn = document.getElementById('race-jump-btn');
+    const info = document.getElementById('race-hurdle-info');
+    const controls = document.getElementById('race-controls');
+    if (!btn || !info) return;
+
+    const distance = me.nextHurdleDistance;
+    const hasHurdle = typeof distance === 'number';
+    const inWindow = hasHurdle && distance >= RACE_JUMP_WINDOW[0] && distance <= RACE_JUMP_WINDOW[1];
+
+    btn.classList.toggle('ready', inWindow && !me.jumping && !me.stumbled);
+    btn.classList.toggle('jumping', !!me.jumping);
+    info.classList.toggle('near', inWindow);
+    if (controls) controls.classList.toggle('stumbled', !!me.stumbled);
+
+    if (me.jumping) {
+        info.textContent = '¡EN EL AIRE!';
+    } else if (me.stumbled) {
+        info.textContent = '¡TROPEZÓN!';
+    } else if (hasHurdle) {
+        info.textContent = `Valla en ${Math.max(1, Math.round(distance))} m`;
+    } else {
+        info.textContent = me.finished ? '' : '¡Sin más vallas!';
+    }
+}
+
+function resetRaceHurdleUI() {
+    const btn = document.getElementById('race-jump-btn');
+    const info = document.getElementById('race-hurdle-info');
+    const controls = document.getElementById('race-controls');
+    if (btn) btn.classList.remove('ready', 'jumping', 'pressed');
+    if (info) { info.textContent = ''; info.classList.remove('near'); }
+    if (controls) controls.classList.remove('stumbled');
+}
+
+// I tripped on a hurdle: buzz (the race-state flag keeps the UI in sync)
+function handleRaceStumble(data) {
+    if (!data || data.playerId !== socket.id) return;
+    vibrate([80, 40, 80]);
 }
 
 function handleRaceCountdown(data) {
@@ -640,22 +686,121 @@ function handleFlappyGameOver(data) {
 // Tag Mode Event Handlers
 // =================================
 
+// Power-ups ('tag-state'.powerUp, 'tag-powerup' events): label, color and vibration per kind
+const TAG_POWERUPS = {
+    rayo:   { emoji: '⚡', name: 'RAYO', color: '#ffcc00', hint: '¡Hay un rayo en el mapa!', vibration: [30, 40, 30] },
+    escudo: { emoji: '🛡', name: 'ESCUDO', color: '#00e5ff', hint: '¡Hay un escudo en el mapa!', vibration: [60, 40, 60] }
+};
+let tagEffectShown = null;   // Last rendered effect line, to skip DOM writes
+let tagHintShown = null;     // Last rendered map hint
+
+/**
+ * "⚡ RAYO 3 s" (active effect) and "¡Hay un rayo en el mapa!" lines under the status,
+ * created on first use next to the penalty time (same spot as the Arena "QUEDAN N")
+ */
+function getTagHudEl(id) {
+    let el = document.getElementById(id);
+    if (el) return el;
+    const info = elements.playerDamage?.parentElement;
+    if (!info) return null;
+    if (!document.getElementById('tag-powerup-styles')) {
+        const style = document.createElement('style');
+        style.id = 'tag-powerup-styles';
+        style.textContent = `
+            .tag-effect, .tag-powerup-hint {
+                display: block; margin-top: 1px; white-space: nowrap;
+                font-family: 'Orbitron', sans-serif; font-weight: 900; letter-spacing: 1px;
+            }
+            .tag-effect { font-size: 0.7rem; }
+            .tag-powerup-hint { font-size: 0.55rem; color: var(--text-muted); animation: tagHintPulse 1s infinite; }
+            .tag-effect.hidden, .tag-powerup-hint.hidden { display: none; }
+            @keyframes tagHintPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        `;
+        document.head.appendChild(style);
+    }
+    el = document.createElement('span');
+    el.id = id;
+    el.className = `${id === 'tag-effect' ? 'tag-effect' : 'tag-powerup-hint'} hidden`;
+    info.appendChild(el);
+    return el;
+}
+
+function renderTagEffect(myState) {
+    const el = getTagHudEl('tag-effect');
+    if (!el) return;
+    let text = '';
+    let color = '';
+    if (myState && myState.boosted && myState.boostMsLeft > 0) {
+        text = `${TAG_POWERUPS.rayo.emoji} ${TAG_POWERUPS.rayo.name} ${Math.ceil(myState.boostMsLeft / 1000)} s`;
+        color = TAG_POWERUPS.rayo.color;
+    } else if (myState && myState.shielded && myState.shieldMsLeft > 0) {
+        text = `${TAG_POWERUPS.escudo.emoji} ${TAG_POWERUPS.escudo.name} ${Math.ceil(myState.shieldMsLeft / 1000)} s`;
+        color = TAG_POWERUPS.escudo.color;
+    }
+    if (text === tagEffectShown) return;
+    tagEffectShown = text;
+    el.textContent = text;
+    el.style.color = color;
+    el.classList.toggle('hidden', !text);
+}
+
+function renderTagPowerUpHint(powerUp, myState) {
+    const el = getTagHudEl('tag-powerup-hint');
+    if (!el) return;
+    const info = powerUp && TAG_POWERUPS[powerUp.kind];
+    // "It" can't take the shield, so don't tempt them
+    const text = info && !(powerUp.kind === 'escudo' && myState?.isIt) ? info.hint : '';
+    if (text === tagHintShown) return;
+    tagHintShown = text;
+    el.textContent = text;
+    el.classList.toggle('hidden', !text);
+}
+
+function resetTagHud() {
+    tagEffectShown = null;
+    tagHintShown = null;
+    ['tag-effect', 'tag-powerup-hint'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = '';
+            el.classList.add('hidden');
+        }
+    });
+}
+
 function handleTagState(data) {
     if (!data || !data.players) return;
-    
+
     const myState = data.players.find(p => p.id === socket.id);
     if (myState) {
         // Update damage display as penalty time
         const penaltySec = (myState.penaltyTime / 1000).toFixed(1);
         elements.playerDamage.textContent = `${penaltySec}s`;
         elements.playerDamage.style.color = myState.isIt ? '#ff3366' : '#fff';
-        
+
         // Show indicator if we "la traemos"
         if (myState.isIt) {
             elements.playerDamage.parentElement.querySelector('.health-label').textContent = 'LA TRAES';
         } else {
             elements.playerDamage.parentElement.querySelector('.health-label').textContent = 'TIEMPO';
         }
+    }
+
+    renderTagEffect(myState);
+    renderTagPowerUpHint(data.powerUp, myState);
+}
+
+/**
+ * 'tag-powerup' { type: 'spawn' | 'collect' | 'expire', id, kind, playerId?, playerName? }
+ */
+function handleTagPowerUp(event) {
+    if (!event) return;
+    const info = TAG_POWERUPS[event.kind];
+    if (event.type === 'collect' && event.playerId === socket.id && info) {
+        vibrate(info.vibration);
+        showTagNotification(`${info.emoji} ¡${info.name}!`, info.color);
+    } else if (event.type === 'spawn') {
+        vibrate(15);
     }
 }
 
@@ -1468,6 +1613,7 @@ function resetMatchState() {
     // Race
     lastRaceTap = null;
     updateRaceSpeed(0);
+    resetRaceHurdleUI();
 
     // Flappy
     flappyAlive = true;
@@ -1492,6 +1638,9 @@ function resetMatchState() {
 
     // Trivia
     document.querySelectorAll('.trivia-btn').forEach(btn => btn.classList.remove('selected', 'pressed'));
+
+    // Tag power-up lines
+    resetTagHud();
 
     // Header: damage / health / penalty / score ("X" when eliminated)
     const initialValue = {
@@ -1533,6 +1682,7 @@ function updateControllerUIForMode() {
     if (stocksDisplay) stocksDisplay.style.display = 'none';
     if (joystickHint) joystickHint.textContent = '';
     resetSmashShieldUI();
+    resetTagHud();
 
     if (gameMode === 'trivia') {
         // Trivia mode
@@ -1649,20 +1799,34 @@ function updateControllerUIForMode() {
     renderRoyalCounter(true);
 }
 
-// Setup race mode controls (left/right foot buttons)
+// Setup race mode controls (left/right foot buttons and the jump button)
 function setupRaceControls() {
     // Replace the buttons so listeners are not stacked on every round/rematch
     // (stacked listeners sent each tap several times)
-    ['left-foot', 'right-foot'].forEach(id => {
+    ['left-foot', 'right-foot', 'race-jump-btn'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) {
             const fresh = btn.cloneNode(true);
-            fresh.classList.remove('pressed', 'pulse');
+            fresh.classList.remove('pressed', 'pulse', 'ready', 'jumping');
             btn.replaceWith(fresh);
         }
     });
     const leftFoot = document.getElementById('left-foot');
     const rightFoot = document.getElementById('right-foot');
+    const jumpBtn = document.getElementById('race-jump-btn');
+    resetRaceHurdleUI();
+
+    if (jumpBtn) {
+        jumpBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleRaceJump(jumpBtn);
+        }, { passive: false });
+
+        jumpBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            jumpBtn.classList.remove('pressed');
+        }, { passive: false });
+    }
 
     if (leftFoot) {
         leftFoot.addEventListener('touchstart', (e) => {
@@ -1711,6 +1875,17 @@ function handleRaceTap(side, btn) {
     
     // Update last tap for alternating indicator
     lastRaceTap = side;
+}
+
+// Handle a jump press: the server only counts it 1.5-5 m before a hurdle (too early costs nothing)
+function handleRaceJump(btn) {
+    btn.classList.add('pressed');
+
+    if (socket && socket.connected) {
+        socket.emit('race-jump');
+    }
+
+    triggerHaptic();
 }
 
 // Setup flappy mode controls (single TAP button)
@@ -2127,12 +2302,28 @@ function renderSmashShield(shield, stunned, blocking) {
  */
 function handleSmashEvent(event) {
     if (!event || !socket) return;
-    if (event.type === 'shield-break' && event.playerId === socket.id) {
+    const mine = event.playerId === socket.id;
+    if (event.type === 'shield-break' && mine) {
         vibrate([60, 40, 60, 40, 120]);
         renderSmashShield(0, true, false);
         // The server already dropped the guard: release the local flag too
         inputState.block = false;
         document.querySelector('.action-btn[data-input="block"]')?.classList.remove('pressed');
+    } else if (event.type === 'item-pickup' && mine) {
+        if (event.kind === 'bomba') {
+            vibrate([120, 60, 120, 60, 200]);
+            showTagNotification('💣 ¡CORRE! 2.5 s', '#ff3366');
+        } else {
+            vibrate([30, 30, 30]);
+            showTagNotification('🏏 ¡BATE! 3 golpes', '#ffcc00');
+        }
+    } else if (event.type === 'item-heal' && mine) {
+        vibrate(40);
+        showTagNotification(`🍗 -${event.healed}% daño`, '#33cc66');
+    } else if (event.type === 'item-explode' && Array.isArray(event.hits) && event.hits.some(h => h.targetId === socket.id)) {
+        vibrate(HIT_VIBRATION.hit);
+    } else if (event.type === 'item-break' && mine) {
+        vibrate(20);
     }
 }
 

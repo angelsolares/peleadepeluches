@@ -322,6 +322,7 @@ class PlayerController {
         if (typeof state.airJumps === 'number') this.airJumps = state.airJumps;
         if (typeof state.doubleJumpSeq === 'number') this.doubleJumpSeq = state.doubleJumpSeq;
         if (typeof state.isBlocking === 'boolean') this.serverBlocking = state.isBlocking;
+        if ('heldItem' in state) this.heldItem = state.heldItem || null;
         if (state.input) this.input = { ...this.input, ...state.input };
     }
 }
@@ -385,6 +386,35 @@ class PlayerEntity {
         this.dizzy = false;
         this.finalAnim = null;
         this.airPhase = 'none'; // 'up' while rising after a takeoff, 'fall' until landing
+
+        // Held item label (bat / bomb with its fuse countdown)
+        this.heldLabel = null;
+        this._heldText = '';
+    }
+
+    /** Show what the player is holding (from the server snapshot) */
+    updateHeldItem() {
+        const held = this.controller.heldItem;
+        let text = '';
+        if (held) {
+            text = held.kind === 'bomba'
+                ? `💣 ${(held.msLeft / 1000).toFixed(1)}`
+                : `🏏 ${'●'.repeat(Math.max(0, held.hitsLeft || 0))}`;
+        }
+        if (text === this._heldText) return;
+        this._heldText = text;
+        if (!this.heldLabel) {
+            const div = document.createElement('div');
+            div.className = 'held-item-label';
+            this.heldLabel = new CSS2DObject(div);
+            this.heldLabel.position.set(60, 150, 0); // Model space (scaled 0.01): by the hand
+            this.heldLabel.center.set(0.5, 0.5);
+            this.model.add(this.heldLabel);
+        }
+        this.heldLabel.element.textContent = text;
+        this.heldLabel.element.classList.toggle('bomb', !!held && held.kind === 'bomba');
+        this.heldLabel.element.classList.toggle('urgent', !!held && held.kind === 'bomba' && held.msLeft < 1000);
+        this.heldLabel.visible = !!text;
     }
 
     /** Whether a clip with this name is loaded for this character */
@@ -670,6 +700,7 @@ class PlayerEntity {
             this.model.position.y += (Math.random() - 0.5) * 0.04;
         }
         this.updateShieldVisual(delta);
+        this.updateHeldItem();
         
         // Update model facing direction using scale.z flip
         // After -90° rotation, scale.z controls left/right facing
@@ -839,6 +870,11 @@ class PlayerEntity {
             this.shieldMesh.geometry.dispose();
             this.shieldMesh.material.dispose();
             this.shieldMesh = null;
+        }
+        if (this.heldLabel) {
+            this.model.remove(this.heldLabel);
+            this.heldLabel.element.remove();
+            this.heldLabel = null;
         }
         
         // Remove name label
@@ -1182,7 +1218,7 @@ async function init() {
     setupLights();
 
     // Add arena (side-view platform stage)
-    createArena();
+    buildStage(currentStage);
 
     // Setup keyboard controls for local testing
     setupKeyboardControls();
@@ -1438,24 +1474,75 @@ function setupLights() {
 // Global platforms array for collision detection
 const stagePlatforms = [];
 
-function createArena() {
+// Stages (synced with server/gameState.js STAGES; server y = top surface = y + 0.1 here)
+const STAGES = {
+    clasico: {
+        name: 'Clásico',
+        ground: { width: 20 },
+        platforms: [
+            { x: -6, y: 2.5, width: 4, color: 0xff3366 },   // Left high
+            { x: 6, y: 2.5, width: 4, color: 0x00ffcc },    // Right high
+            { x: 0, y: 4.5, width: 3.5, color: 0xffcc00 },  // Center top
+            { x: -3, y: 5.5, width: 2.5, color: 0xff66cc }, // Upper left
+            { x: 3, y: 5.5, width: 2.5, color: 0x66ccff }   // Upper right
+        ]
+    },
+    torres: {
+        name: 'Torres',
+        ground: { width: 14 },
+        platforms: [
+            { x: -7, y: 3.2, width: 3, color: 0xff3366 },   // Left tower (over the edge)
+            { x: 7, y: 3.2, width: 3, color: 0x00ffcc },    // Right tower
+            { x: 0, y: 2.3, width: 4, color: 0xffcc00 },    // Center low
+            { x: 0, y: 6.0, width: 3, color: 0xff66cc }     // Center top
+        ]
+    }
+};
+const DEFAULT_STAGE = 'clasico';
+let currentStage = DEFAULT_STAGE;
+let stageGroup = null;       // Everything stage-specific, rebuilt when the stage changes
+let stageBackground = null;  // Shared backdrop
+
+/**
+ * (Re)build the stage meshes and the collision platforms for a stage id
+ */
+function buildStage(stageId) {
+    const id = STAGES[stageId] ? stageId : DEFAULT_STAGE;
+    if (stageGroup) {
+        scene.remove(stageGroup);
+        stageGroup.traverse((obj) => {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => m.dispose());
+        });
+    }
+    stageGroup = new THREE.Group();
+    scene.add(stageGroup);
+    currentStage = id;
+    createArena(STAGES[id]);
+    document.querySelectorAll('.stage-btn').forEach(btn => btn.classList.toggle('selected', btn.dataset.stage === id));
+    console.log(`[Game] Escenario: ${STAGES[id].name}`);
+}
+
+function createArena(stage = STAGES[DEFAULT_STAGE]) {
     // === SIDE-VIEW PLATFORM STAGE (Smash Bros style) ===
     
     // Clear platforms array
     stagePlatforms.length = 0;
     
-    // Background plane (far back)
-    const bgGeometry = new THREE.PlaneGeometry(40, 20);
-    const bgMaterial = new THREE.MeshBasicMaterial({
-        color: 0x0a0a15,
-        side: THREE.DoubleSide
-    });
-    const background = new THREE.Mesh(bgGeometry, bgMaterial);
-    background.position.set(0, 5, -8);
-    scene.add(background);
+    // Background plane (far back), shared by every stage
+    if (!stageBackground) {
+        const bgGeometry = new THREE.PlaneGeometry(40, 20);
+        const bgMaterial = new THREE.MeshBasicMaterial({
+            color: 0x0a0a15,
+            side: THREE.DoubleSide
+        });
+        stageBackground = new THREE.Mesh(bgGeometry, bgMaterial);
+        stageBackground.position.set(0, 5, -8);
+        scene.add(stageBackground);
+    }
     
     // === MAIN PLATFORM === (Sized for up to 8 players)
-    const mainPlatformWidth = 20;  // Larger to fit 8 players comfortably
+    const mainPlatformWidth = stage.ground.width;  // 20 on the classic stage (8 players), narrower on others
     const platformDepth = 4;
     const platformHeight = 0.4;
     
@@ -1468,7 +1555,7 @@ function createArena() {
     const mainPlatform = new THREE.Mesh(mainPlatformGeometry, mainPlatformMaterial);
     mainPlatform.position.set(0, -platformHeight / 2, 0);
     mainPlatform.receiveShadow = true;
-    scene.add(mainPlatform);
+    stageGroup.add(mainPlatform);
     
     // Register main platform for collision
     stagePlatforms.push({
@@ -1487,7 +1574,7 @@ function createArena() {
     });
     const leftEdge = new THREE.Mesh(edgeGeometry, leftEdgeMaterial);
     leftEdge.position.set(-mainPlatformWidth / 2, -platformHeight / 2, 0);
-    scene.add(leftEdge);
+    stageGroup.add(leftEdge);
     
     // Platform edge glow (right)
     const rightEdgeMaterial = new THREE.MeshBasicMaterial({
@@ -1497,16 +1584,10 @@ function createArena() {
     });
     const rightEdge = new THREE.Mesh(edgeGeometry, rightEdgeMaterial);
     rightEdge.position.set(mainPlatformWidth / 2, -platformHeight / 2, 0);
-    scene.add(rightEdge);
+    stageGroup.add(rightEdge);
     
     // === FLOATING PLATFORMS (Smash Bros style) === (Positioned for larger stage)
-    const floatingPlatformConfigs = [
-        { x: -6, y: 2.5, width: 4, color: 0xff3366 },   // Left high
-        { x: 6, y: 2.5, width: 4, color: 0x00ffcc },    // Right high
-        { x: 0, y: 4.5, width: 3.5, color: 0xffcc00 },  // Center top
-        { x: -3, y: 5.5, width: 2.5, color: 0xff66cc }, // Upper left
-        { x: 3, y: 5.5, width: 2.5, color: 0x66ccff },  // Upper right
-    ];
+    const floatingPlatformConfigs = stage.platforms;
     
     floatingPlatformConfigs.forEach(config => {
         // Platform body
@@ -1520,7 +1601,7 @@ function createArena() {
         floatPlatform.position.set(config.x, config.y, 0);
         floatPlatform.receiveShadow = true;
         floatPlatform.castShadow = true;
-        scene.add(floatPlatform);
+        stageGroup.add(floatPlatform);
         
         // Glowing edge (bottom)
         const glowGeometry = new THREE.BoxGeometry(config.width + 0.1, 0.05, 2.1);
@@ -1531,7 +1612,7 @@ function createArena() {
         });
         const glow = new THREE.Mesh(glowGeometry, glowMaterial);
         glow.position.set(config.x, config.y - 0.12, 0);
-        scene.add(glow);
+        stageGroup.add(glow);
         
         // Register platform for collision
         stagePlatforms.push({
@@ -1553,7 +1634,7 @@ function createArena() {
     const centerLine = new THREE.Mesh(centerLineGeometry, centerLineMaterial);
     centerLine.rotation.x = -Math.PI / 2;
     centerLine.position.set(0, 0.01, 0);
-    scene.add(centerLine);
+    stageGroup.add(centerLine);
     
     // Grid on main platform surface
     const gridGeometry = new THREE.PlaneGeometry(mainPlatformWidth - 0.5, platformDepth - 0.5);
@@ -1566,7 +1647,7 @@ function createArena() {
     const grid = new THREE.Mesh(gridGeometry, gridMaterial);
     grid.rotation.x = -Math.PI / 2;
     grid.position.y = 0.02;
-    scene.add(grid);
+    stageGroup.add(grid);
     
     // Decorative side pillars
     const pillarGeometry = new THREE.BoxGeometry(0.3, 3, 0.3);
@@ -1580,23 +1661,23 @@ function createArena() {
     const leftPillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
     leftPillar.position.set(-mainPlatformWidth / 2 - 1, 1.5, -1);
     leftPillar.castShadow = true;
-    scene.add(leftPillar);
+    stageGroup.add(leftPillar);
     
     // Right pillar
     const rightPillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
     rightPillar.position.set(mainPlatformWidth / 2 + 1, 1.5, -1);
     rightPillar.castShadow = true;
-    scene.add(rightPillar);
+    stageGroup.add(rightPillar);
     
     // Pillar glow tops
     const glowTopGeometry = new THREE.SphereGeometry(0.2, 16, 16);
     const leftGlow = new THREE.Mesh(glowTopGeometry, new THREE.MeshBasicMaterial({ color: 0xff3366 }));
     leftGlow.position.set(-mainPlatformWidth / 2 - 1, 3.2, -1);
-    scene.add(leftGlow);
+    stageGroup.add(leftGlow);
     
     const rightGlow = new THREE.Mesh(glowTopGeometry, new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
     rightGlow.position.set(mainPlatformWidth / 2 + 1, 3.2, -1);
-    scene.add(rightGlow);
+    stageGroup.add(rightGlow);
 }
 
 // =================================
@@ -2135,6 +2216,7 @@ function initializeSocket() {
     socket.on('player-block-state', handlePlayerBlockState);
     socket.on('player-taunting', handlePlayerTaunt);
     socket.on('smash-event', handleSmashEvent);
+    socket.on('smash-stage', (data) => { if (data?.stage && data.stage !== currentStage) buildStage(data.stage); });
     
     // Tournament events - listen for round transitions (also used for rematches: data.rematch)
     socket.on('round-starting', (data) => {
@@ -2201,7 +2283,13 @@ function showRoomCode(code) {
                     <button class="round-btn" data-rounds="3">3</button>
                     <button class="round-btn" data-rounds="5">5</button>
                 </div>
-                
+                <div class="rounds-selector stage-selector">
+                    <span class="rounds-label">ESCENARIO:</span>
+                    ${Object.entries(STAGES).map(([id, stage]) =>
+                        `<button class="round-btn stage-btn${id === currentStage ? ' selected' : ''}" data-stage="${id}">${stage.name}</button>`
+                    ).join('')}
+                </div>
+
                 <button id="start-game-btn" disabled>INICIAR JUEGO</button>
                 <p class="waiting-text">Esperando jugadores...</p>
             </div>
@@ -2309,6 +2397,7 @@ function showRoomCode(code) {
         
         // Rounds selector
         setupRoundsSelector();
+        setupStageSelector();
     } else {
         overlay.querySelector('.room-code').textContent = code;
         overlay.querySelector('.qr-code').src = qrCodeUrl;
@@ -2330,6 +2419,17 @@ function setupRoundsSelector() {
             
             // Send to server
             socket?.emit('set-tournament-rounds', rounds);
+        });
+    });
+}
+
+function setupStageSelector() {
+    document.querySelectorAll('.stage-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const stageId = btn.dataset.stage;
+            if (gameState === 'playing') return;
+            buildStage(stageId); // immediate feedback; the server confirms with 'smash-stage'
+            socket?.emit('smash-set-stage', stageId);
         });
     });
 }
@@ -2399,6 +2499,11 @@ async function handleGameStarted(data) {
     console.log('[Game] Game started!', data);
     const generation = ++gameStartGeneration;
     gameState = 'playing';
+
+    // The server's stage is authoritative for the match
+    if (data.stage && data.stage !== currentStage) buildStage(data.stage);
+    clearItems();
+    slowMo = null;
 
     // A new match/round never keeps the previous end-of-match screens
     hideEndOfMatchUI();
@@ -2497,6 +2602,9 @@ function handlePlayerInput(data) {
 }
 
 function handleGameState(data) {
+    // Items on the stage
+    if (Array.isArray(data.items)) syncItems(data.items);
+
     // Update all player states from server
     data.players.forEach(state => {
         const player = players.get(state.id);
@@ -2614,19 +2722,127 @@ function handlePlayerTaunt(data) {
     }
 }
 
+// =================================
+// Items on the stage
+// =================================
+
+const ITEM_EMOJI = { bate: '🏏', bomba: '💣', pollo: '🍗' };
+const ITEM_NAMES = { bate: '¡BATE!', bomba: '¡BOMBA!', pollo: '¡POLLO!' };
+const itemVisuals = new Map(); // id -> { group, label, ring }
+
+/** Create/move/remove item visuals from the server list */
+function syncItems(items) {
+    const seen = new Set();
+    for (const item of items) {
+        seen.add(item.id);
+        let visual = itemVisuals.get(item.id);
+        if (!visual) {
+            const group = new THREE.Group();
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(0.35, 0.5, 24),
+                new THREE.MeshBasicMaterial({ color: item.kind === 'bomba' ? 0xff3366 : (item.kind === 'bate' ? 0xffcc00 : 0x66ff66), transparent: true, opacity: 0.7, side: THREE.DoubleSide })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.03;
+            group.add(ring);
+            const div = document.createElement('div');
+            div.className = `stage-item ${item.kind}`;
+            div.textContent = ITEM_EMOJI[item.kind] || '❔';
+            const label = new CSS2DObject(div);
+            label.position.set(0, 0.6, 0);
+            group.add(label);
+            scene.add(group);
+            visual = { group, label, ring, spawnedAt: performance.now() };
+            itemVisuals.set(item.id, visual);
+        }
+        visual.group.position.set(item.x, item.y, 0);
+        visual.ring.visible = !!item.landed;
+    }
+    for (const [id, visual] of itemVisuals) {
+        if (!seen.has(id)) removeItemVisual(id, visual);
+    }
+}
+
+function removeItemVisual(id, visual = itemVisuals.get(id)) {
+    if (!visual) return;
+    scene.remove(visual.group);
+    visual.ring.geometry.dispose();
+    visual.ring.material.dispose();
+    visual.label.element.remove();
+    itemVisuals.delete(id);
+}
+
+function clearItems() {
+    for (const [id, visual] of itemVisuals) removeItemVisual(id, visual);
+}
+
+/** Bomb blast: rings, sparks, flash, shake and damage numbers */
+function showExplosion(event) {
+    const pos = new THREE.Vector3(event.x, event.y + 0.8, 0);
+    if (vfxManager) {
+        vfxManager.createImpactRing(pos, 0xff3366);
+        vfxManager.createImpactRing(pos, 0xffcc00);
+        vfxManager.createHitSparks(pos, 0xff6600, 2.5);
+        for (const hit of event.hits || []) {
+            const target = players.get(hit.targetId);
+            if (!target) continue;
+            const p = target.controller.position.clone(); p.y += 1.2;
+            vfxManager.createDamageNumber(p, hit.damage, hit.self ? '#ffcc00' : '#ff3366');
+            vfxManager.createCharacterFlash(target.model, 150);
+            target.playAnimation('hit');
+            target.controller.health = hit.newHealth;
+            updatePlayerHUD(target);
+        }
+    }
+    triggerScreenShake(0.9, 450);
+    triggerScreenFlash(0xff6600);
+    if (sfxManager) sfxManager.playKO();
+}
+
 /**
- * One-off server events (shield breaks...)
+ * One-off server events (shield breaks, items...)
  */
 function handleSmashEvent(event) {
     if (!event) return;
-    if (event.type === 'shield-break') {
-        const player = players.get(event.playerId);
-        if (player) {
-            player.controller.isBlocking = false;
-            player.controller.serverBlocking = false;
-            player.animController.releaseBlock();
-            showShieldBreak(player);
-        }
+    const player = event.playerId ? players.get(event.playerId) : null;
+    switch (event.type) {
+        case 'shield-break':
+            if (player) {
+                player.controller.isBlocking = false;
+                player.controller.serverBlocking = false;
+                player.animController.releaseBlock();
+                showShieldBreak(player);
+            }
+            break;
+        case 'item-pickup':
+            if (player) {
+                showFloatingText(player, ITEM_NAMES[event.kind] || '¡ÍTEM!', event.kind === 'bomba' ? '#FF3366' : '#FFCC00');
+                if (sfxManager) sfxManager.playJump();
+            }
+            removeItemVisual(event.id);
+            break;
+        case 'item-heal':
+            if (player) {
+                player.controller.health = event.newHealth;
+                updatePlayerHUD(player);
+                showFloatingText(player, `+${event.healed} ❤`, '#66FF66');
+                if (vfxManager) {
+                    const p = player.controller.position.clone(); p.y += 1.2;
+                    vfxManager.createHitSparks(p, 0x66ff66, 1.2);
+                }
+            }
+            removeItemVisual(event.id);
+            break;
+        case 'item-explode':
+            showExplosion(event);
+            break;
+        case 'item-break':
+            if (player) showFloatingText(player, '¡SE ROMPIÓ!', '#AAAAAA');
+            break;
+        case 'item-expire':
+        case 'item-lost':
+            removeItemVisual(event.id);
+            break;
     }
 }
 
@@ -2705,10 +2921,30 @@ function showFloatingText(player, text, color = '#FFFFFF') {
     animate();
 }
 
+// KO slow motion: { until (performance.now), focus: THREE.Vector3 }
+let slowMo = null;
+const SLOWMO_SCALE = 0.3;
+
+function startSlowMo(ko) {
+    const ms = ko.slowMoMs || 800;
+    const focus = new THREE.Vector3(
+        THREE.MathUtils.clamp(ko.position?.x ?? 0, -14, 14),
+        THREE.MathUtils.clamp(ko.position?.y ?? 2, -4, 10),
+        0
+    );
+    slowMo = { until: performance.now() + ms, focus };
+    const vignette = document.getElementById('slowmo-vignette');
+    if (vignette) {
+        vignette.classList.add('show');
+        setTimeout(() => vignette.classList.remove('show'), ms);
+    }
+}
+
 function handlePlayerKO(kos) {
     console.log('[Game] KOs:', kos);
-    
+
     kos.forEach(ko => {
+        startSlowMo(ko);
         const player = players.get(ko.playerId);
         if (player) {
             player.playAnimation('fall');
@@ -2763,6 +2999,8 @@ function resetForNextRound(data) {
 
     // Hide overlays (game over, round end, tournament end, confetti, room code)
     hideEndOfMatchUI();
+    clearItems();
+    slowMo = null;
 
     // Reset game state
     gameState = 'playing';
@@ -3692,8 +3930,10 @@ function checkPlayerCollisions() {
 
 function animate() {
     requestAnimationFrame(animate);
-    
-    const delta = clock.getDelta();
+
+    // KO slow motion: animations and effects run at 30% (positions come from the server, which slows too)
+    if (slowMo && performance.now() >= slowMo.until) slowMo = null;
+    const delta = clock.getDelta() * (slowMo ? SLOWMO_SCALE : 1);
     
     // Update all players
     players.forEach(player => {
@@ -3808,18 +4048,29 @@ function updateSideViewCamera() {
     
     // Use the larger distance to ensure everything fits
     let targetZ = Math.max(distanceForHeight, distanceForWidth);
-    
+
     // Clamp zoom to min/max
     targetZ = THREE.MathUtils.clamp(targetZ, CAMERA_CONFIG.MIN_ZOOM, CAMERA_CONFIG.MAX_ZOOM);
-    
+
     // Target camera position
-    const targetX = centerX;
-    const targetY = centerY + CAMERA_CONFIG.CAMERA_HEIGHT_OFFSET;
-    
+    let targetX = centerX;
+    let targetY = centerY + CAMERA_CONFIG.CAMERA_HEIGHT_OFFSET;
+    let posLerp = CAMERA_CONFIG.POSITION_LERP;
+    let zoomLerp = CAMERA_CONFIG.ZOOM_LERP;
+
+    // KO slow motion: snap toward the KO spot and zoom in
+    if (slowMo) {
+        targetX = slowMo.focus.x;
+        targetY = slowMo.focus.y + CAMERA_CONFIG.CAMERA_HEIGHT_OFFSET;
+        targetZ = CAMERA_CONFIG.MIN_ZOOM;
+        posLerp = 0.18;
+        zoomLerp = 0.14;
+    }
+
     // Smoothly interpolate camera position (elastic effect)
-    camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, CAMERA_CONFIG.POSITION_LERP);
-    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, CAMERA_CONFIG.POSITION_LERP);
-    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, CAMERA_CONFIG.ZOOM_LERP);
+    camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, posLerp);
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, posLerp);
+    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, zoomLerp);
     
     // Look at center of action with smooth interpolation
     // Store current lookAt target for smooth transitions
@@ -3827,12 +4078,10 @@ function updateSideViewCamera() {
         camera.userData.lookAtTarget = new THREE.Vector3(centerX, centerY + CAMERA_CONFIG.LOOK_AT_OFFSET_Y, 0);
     }
     
-    camera.userData.lookAtTarget.x = THREE.MathUtils.lerp(
-        camera.userData.lookAtTarget.x, centerX, CAMERA_CONFIG.POSITION_LERP
-    );
-    camera.userData.lookAtTarget.y = THREE.MathUtils.lerp(
-        camera.userData.lookAtTarget.y, centerY + CAMERA_CONFIG.LOOK_AT_OFFSET_Y, CAMERA_CONFIG.POSITION_LERP
-    );
+    const lookX = slowMo ? slowMo.focus.x : centerX;
+    const lookY = (slowMo ? slowMo.focus.y : centerY) + CAMERA_CONFIG.LOOK_AT_OFFSET_Y;
+    camera.userData.lookAtTarget.x = THREE.MathUtils.lerp(camera.userData.lookAtTarget.x, lookX, posLerp);
+    camera.userData.lookAtTarget.y = THREE.MathUtils.lerp(camera.userData.lookAtTarget.y, lookY, posLerp);
     
     camera.lookAt(camera.userData.lookAtTarget);
 }

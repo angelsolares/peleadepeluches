@@ -434,6 +434,7 @@ io.on('connection', (socket) => {
                 ...result,
                 players: playersData,
                 gameMode: room.gameMode || 'smash',
+                stage: gameStateManager.getStage(roomCode),
                 tournamentRounds: tournamentState?.tournamentRounds || 1,
                 currentRound: tournamentState?.currentRound || 1,
                 playerScores: tournamentState?.playerScores || {}
@@ -654,6 +655,21 @@ io.on('connection', (socket) => {
         }
     });
     
+    /**
+     * Smash stage pick (host only, in the lobby / between matches)
+     */
+    socket.on('smash-set-stage', (stageId, callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        const room = roomCode && lobbyManager.rooms.get(roomCode);
+        if (!room || room.hostId !== socket.id) {
+            if (typeof callback === 'function') callback({ success: false, error: 'Only the host can pick the stage' });
+            return;
+        }
+        const applied = gameStateManager.setStage(roomCode, stageId);
+        if (applied) io.to(roomCode).emit('smash-stage', { stage: applied });
+        if (typeof callback === 'function') callback({ success: !!applied, stage: applied });
+    });
+
     /**
      * Player block state change
      */
@@ -886,13 +902,26 @@ io.on('connection', (socket) => {
         if (!roomCode) return;
         
         const result = raceStateManager.processTap(socket.id, roomCode, side);
-        
+
         // Optionally send feedback to the tapper
         if (result) {
             socket.emit('race-tap-result', result);
         }
     });
-    
+
+    /**
+     * Race jump (hurdles): only counts 1.5-5 m before the next hurdle
+     */
+    socket.on('race-jump', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (!roomCode) return;
+
+        const result = raceStateManager.processJump(socket.id, roomCode);
+        if (result) {
+            socket.emit('race-jump-result', result);
+        }
+    });
+
     // ========== FLAPPY MODE EVENTS ==========
     
     /**
@@ -1206,6 +1235,7 @@ function startModeRound(roomCode, gameMode) {
         success: true,
         players: players,
         gameMode: gameMode,
+        stage: gameStateManager.getStage(roomCode),
         tournamentRounds: tournamentState?.tournamentRounds || 1,
         currentRound: tournamentState?.currentRound || 1,
         playerScores: tournamentState?.playerScores || {}
@@ -1377,7 +1407,16 @@ function handleDisconnect(socket) {
 function startGameLoop(roomCode) {
     // Stop existing loop if any
     stopGameLoop(roomCode);
-    
+
+    // Fresh items / slow motion for every match and round
+    const room = lobbyManager.rooms.get(roomCode);
+    if (room) {
+        room.items = [];
+        room.nextItemAt = 0;
+        room.slowMoUntil = 0;
+        room.players.forEach(p => { p.heldItem = null; });
+    }
+
     const tickRate = 1000 / 60; // 60 FPS
     
     const loop = setInterval(() => {
@@ -1610,11 +1649,16 @@ function startTagLoop(roomCode) {
     
     const loop = setInterval(() => {
         const state = tagStateManager.processTick(roomCode);
-        
+
         if (state) {
             // Send state to all clients in room
             io.to(roomCode).emit('tag-state', state);
-            
+
+            // One-off power-up events (spawn / collect / expire)
+            for (const event of tagStateManager.drainEvents(roomCode)) {
+                io.to(roomCode).emit('tag-powerup', event);
+            }
+
             // Check for game over
             if (state.gameState === 'finished') {
                 stopTagLoop(roomCode);
@@ -1873,22 +1917,23 @@ function startRaceLoop(roomCode) {
         return;
     }
     
-    const tickRate = 1000 / 30; // 30 FPS for race
-    let lastTime = Date.now();
+    const tickRate = 1000 / 30; // 30 FPS for race (the state uses the real elapsed time per tick)
     let announcedFinishers = 0; // 'race-finish' is sent once per finisher
-        
+
     const loop = setInterval(() => {
-        const now = Date.now();
-        const delta = (now - lastTime) / 1000; // Delta in seconds
-        lastTime = now;
-        
-        const state = raceStateManager.processTick(roomCode, delta);
-        
+        const state = raceStateManager.processTick(roomCode);
+
         if (state) {
             // Send state to all clients in room
             io.to(roomCode).emit('race-state', state);
-            
-            // Announce each new finisher exactly once
+
+            // One-off events (hurdle stumbles...)
+            for (const event of raceStateManager.drainEvents(roomCode)) {
+                const { type, ...data } = event;
+                io.to(roomCode).emit(type, data);
+            }
+
+// Announce each new finisher exactly once
             const finishOrder = state.finishOrder || [];
             while (announcedFinishers < finishOrder.length) {
                 const finisher = state.players.find(p => p.id === finishOrder[announcedFinishers]);
