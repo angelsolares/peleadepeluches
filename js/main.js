@@ -12,6 +12,7 @@ import { AnimationController, ANIMATION_CONFIG, AnimationState } from './animati
 import ModeSelector, { GAME_MODES } from './modes/ModeSelector.js';
 import TournamentManager from './tournament/TournamentManager.js';
 import { loadClips, loadModel } from './assets/AssetLoader.js';
+import { retargetMixamoClip } from './animation/MixamoRetarget.js';
 
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
@@ -378,6 +379,75 @@ class PlayerEntity {
         // Hitstop: the pose freezes for a few ms on impact
         this.hitstopUntil = 0;
         this._lastDoubleJumpSeq = null; // Adopted from the first snapshot (no VFX for old jumps)
+
+        // Clips that override the movement animation for a while (double jump flip, dizzy, victory)
+        this.transientUntil = 0;
+        this.dizzy = false;
+        this.finalAnim = null;
+    }
+
+    /** Whether a clip with this name is loaded for this character */
+    hasClip(name) {
+        return !!this.animController.actions[name];
+    }
+
+    /**
+     * Attack animation for a server attack (type + directional variant), with its trail/whoosh.
+     * Missing clips fall back to the plain punch/kick.
+     */
+    playAttack(attackType, variant = 'neutral') {
+        const wanted = ATTACK_CLIPS[attackType]?.[variant];
+        const clip = wanted && this.hasClip(wanted) ? wanted : (attackType === 'kick' ? 'kick' : 'punch');
+        console.log(`[Smash] ${this.name}: ${attackType}/${variant} -> clip ${clip}`);
+        if (clip === 'punch' || clip === 'kick') {
+            this.playAnimation(clip);
+            return;
+        }
+        if (this.animController.isAttacking) return;
+        this.transientUntil = 0;
+        if (!this.animController.play(clip, ANIMATION_CONFIG.fadeDuration.toAttack)) return;
+        this.controller.isAttacking = true;
+
+        const colorIndex = this.controller.playerNumber - 1;
+        const colors = [0xff3366, 0x00ffcc, 0xffcc00, 0x9966ff];
+        const playerColor = colors[colorIndex] || 0xFF6600;
+        if (vfxManager) {
+            const attackPos = this.controller.position.clone();
+            attackPos.y += attackType === 'kick' ? 0.8 : 1.2;
+            vfxManager.createAttackTrail(attackPos, attackType === 'kick' ? 'kick' : 'punch', this.controller.facingRight ? 1 : -1, playerColor);
+        }
+        if (sfxManager) {
+            if (attackType === 'kick') sfxManager.playKickWhoosh();
+            else sfxManager.playPunchWhoosh();
+        }
+    }
+
+    /**
+     * Play a clip that holds over the movement animation but can still be interrupted by
+     * attacks/hits (a double jump flip, the dizzy kneel, the victory pose).
+     * @param {string} name
+     * @param {{loop?: boolean, timeScale?: number, durationMs?: number}} [options]
+     */
+    playTransient(name, options = {}) {
+        if (!this.hasClip(name)) return false;
+        const { loop = false, timeScale = 1, durationMs } = options;
+        this.animController.playState(name, { loop, clamp: true, timeScale, fade: 0.1, restart: true });
+        const clipMs = (this.animController.actions[name].getClip().duration / timeScale) * 1000;
+        this.transientUntil = performance.now() + (durationMs ?? (loop ? Infinity : clipMs));
+        return true;
+    }
+
+    /** Random taunt among the loaded ones */
+    playTaunt() {
+        const options = TAUNT_CLIPS.filter((name) => this.hasClip(name));
+        const name = options.length ? options[Math.floor(Math.random() * options.length)] : 'taunt';
+        if (name === 'taunt') {
+            this.playAnimation('taunt');
+            return;
+        }
+        if (this.animController.isAttacking || this.animController.isBlocking || this.animController.isTaunting) return;
+        this.animController.isTaunting = true;
+        this.animController.play(name, ANIMATION_CONFIG.fadeDuration.toAttack);
     }
 
     /**
@@ -668,12 +738,28 @@ class PlayerEntity {
             0.08 // Slower lerp for smoother rotation
         );
         
-        this.animController.updateFromMovementState({
-            isMoving,
-            isRunning,
-            isGrounded: this.controller.isGrounded,
-            isJumping: this.controller.isJumping
-        });
+        // Dizzy after a shield break: kneel until the server says the stun is over
+        const stunned = this.controller.shieldStunned === true;
+        if (stunned && !this.dizzy) {
+            this.dizzy = true;
+            console.log(`[Smash] ${this.name}: dizzy -> clip ${this.hasClip('kneel') ? 'kneel' : '(none)'}`);
+            this.playTransient('kneel', { timeScale: 1.3, durationMs: Infinity });
+        } else if (!stunned && this.dizzy) {
+            this.dizzy = false;
+            this.transientUntil = 0;
+            this.animController.playIdle();
+        }
+
+        // Movement animation, unless a transient/final clip is holding the pose
+        const holdingPose = this.finalAnim || performance.now() < this.transientUntil;
+        if (!holdingPose) {
+            this.animController.updateFromMovementState({
+                isMoving,
+                isRunning,
+                isGrounded: this.controller.isGrounded,
+                isJumping: this.controller.isJumping
+            });
+        }
         
         // Sync state flags from animController to controller
         // This ensures controller knows when animations finish
@@ -690,6 +776,11 @@ class PlayerEntity {
      */
     showDoubleJump() {
         const pos = this.controller.position.clone();
+        // Flip (only when nothing else is going on with the pose)
+        if (!this.animController.isAttacking && !this.animController.isBlocking && !this.animController.isTaunting && !this.dizzy) {
+            console.log(`[Smash] ${this.name}: double jump -> clip ${this.hasClip('dive') ? 'dive' : '(none)'}`);
+            this.playTransient('dive', { timeScale: 1.6 });
+        }
         if (vfxManager) {
             vfxManager.createLandingImpact(pos, 0.6);
             const colorIndex = this.controller.playerNumber - 1;
@@ -773,9 +864,41 @@ const ANIMATION_FILES = {
     fall: 'Meshy_AI_Animation_Shot_and_Slow_Fall_Backward_withSkin.fbx',
     block: 'Meshy_AI_Animation_Block3_withSkin.fbx',
     taunt: 'Meshy_AI_Animation_Hip_Hop_Dance_withSkin.fbx',
+    jab: 'Meshy_AI_Animation_Boxing_Guard_Prep_Straight_Punch_withSkin.fbx', // Neutral punch (the 'punch' clip is the uppercut)
     // Babies crawl instead of walking/running: only needed (and downloaded) in baby shower mode
     ...(IS_BABY_SHOWER ? { crawling: 'Crawling.fbx' } : {})
 };
+
+// Mixamo clips (skinless FBX in assets/mixamo) retargeted onto each character's Meshy skeleton.
+// Loaded in the background after the lobby shows; babies keep the Meshy clips.
+const MIXAMO_FILES = IS_BABY_SHOWER ? {} : {
+    idle: 'fighting_idle.fbx',        // Guard stance (replaces the paused-walk idle)
+    sideSmash: 'headbutt.fbx',         // Side smash (punch)
+    sideKick: 'flying_kick.fbx',    // Side smash (kick)
+    sweep: 'illegal_knee.fbx',         // Sweep
+    meteor: 'stomping.fbx',            // Meteor (aerial stomp)
+    kneel: 'kneel.fbx',               // Dizzy after a shield break
+    dive: 'dive_forward.fbx',         // Double jump flip
+    victory: 'victory.fbx',           // Winner pose at the end
+    battlecry: 'taunt_battlecry.fbx',
+    chestThump: 'taunt_chest_thump.fbx',
+    flex: 'taunt_flex.fbx',
+    gesture: 'taunt_gesture.fbx'
+};
+
+// Meshy clip used when a Mixamo clip can't be loaded/retargeted
+const MIXAMO_FALLBACKS = {
+    sideSmash: 'punch', sideKick: 'kick', sweep: 'kick', meteor: 'kick', kneel: 'hit'
+};
+
+// Clip per attack: [attackType][variant] (see server MOVES); missing clips fall back to punch/kick
+const ATTACK_CLIPS = {
+    punch: { neutral: 'jab', side: 'sideSmash', up: 'punch', sweep: 'sweep', meteor: 'meteor' },
+    kick:  { neutral: 'kick', side: 'sideKick', up: 'punch', sweep: 'sweep', meteor: 'meteor' }
+};
+
+// One of these plays on BURLA (whichever are loaded)
+const TAUNT_CLIPS = ['taunt', 'battlecry', 'chestThump', 'flex', 'gesture'];
 
 // Available character models
 const CHARACTER_MODELS = {
@@ -868,6 +991,74 @@ const characterModelCache = {};
 
 // Promise of the default character's model (see loadDefaultModel)
 let defaultModelPromise = null;
+
+// Mixamo source FBX files (shared by every character) and the per-character retargeted clip sets
+let mixamoSourcesPromise = null;
+const characterAnimCache = {}; // characterId -> Promise<animations>
+
+/**
+ * Load every Mixamo clip in parallel, once (failed files resolve to null).
+ * @returns {Promise<Object<string, THREE.Object3D|null>>} file name -> loaded FBX
+ */
+function loadMixamoSources() {
+    if (!mixamoSourcesPromise) {
+        const files = [...new Set(Object.values(MIXAMO_FILES))];
+        mixamoSourcesPromise = Promise.all(files.map((file) =>
+            loadModel(`mixamo/${file}`)
+                .then((fbx) => [file, fbx])
+                .catch((err) => {
+                    console.warn(`[Assets] Mixamo clip ${file} not loaded:`, err);
+                    return [file, null];
+                })
+        )).then((entries) => Object.fromEntries(entries));
+    }
+    return mixamoSourcesPromise;
+}
+
+/**
+ * Clips for a character: the shared Meshy clips plus the Mixamo clips retargeted onto its
+ * skeleton (cached per character). Never rejects: on any failure the Meshy clips are used.
+ * @param {string} characterId
+ * @returns {Promise<Object<string, THREE.AnimationClip>>}
+ */
+function getCharacterAnimations(characterId) {
+    const id = CHARACTER_MODELS[characterId] ? characterId : DEFAULT_CHARACTER;
+    if (!characterAnimCache[id]) {
+        characterAnimCache[id] = (async () => {
+            const [model, base] = await Promise.all([loadCharacterModel(id), animationsReady]);
+            const animations = { ...base };
+            if (!Object.keys(MIXAMO_FILES).length) return animations;
+
+            const sources = await loadMixamoSources();
+            const t0 = performance.now();
+            for (const [name, file] of Object.entries(MIXAMO_FILES)) {
+                const source = sources[file];
+                const clip = source?.animations?.[0];
+                if (model && clip) {
+                    try {
+                        animations[name] = retargetMixamoClip(model, source, clip, { name: `${id}_${name}` });
+                    } catch (err) {
+                        console.warn(`[Assets] Retarget ${name} failed for ${id}:`, err);
+                    }
+                }
+                const stand = MIXAMO_FALLBACKS[name];
+                if (!animations[name] && stand && base[stand]) {
+                    animations[name] = base[stand].clone();
+                }
+                // Retargeting is synchronous: yield between clips so the page stays responsive
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            const retargeted = Object.keys(MIXAMO_FILES).filter((name) => animations[name]?.name === `${id}_${name}`);
+            const fallbacks = Object.keys(MIXAMO_FILES).filter((name) => !retargeted.includes(name));
+            console.log(`[Assets] Clips de ${id} listos en ${Math.round(performance.now() - t0)} ms: ${retargeted.join(', ')}${fallbacks.length ? ` (sin Mixamo: ${fallbacks.join(', ')})` : ''}`);
+            return animations;
+        })().catch((err) => {
+            console.warn(`[Assets] Mixamo clips unavailable for ${id}, using the Meshy clips:`, err);
+            return baseAnimations;
+        });
+    }
+    return characterAnimCache[id];
+}
 
 // Resolves with baseAnimations once the animation clips are loaded (set in loadCharacterWithAnimations)
 let animationsReady = Promise.resolve(baseAnimations);
@@ -1412,6 +1603,18 @@ async function loadCharacterWithAnimations() {
             createLocalPlayer();
         }
 
+        // Mixamo clips download in the background; the lobby doesn't wait for them.
+        // When the default character's set is ready, the test player picks it up.
+        getCharacterAnimations(DEFAULT_CHARACTER).then((animations) => {
+            if (gameState !== 'lobby' || !localPlayer || selectedCharacter !== DEFAULT_CHARACTER) return;
+            if (animations === baseAnimations) return;
+            scene.remove(localPlayer.model);
+            localPlayer.dispose();
+            players.delete('local');
+            localPlayer = null;
+            createLocalPlayer(animations);
+        });
+
         updateLoadingProgress(100, '¡Listo!');
 
         setTimeout(() => {
@@ -1481,17 +1684,18 @@ function loadCharacterModel(characterId) {
 
 /** Start downloading a character in the background (as soon as a player picks it) */
 function preloadCharacter(characterId) {
-    if (!characterId || characterModelCache[characterId]) return;
-    loadCharacterModel(characterId).catch(() => {}); // failures are already logged
+    if (!characterId || !CHARACTER_MODELS[characterId]) return;
+    // Model download + Mixamo retarget ahead of the match (both cached; failures are logged)
+    getCharacterAnimations(characterId).catch(() => {});
 }
 
 // =================================
 // Player Management
 // =================================
 
-function createLocalPlayer() {
+function createLocalPlayer(animations = baseAnimations) {
     // Create a test local player
-    localPlayer = new PlayerEntity('local', 1, PLAYER_COLORS[0], baseModel, baseAnimations);
+    localPlayer = new PlayerEntity('local', 1, PLAYER_COLORS[0], baseModel, animations);
     localPlayer.controller.position.set(0, 0, 0);
     
     // Set name based on selected character
@@ -1550,8 +1754,8 @@ async function changeCharacter(characterId) {
     }
 
     try {
-        // Models are cached and shared (never disposed); animations are already loaded
-        const [model] = await Promise.all([loadCharacterModel(characterId), animationsReady]);
+        // Models are cached and shared (never disposed); clips are retargeted once per character
+        const [model, animations] = await Promise.all([loadCharacterModel(characterId), getCharacterAnimations(characterId)]);
 
         // A newer pick won, or a match started meanwhile (no local test player during matches)
         if (token !== characterChangeToken || gameState !== 'lobby') return;
@@ -1564,7 +1768,7 @@ async function changeCharacter(characterId) {
             localPlayer = null;
         }
         baseModel = model;
-        createLocalPlayer();
+        createLocalPlayer(animations);
 
         console.log(`[Game] Character changed to: ${CHARACTER_MODELS[characterId].name}`);
     } catch (error) {
@@ -1722,8 +1926,9 @@ async function createPlayerEntity(playerData, characterId, token) {
     console.log(`[Game] Adding player: ${playerData.name} (${playerData.id}) with character: ${characterId}`);
 
     let playerModel = null;
+    let animations = baseAnimations;
     try {
-        [playerModel] = await Promise.all([loadCharacterModel(characterId), animationsReady]);
+        [playerModel, animations] = await Promise.all([loadCharacterModel(characterId), getCharacterAnimations(characterId)]);
     } catch (error) {
         console.error(`[Game] Could not load a model for player ${playerData.id}`, error);
     }
@@ -1744,7 +1949,7 @@ async function createPlayerEntity(playerData, characterId, token) {
         playerData.number,
         playerData.color || PLAYER_COLORS[(playerData.number - 1) % PLAYER_COLORS.length],
         playerModel,
-        baseAnimations
+        animations || baseAnimations
     );
     
     player.setName(playerData.name || `Player ${playerData.number}`);
@@ -2231,8 +2436,10 @@ function handlePlayerInput(data) {
         }
         
         // Handle attacks (use AnimationController which handles transitions properly)
-        // Note: Mobile controller already emits 'player-attack' to server directly
-        // We just handle the animation here
+        // Note: Mobile controller already emits 'player-attack' to server directly.
+        // During a match the server's 'attack-started' (with the variant) drives the animation;
+        // this path only animates lobby button mashing.
+        if (gameState === 'playing') return;
         if (data.input.punch && !player.animController.isAttacking) {
             if (player.controller.punch()) {
                 player.playAnimation('punch');
@@ -2272,10 +2479,10 @@ function handleGameState(data) {
 function handleAttackStarted(data) {
     console.log('[Game] Attack started:', data.attackType, 'by', data.attackerId);
     
-    // Play attacker's animation (punch or kick) immediately
+    // Play attacker's animation immediately (clip chosen by type + directional variant)
     const attacker = players.get(data.attackerId);
     if (attacker) {
-        attacker.playAnimation(data.attackType); // 'punch' or 'kick'
+        attacker.playAttack(data.attackType, data.variant || 'neutral');
     }
 }
 
@@ -2360,7 +2567,7 @@ function handlePlayerTaunt(data) {
     const player = players.get(data.playerId);
     if (player) {
         player.controller.isTaunting = true;
-        player.playAnimation('taunt');
+        player.playTaunt();
     }
 }
 
@@ -2391,7 +2598,8 @@ function showShieldBreak(player) {
         vfxManager.createBlockSparks(pos);
         vfxManager.createCharacterFlash(player.model, 250);
     }
-    player.playAnimation('hit');
+    // The dizzy kneel starts from the next snapshot (shieldStunned); plain hit if that clip is missing
+    if (!player.hasClip('kneel')) player.playAnimation('hit');
     showFloatingText(player, '¡ESCUDO ROTO!', '#FF3366');
     triggerScreenShake(0.5, 350);
     if (sfxManager) sfxManager.playHit(30, false);
@@ -2485,10 +2693,21 @@ function handleGameOver(data) {
     
     if (data.winner) {
         updateAnimationDisplay(`¡${data.winner.name} GANA!`);
+        // Winner pose (held until the next round resets the players)
+        const winner = players.get(data.winner.id);
+        if (winner) {
+            winner.finalAnim = 'victory';
+            winner.controller.isBlocking = false;
+            winner.controller.serverBlocking = null;
+            if (winner.shieldMesh) winner.shieldMesh.visible = false;
+            if (!winner.playTransient('victory', { loop: true })) {
+                winner.playTaunt();
+            }
+        }
     } else {
         updateAnimationDisplay('¡EMPATE!');
     }
-    
+
     // Show game over UI
     showGameOverUI(data);
 }
@@ -2540,6 +2759,9 @@ function resetForNextRound(data) {
             };
         }
         player.hitstopUntil = 0;
+        player.transientUntil = 0;
+        player.dizzy = false;
+        player.finalAnim = null;
         if (player.shieldMesh) player.shieldMesh.visible = false;
 
         // Reset position and visibility (eliminated players were hidden by handleGameState)

@@ -23,8 +23,10 @@ export const ANIMATION_CONFIG = {
     },
     
     // Animation types
-    looping: ['walk', 'run', 'idle', 'pull'],
-    oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt', 'throw', 'crawling'],
+    looping: ['walk', 'run', 'idle', 'pull', 'victory'],
+    oneShot: ['punch', 'kick', 'hit', 'fall', 'taunt', 'throw', 'crawling',
+        // Smash directional attacks and extra taunts (Mixamo clips retargeted per character)
+        'jab', 'sideSmash', 'sideKick', 'sweep', 'meteor', 'battlecry', 'chestThump', 'flex', 'gesture'],
     held: ['block', 'grab'],  // Animations that play once and hold on last frame while held
     
     // Default fade durations
@@ -61,7 +63,17 @@ export const ANIMATION_CONFIG = {
         grab: 1.2,   // Grab animation speed
         throw: 1.5,   // Throw animation speed (faster for impact)
         pull: 1.0,
-        crawling: 1.5 // Fast crawl
+        crawling: 1.5, // Fast crawl
+        // Smash Mixamo clips
+        jab: 1.8,
+        sideSmash: 1.4,
+        sideKick: 1.3,
+        sweep: 1.4,
+        meteor: 1.4,
+        battlecry: 1.0,
+        chestThump: 1.0,
+        flex: 1.0,
+        gesture: 1.0
     }
 };
 
@@ -259,8 +271,17 @@ export class AnimationController {
      */
     playIdle() {
         if (this.isAttacking) return false;
-        
+
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
+
+        // A real idle clip (fighting stance) when the character has one
+        if (!isBabyShower && this.actions[AnimationState.IDLE]) {
+            if (this.currentActionName !== AnimationState.IDLE) {
+                this.play(AnimationState.IDLE, ANIMATION_CONFIG.fadeDuration.toIdle);
+            }
+            return true;
+        }
+
         const moveState = isBabyShower ? AnimationState.CRAWLING : AnimationState.WALK;
 
         if (this.currentActionName !== moveState) {
