@@ -384,6 +384,7 @@ class PlayerEntity {
         this.transientUntil = 0;
         this.dizzy = false;
         this.finalAnim = null;
+        this.airPhase = 'none'; // 'up' while rising after a takeoff, 'fall' until landing
     }
 
     /** Whether a clip with this name is loaded for this character */
@@ -633,10 +634,11 @@ class PlayerEntity {
     }
     
     update(delta, skipPhysics = false) {
-        // Track previous state for VFX/SFX triggers
-        const wasInAir = !this.controller.isGrounded;
-        const wasGrounded = this.controller.isGrounded;
-        const prevVelocityY = this.controller.velocity.y;
+        // Previous frame's state for VFX/SFX/animation triggers. Online players get their state
+        // from snapshots between frames, so "previous" must be what the last update() saw.
+        const wasInAir = this._lastGrounded === false;
+        const wasGrounded = this._lastGrounded !== false;
+        const prevVelocityY = this._lastVelocityY ?? 0;
         
         // Update controller physics only if not skipped (skip during online game)
         if (!skipPhysics) {
@@ -742,8 +744,8 @@ class PlayerEntity {
         const stunned = this.controller.shieldStunned === true;
         if (stunned && !this.dizzy) {
             this.dizzy = true;
-            console.log(`[Smash] ${this.name}: dizzy -> clip ${this.hasClip('kneel') ? 'kneel' : '(none)'}`);
-            this.playTransient('kneel', { timeScale: 1.3, durationMs: Infinity });
+            console.log(`[Smash] ${this.name}: dizzy -> clip ${this.hasClip('dizzy') ? 'dizzy' : '(none)'}`);
+            this.playTransient('dizzy', { loop: true, durationMs: Infinity });
         } else if (!stunned && this.dizzy) {
             this.dizzy = false;
             this.transientUntil = 0;
@@ -752,11 +754,45 @@ class PlayerEntity {
 
         // Movement animation, unless a transient/final clip is holding the pose
         const holdingPose = this.finalAnim || performance.now() < this.transientUntil;
-        if (!holdingPose) {
-            this.animController.updateFromMovementState({
+        const ac = this.animController;
+        const busy = ac.isAttacking || ac.isBlocking || ac.isTaunting || this.dizzy;
+        const grounded = this.controller.isGrounded;
+
+        // Landing: short recovery clip, a heavier one after a long fall / launch
+        if (wasInAir && grounded && !busy && !holdingPose) {
+            const hard = prevVelocityY < -14;
+            if (!this.playTransient(hard ? 'hardLand' : 'land', hard ? { timeScale: 1.4, durationMs: 650 } : { timeScale: 1.8, durationMs: 300 })) {
+                this.airPhase = 'none';
+            }
+        }
+
+        if (!grounded && this.hasClip('fallIdle')) {
+            // In the air: takeoff clip while rising from a jump, falling loop otherwise
+            if (wasGrounded) this.airPhase = 'up';
+            const rising = this.controller.velocity.y > 0.5 && this.airPhase === 'up' && this.hasClip('jumpUp');
+            if (!rising) this.airPhase = 'fall';
+            if (!busy && !holdingPose) {
+                const wanted = rising ? 'jumpUp' : 'fallIdle';
+                if (ac.currentActionName !== wanted) {
+                    ac.playState(wanted, { loop: !rising, clamp: true, timeScale: rising ? 1.3 : 1, fade: 0.1 });
+                }
+            }
+        } else if (grounded) {
+            this.airPhase = 'none';
+            if (!holdingPose) {
+                ac.updateFromMovementState({
+                    isMoving,
+                    isRunning,
+                    isGrounded: grounded,
+                    isJumping: this.controller.isJumping
+                });
+            }
+        } else if (!holdingPose) {
+            // No air clips loaded (yet): keep the old behaviour
+            ac.updateFromMovementState({
                 isMoving,
                 isRunning,
-                isGrounded: this.controller.isGrounded,
+                isGrounded: grounded,
                 isJumping: this.controller.isJumping
             });
         }
@@ -769,6 +805,9 @@ class PlayerEntity {
         if (!inHitstop) {
             this.animController.update(delta);
         }
+
+        this._lastGrounded = this.controller.isGrounded;
+        this._lastVelocityY = this.controller.velocity.y;
     }
 
     /**
@@ -877,8 +916,12 @@ const MIXAMO_FILES = IS_BABY_SHOWER ? {} : {
     sideKick: 'flying_kick.fbx',    // Side smash (kick)
     sweep: 'illegal_knee.fbx',         // Sweep
     meteor: 'stomping.fbx',            // Meteor (aerial stomp)
-    kneel: 'kneel.fbx',               // Dizzy after a shield break
+    dizzy: 'dizzy_idle.fbx',          // Dizzy after a shield break (loops until the stun ends)
     dive: 'dive_forward.fbx',         // Double jump flip
+    jumpUp: 'jump_up.fbx',            // Takeoff
+    fallIdle: 'falling_idle.fbx',     // In the air (loop)
+    land: 'falling_to_landing.fbx',   // Soft landing
+    hardLand: 'hard_landing.fbx',     // Landing from a launch / long fall
     victory: 'victory.fbx',           // Winner pose at the end
     battlecry: 'taunt_battlecry.fbx',
     chestThump: 'taunt_chest_thump.fbx',
@@ -888,7 +931,7 @@ const MIXAMO_FILES = IS_BABY_SHOWER ? {} : {
 
 // Meshy clip used when a Mixamo clip can't be loaded/retargeted
 const MIXAMO_FALLBACKS = {
-    sideSmash: 'punch', sideKick: 'kick', sweep: 'kick', meteor: 'kick', kneel: 'hit'
+    sideSmash: 'punch', sideKick: 'kick', sweep: 'kick', meteor: 'kick', dizzy: 'hit'
 };
 
 // Clip per attack: [attackType][variant] (see server MOVES); missing clips fall back to punch/kick
@@ -2598,8 +2641,8 @@ function showShieldBreak(player) {
         vfxManager.createBlockSparks(pos);
         vfxManager.createCharacterFlash(player.model, 250);
     }
-    // The dizzy kneel starts from the next snapshot (shieldStunned); plain hit if that clip is missing
-    if (!player.hasClip('kneel')) player.playAnimation('hit');
+    // The dizzy loop starts from the next snapshot (shieldStunned); plain hit if that clip is missing
+    if (!player.hasClip('dizzy')) player.playAnimation('hit');
     showFloatingText(player, '¡ESCUDO ROTO!', '#FF3366');
     triggerScreenShake(0.5, 350);
     if (sfxManager) sfxManager.playHit(30, false);
