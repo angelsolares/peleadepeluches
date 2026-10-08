@@ -11,6 +11,7 @@ Una fiesta de minijuegos 3D hecha con Three.js: la pantalla grande (PC o TV) es 
 | **Carrera** | `race.html` | Sprint de 100 m: alterna los pies en el celular para correr más rápido y **salta** las tres vallas justo antes de llegar; si las pisas, tropiezas. |
 | **Flappy** | `flappy.html` | Vuela entre tubos tocando la pantalla. Desde los 60 m aparecen **tubos móviles** que suben y bajan, y los huecos varían. Último en pie gana. |
 | **La Trae** | `tag.html` | El clásico "la traes": quien la trae al final pierde. Cada ~12 s aparece un **power-up**: ⚡ rayo (velocidad ×1.5) o 🛡 escudo (nadie te puede tocar) durante 4 s. |
+| **Sumo** | `sumo.html` | Un ring redondo que se encoge (8 → 3 m en 60 s, luego muerte súbita). Mantén **EMPUJAR** para cargar y suelta para embestir: el rival sale volando y, si cae fuera, queda eliminado. Último en pie gana. |
 | **Guerra de Cuerda** | `tug.html` | Dos equipos jalan la cuerda **al ritmo del beat**. Jalar en sincronía con el equipo multiplica la fuerza; machacar el botón no sirve. |
 | **Pinta el Piso** | `paint.html` | Pinta más territorio que los demás antes de que acabe el tiempo. |
 | **Infla el Globo** | `balloon.html` | Mantén presionado para soplar, suelta para respirar. El globo truena entre 85 y 95 (no se ve la barra): lee las señales y **amarra** a tiempo para asegurar tu tamaño. |

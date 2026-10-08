@@ -160,7 +160,7 @@ let rematchErrorTimer = null;
 
 // Mode classes that updateControllerUIForMode toggles on #controller-screen
 const MODE_CLASSES = ['race-mode', 'flappy-mode', 'tug-mode', 'paint-mode', 'balloon-mode',
-    'trivia-mode', 'puzzle-mode', 'maze-mode', 'joystick-only'];
+    'trivia-mode', 'puzzle-mode', 'maze-mode', 'sumo-mode', 'joystick-only'];
 
 // =================================
 // Small helpers
@@ -340,6 +340,11 @@ function connectToServer() {
     socket.on('tag-transfer', handleTagTransfer);
     socket.on('tag-powerup', handleTagPowerUp);
     socket.on('tag-game-over', handleTagGameOver);
+
+    // Sumo mode events
+    socket.on('sumo-state', handleSumoState);
+    socket.on('sumo-event', handleSumoEvent);
+    socket.on('sumo-game-over', handleGameOver);
     
     // Tug mode events
     socket.on('tug-state', handleTugState);
@@ -801,6 +806,84 @@ function handleTagPowerUp(event) {
         showTagNotification(`${info.emoji} ¡${info.name}!`, info.color);
     } else if (event.type === 'spawn') {
         vibrate(15);
+    }
+}
+
+// =================================
+// Sumo
+// =================================
+
+/** Only the A button (EMPUJAR) in Sumo; the normal four buttons everywhere else */
+function renderSumoButtons(on) {
+    document.querySelectorAll('.action-btn[data-action], .action-btn[data-input]').forEach(btn => {
+        const isShove = btn.dataset.action === 'punch';
+        if (btn.classList.contains('arena-only')) return; // handled by the arena branch
+        btn.style.display = on && !isShove ? 'none' : '';
+        if (isShove) {
+            const label = btn.querySelector('.btn-action');
+            if (label) label.textContent = on ? 'EMPUJAR' : 'GOLPE';
+            btn.classList.toggle('sumo-shove', on);
+        }
+    });
+}
+
+let sumoCharging = false;
+
+function sumoChargeStart() {
+    if (gameMode !== 'sumo' || !socket || !socket.connected || sumoCharging) return;
+    sumoCharging = true;
+    socket.emit('sumo-charge');
+    vibrate(10);
+}
+
+function sumoShove() {
+    if (gameMode !== 'sumo' || !sumoCharging) return;
+    sumoCharging = false;
+    if (!socket || !socket.connected) return;
+    socket.emit('sumo-shove', (result) => {
+        if (result && result.success) vibrate(result.power >= 0.99 ? [40, 30, 60] : 25);
+    });
+}
+
+function handleSumoState(data) {
+    if (!data || !data.players || !socket) return;
+    const me = data.players.find(p => p.id === socket.id);
+    if (elements.playerDamage) {
+        let text = `${data.aliveCount}`;
+        let color = '';
+        if (me && !me.alive) { text = `${me.placement}º`; color = 'var(--primary)'; }
+        else if (data.gameState === 'suddenDeath') color = 'var(--primary)';
+        if (elements.playerDamage.textContent !== text) elements.playerDamage.textContent = text;
+        elements.playerDamage.style.color = color;
+    }
+    const label = document.querySelector('.health-label');
+    if (label) {
+        const want = me && !me.alive ? 'FUERA' : (data.gameState === 'suddenDeath' ? '¡MUERTE SÚBITA!' : 'QUEDAN');
+        if (label.textContent !== want) label.textContent = want;
+    }
+    // Charge feedback on the button
+    const btn = document.querySelector('.action-btn[data-action="punch"]');
+    if (btn && me) {
+        btn.style.setProperty('--charge', `${Math.round((me.isCharging ? me.chargeRatio : 0) * 100)}%`);
+        btn.classList.toggle('full', !!me.isCharging && me.chargeRatio >= 1);
+    }
+}
+
+function handleSumoEvent(event) {
+    if (!event || !socket) return;
+    if (event.type === 'shove-hit' && event.targetId === socket.id) {
+        vibrate(HIT_VIBRATION.hit);
+    } else if (event.type === 'ring-out') {
+        if (event.playerId === socket.id) {
+            sumoCharging = false;
+            vibrate([80, 40, 80, 40, 200]);
+            showTagNotification(`¡FUERA! ${event.placement}º lugar`, '#ff3366');
+        } else if (event.by === socket.id) {
+            showTagNotification('¡LO SACASTE!', '#ffaa33');
+        }
+    } else if (event.type === 'sudden-death') {
+        vibrate([60, 60, 60]);
+        showTagNotification('¡MUERTE SÚBITA!', '#ff3366');
     }
 }
 
@@ -1683,8 +1766,18 @@ function updateControllerUIForMode() {
     if (joystickHint) joystickHint.textContent = '';
     resetSmashShieldUI();
     resetTagHud();
+    renderSumoButtons(false);
 
-    if (gameMode === 'trivia') {
+    if (gameMode === 'sumo') {
+        // Sumo: 8-direction joystick + one big EMPUJAR button (hold to charge, release to dash)
+        if (controllerBody) controllerBody.style.display = 'flex';
+        if (controllerScreen) controllerScreen.classList.add('sumo-mode');
+        if (healthLabel) healthLabel.textContent = 'QUEDAN';
+        if (joystickHint) joystickHint.textContent = 'MANTÉN EMPUJAR PARA CARGAR';
+        renderSumoButtons(true);
+
+        console.log('[Controller] Sumo mode UI configured');
+    } else if (gameMode === 'trivia') {
         // Trivia mode
         if (controllerBody) controllerBody.style.display = 'none';
         if (triviaControls) triviaControls.style.display = 'flex';
@@ -2553,7 +2646,7 @@ const joystick = {
  */
 function getJoystickProfile() {
     if (gameMode === 'arena') return 'arena';
-    if (gameMode === 'tag' || gameMode === 'paint' || gameMode === 'maze') return 'eight';
+    if (gameMode === 'tag' || gameMode === 'paint' || gameMode === 'maze' || gameMode === 'sumo') return 'eight';
     return 'smash';
 }
 
@@ -2773,11 +2866,17 @@ function setupControllerInput() {
         btn.addEventListener('touchend', (e) => {
             e.preventDefault();
             btn.classList.remove('pressed');
+            if (action === 'punch') sumoShove(); // Sumo: release = dash (no-op elsewhere)
         }, { passive: false });
-        
+        btn.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            btn.classList.remove('pressed');
+            if (action === 'punch') sumoShove();
+        }, { passive: false });
+
         // Mouse events
         btn.addEventListener('mousedown', () => handleAction(action, btn));
-        btn.addEventListener('mouseup', () => btn.classList.remove('pressed'));
+        btn.addEventListener('mouseup', () => { btn.classList.remove('pressed'); if (action === 'punch') sumoShove(); });
     });
     
     // Block button (hold to maintain)
@@ -2820,6 +2919,12 @@ function handleAction(action, btn) {
 
     // While reconnecting, socket.io would buffer these and replay stale attacks later
     if (!socket || !socket.connected) return;
+
+    // Sumo: pressing starts the charge; the release (touchend) sends the shove
+    if (gameMode === 'sumo') {
+        if (action === 'punch') sumoChargeStart();
+        return;
+    }
 
     // Handle actions based on game mode
     if (gameMode === 'arena') {

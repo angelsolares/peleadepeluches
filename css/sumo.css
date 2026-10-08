@@ -1,0 +1,448 @@
+/* ==================================
+   SUMO DE PELUCHES - Host screen styles
+   (loaded after css/style.css)
+   ================================== */
+
+.hidden {
+    display: none !important;
+}
+
+.game-title {
+    background: linear-gradient(135deg, #ffcc00, #ff6600, #ff3366);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ---------- Top HUD: title, timer, alive counter ---------- */
+
+#sumo-hud {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.sumo-timer {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px 30px;
+    border-radius: 50px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    transition: color 0.3s ease, border-color 0.3s ease;
+}
+
+.sumo-timer.urgent {
+    color: #ff3366;
+    border-color: rgba(255, 51, 102, 0.6);
+    text-shadow: 0 0 25px rgba(255, 51, 102, 0.8);
+    animation: sumo-urgent 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes sumo-urgent {
+    from { transform: scale(1); }
+    to { transform: scale(1.06); }
+}
+
+.sumo-alive {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #00ffcc;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    text-shadow: 0 0 12px rgba(0, 255, 204, 0.6);
+}
+
+/* ---------- Center countdown (3, 2, 1, ¡SUMO!) ---------- */
+
+#sumo-countdown {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9rem;
+    font-weight: 900;
+    color: #ffcc00;
+    text-shadow: 0 0 40px rgba(255, 204, 0, 0.8), 0 0 80px rgba(255, 102, 0, 0.5);
+    pointer-events: none;
+    z-index: 120;
+    white-space: nowrap;
+}
+
+#sumo-countdown.pop {
+    animation: sumo-pop 0.5s ease-out;
+}
+
+@keyframes sumo-pop {
+    0% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+/* ---------- Banner: MUERTE SÚBITA / winner / rematch ---------- */
+
+.sumo-banner {
+    position: absolute;
+    top: 150px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.2rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    padding: 10px 36px;
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid currentColor;
+    color: #fff;
+    text-shadow: 0 0 20px currentColor;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 110;
+    animation: sumo-banner-in 0.4s ease-out;
+}
+
+.sumo-banner.sudden-death {
+    color: #ff3366;
+    animation: sumo-banner-in 0.4s ease-out, sumo-blink 0.8s ease-in-out infinite alternate 0.4s;
+}
+
+.sumo-banner.winner {
+    color: #ffcc00;
+}
+
+.sumo-banner.rematch {
+    color: #00ffcc;
+}
+
+@keyframes sumo-banner-in {
+    0% { transform: translateX(-50%) scale(1.6); opacity: 0; }
+    100% { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+
+@keyframes sumo-blink {
+    from { opacity: 1; }
+    to { opacity: 0.55; }
+}
+
+/* ---------- Side list of players ---------- */
+
+#sumo-player-list {
+    position: absolute;
+    left: 20px;
+    top: 100px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.sumo-player-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 15px;
+    border-radius: 10px;
+    border-left: 5px solid var(--player-color, #fff);
+    min-width: 220px;
+    transition: all 0.3s ease;
+}
+
+.sumo-player-item.out {
+    opacity: 0.5;
+    filter: grayscale(0.6);
+}
+
+.sumo-player-item.hot {
+    animation: sumo-row-hot 1.2s ease-out;
+}
+
+@keyframes sumo-row-hot {
+    0% { background: rgba(255, 204, 0, 0.45); transform: translateX(12px); }
+    100% { background: rgba(0, 0, 0, 0.7); transform: translateX(0); }
+}
+
+.sumo-player-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.9rem;
+    color: #fff;
+    flex: 1;
+    text-transform: uppercase;
+}
+
+.sumo-player-status {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    color: #00ffcc;
+}
+
+.sumo-player-item.out .sumo-player-status {
+    color: #ff3366;
+}
+
+/* ---------- CSS2D labels over the players ---------- */
+
+/* Attacker of a ring-out (and the winner) */
+.sumo-name-label.sumo-name-hot {
+    background: rgba(255, 204, 0, 0.85) !important;
+    color: #000 !important;
+    box-shadow: 0 0 18px #ffcc00;
+}
+
+/* "¡FUERA!" shout. Uses translate/scale (not transform) so the inline transform
+   CSS2DRenderer uses to place the label over the player is not overridden */
+.sumo-float-text {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 22px;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px currentColor, 0 2px 4px rgba(0, 0, 0, 0.8);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: sumo-float-up 1.3s ease-out forwards;
+}
+
+.sumo-float-text.out {
+    font-size: 28px;
+}
+
+@keyframes sumo-float-up {
+    0% { translate: 0 10px; scale: 0.6; opacity: 0; }
+    20% { translate: 0 0; scale: 1.3; opacity: 1; }
+    100% { translate: 0 -50px; scale: 1; opacity: 0; }
+}
+
+/* ---------- Results overlay (ranking + rematch) ---------- */
+
+#round-scores h3 {
+    width: 100%;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1rem;
+    letter-spacing: 3px;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
+}
+
+.sumo-rank-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    max-width: 360px;
+    padding: 8px 16px;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 10px;
+    border-left: 5px solid var(--player-color, #fff);
+    font-family: 'Orbitron', sans-serif;
+    color: #fff;
+}
+
+.sumo-rank-row.first {
+    background: rgba(255, 204, 0, 0.15);
+    border-color: #ffcc00;
+    box-shadow: 0 0 15px rgba(255, 204, 0, 0.3);
+}
+
+.sumo-rank-place {
+    min-width: 2.2em;
+    font-size: 1.2rem;
+    font-weight: 900;
+    color: #ffcc00;
+}
+
+.sumo-rank-name {
+    flex: 1;
+    text-transform: uppercase;
+}
+
+.round-end-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 25px;
+}
+
+.btn-rematch,
+.round-end-actions .btn-return-menu {
+    padding: 15px 40px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 900;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: all 0.3s ease;
+}
+
+.btn-rematch {
+    background: linear-gradient(135deg, #ffcc00, #ff6600);
+    color: #000;
+    box-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+}
+
+.btn-rematch:not(:disabled):hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px rgba(255, 204, 0, 0.8);
+}
+
+.btn-rematch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.round-end-actions .btn-return-menu {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.rematch-error {
+    min-height: 1.2em;
+    margin-top: 10px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.85rem;
+    color: #ff3366;
+}
+
+/* ---------- Room code / QR overlay (lobby) ---------- */
+
+#room-code-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 10, 21, 0.95);
+    border: 3px solid #ffcc00;
+    border-radius: 24px;
+    padding: 40px;
+    z-index: 1000;
+    text-align: center;
+    font-family: 'Orbitron', sans-serif;
+    box-shadow: 0 0 50px rgba(255, 204, 0, 0.3);
+    min-width: 340px;
+}
+
+.room-code-content h2 {
+    color: #ffcc00;
+    margin-bottom: 20px;
+    font-size: 1.5rem;
+}
+
+.room-code {
+    font-size: 4rem;
+    font-weight: 900;
+    color: #fff;
+    letter-spacing: 15px;
+    margin-bottom: 20px;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+}
+
+.qr-container {
+    background: white;
+    padding: 15px;
+    border-radius: 16px;
+    display: inline-block;
+    margin-bottom: 20px;
+}
+
+.qr-code {
+    display: block;
+    width: 150px;
+    height: 150px;
+}
+
+#room-code-overlay p {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+}
+
+.url-display {
+    color: #ff3366;
+    font-size: 0.8rem;
+    margin: 8px 0 10px;
+    opacity: 0.8;
+    word-break: break-all;
+}
+
+#start-game-btn {
+    width: 100%;
+    padding: 18px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #ffcc00, #ff6600);
+    border: none;
+    border-radius: 12px;
+    color: #000;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+#start-game-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+#start-game-btn:not(:disabled):hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px #ffcc00;
+}
+
+#player-count-lobby {
+    margin-top: 15px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.9rem;
+}
+
+/* ---------- Baby shower theme ---------- */
+
+.baby-theme .sumo-timer,
+.baby-theme .sumo-player-item,
+.baby-theme .sumo-banner {
+    background: rgba(255, 255, 255, 0.85);
+    color: #666;
+    text-shadow: none;
+}
+
+.baby-theme .sumo-player-name {
+    color: #555;
+}
+
+.baby-theme .sumo-alive {
+    color: #ff6fa5;
+    text-shadow: none;
+}
+
+.baby-theme #sumo-countdown {
+    color: #ff6fa5;
+    text-shadow: 0 0 30px rgba(255, 111, 165, 0.5);
+}
+
+/* ---------- Small screens ---------- */
+
+@media (max-width: 900px) {
+    .sumo-timer { font-size: 2rem; padding: 6px 20px; }
+    #sumo-countdown { font-size: 6rem; }
+    .sumo-banner { font-size: 1.4rem; top: 120px; }
+    #sumo-player-list { top: 90px; left: 10px; }
+    .sumo-player-item { min-width: 160px; padding: 6px 10px; }
+}

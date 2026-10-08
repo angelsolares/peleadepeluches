@@ -15,6 +15,7 @@ import ArenaStateManager from './arenaState.js';
 import { RaceStateManager } from './raceState.js';
 import { FlappyStateManager } from './flappyState.js';
 import TagStateManager from './tagState.js';
+import SumoStateManager from './sumoState.js';
 import TugStateManager from './tugState.js';
 import PaintStateManager from './paintState.js';
 import BalloonStateManager from './balloonState.js';
@@ -95,6 +96,7 @@ const arenaStateManager = new ArenaStateManager(lobbyManager);
 const raceStateManager = new RaceStateManager(lobbyManager);
 const flappyStateManager = new FlappyStateManager();
 const tagStateManager = new TagStateManager(lobbyManager);
+const sumoStateManager = new SumoStateManager(lobbyManager);
 const tugStateManager = new TugStateManager(lobbyManager);
 const paintStateManager = new PaintStateManager(lobbyManager);
 const balloonStateManager = new BalloonStateManager(lobbyManager);
@@ -233,6 +235,7 @@ const flappyLoops = new Map();
 
 // Tag game loops
 const tagLoops = new Map();
+const sumoLoops = new Map();
 
 // Tug game loops
 const tugLoops = new Map();
@@ -417,6 +420,8 @@ io.on('connection', (socket) => {
                 arenaStateManager.initializeArena(roomCode);
             } else if (room.gameMode === 'tag') {
                 tagStateManager.initializeTag(roomCode);
+            } else if (room.gameMode === 'sumo') {
+                sumoStateManager.initializeSumo(roomCode);
             } else if (room.gameMode === 'paint') {
                 paintStateManager.initializePaint(roomCode);
             } else if (room.gameMode === 'balloon') {
@@ -453,6 +458,8 @@ io.on('connection', (socket) => {
                 flappyStateManager.startCountdown(roomCode, io);
             } else if (room.gameMode === 'tag') {
                 startTagLoop(roomCode);
+            } else if (room.gameMode === 'sumo') {
+                startSumoLoop(roomCode);
             } else if (room.gameMode === 'tug') {
                 startTugLoop(roomCode);
             } else if (room.gameMode === 'paint') {
@@ -945,6 +952,20 @@ io.on('connection', (socket) => {
     });
 
     /**
+     * Sumo: hold the shove button to charge, release to dash
+     */
+    socket.on('sumo-charge', () => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        if (roomCode) sumoStateManager.handleChargeStart(socket.id, roomCode);
+    });
+
+    socket.on('sumo-shove', (callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        const result = roomCode ? sumoStateManager.handleShove(socket.id, roomCode) : { success: false, reason: 'no-room' };
+        if (typeof callback === 'function') callback(result);
+    });
+
+    /**
      * Balloon inflate action (legacy tap: a tiny puff)
      */
     socket.on('balloon-inflate', () => {
@@ -1196,6 +1217,10 @@ function startModeRound(roomCode, gameMode) {
         tagStateManager.initializeTag(roomCode);
         stopTagLoop(roomCode);
         startTagLoop(roomCode);
+    } else if (gameMode === 'sumo') {
+        sumoStateManager.initializeSumo(roomCode);
+        stopSumoLoop(roomCode);
+        startSumoLoop(roomCode);
     } else if (gameMode === 'tug') {
         const tugPlayers = tugStateManager.initializeTug(roomCode);
         if (tugPlayers) players = tugPlayers;
@@ -1294,6 +1319,7 @@ function isModeRunning(roomCode, gameMode) {
             return !!game && !game.gameOver;
         }
         case 'tag': return tagLoops.has(roomCode);
+        case 'sumo': return sumoLoops.has(roomCode);
         case 'tug': return tugLoops.has(roomCode);
         case 'paint': return paintLoops.has(roomCode);
         case 'balloon': return balloonLoops.has(roomCode);
@@ -1348,6 +1374,8 @@ function handleDisconnect(socket) {
             stopRaceLoop(result.roomCode);
             stopFlappyLoop(result.roomCode);
             stopTagLoop(result.roomCode);
+            stopSumoLoop(result.roomCode);
+            sumoStateManager.cleanup(result.roomCode);
             stopTugLoop(result.roomCode);
             stopPaintLoop(result.roomCode);
             stopBalloonLoop(result.roomCode);
@@ -1706,11 +1734,67 @@ function startTagLoop(roomCode) {
  */
 function stopTagLoop(roomCode) {
     const loop = tagLoops.get(roomCode);
-    
+
     if (loop) {
         clearInterval(loop);
         tagLoops.delete(roomCode);
         console.log(`[Tag] Stopped tag loop for room ${roomCode}`);
+    }
+}
+
+/**
+ * Start sumo game loop for a room
+ */
+function startSumoLoop(roomCode) {
+    stopSumoLoop(roomCode);
+
+    const tickRate = 1000 / 60;
+
+    const loop = setInterval(() => {
+        const state = sumoStateManager.processTick(roomCode);
+
+        if (state) {
+            io.to(roomCode).emit('sumo-state', state);
+
+            // One-off events (shoves, ring-outs, sudden death, ring shrink)
+            for (const event of sumoStateManager.drainEvents(roomCode)) {
+                io.to(roomCode).emit('sumo-event', event);
+            }
+
+            if (state.gameState === 'finished') {
+                stopSumoLoop(roomCode);
+
+                const room = lobbyManager.rooms.get(roomCode);
+                if (room && room.tournamentRounds > 1) {
+                    const roundResult = handleRoundEnd(roomCode, state.winner?.id, state.winner?.name, 'sumo');
+                    if (roundResult.action === 'tournament-end') {
+                        io.to(roomCode).emit('tournament-ended', { ...roundResult, gameMode: 'sumo', ranking: state.ranking });
+                    } else if (roundResult.action === 'round-end') {
+                        io.to(roomCode).emit('round-ended', { ...roundResult, gameMode: 'sumo', ranking: state.ranking });
+                        scheduleRoomTimer(roomCode, () => startNextRound(roomCode, 'sumo'), 5000);
+                    }
+                } else {
+                    io.to(roomCode).emit('sumo-game-over', state);
+                }
+            }
+        } else {
+            stopSumoLoop(roomCode);
+        }
+    }, tickRate);
+
+    sumoLoops.set(roomCode, loop);
+    console.log(`[Sumo] Started sumo loop for room ${roomCode}`);
+}
+
+/**
+ * Stop sumo game loop for a room
+ */
+function stopSumoLoop(roomCode) {
+    const loop = sumoLoops.get(roomCode);
+    if (loop) {
+        clearInterval(loop);
+        sumoLoops.delete(roomCode);
+        console.log(`[Sumo] Stopped sumo loop for room ${roomCode}`);
     }
 }
 

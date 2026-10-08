@@ -13,6 +13,7 @@ import ModeSelector, { GAME_MODES } from './modes/ModeSelector.js';
 import TournamentManager from './tournament/TournamentManager.js';
 import { loadClips, loadModel } from './assets/AssetLoader.js';
 import { retargetMixamoClip } from './animation/MixamoRetarget.js';
+import { KOBurstManager, koScreenPunch } from './effects/KOBurst.js';
 
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
@@ -2923,6 +2924,7 @@ function showFloatingText(player, text, color = '#FFFFFF') {
 
 // KO slow motion: { until (performance.now), focus: THREE.Vector3 }
 let slowMo = null;
+let koBursts = null; // KOBurstManager, created on the first KO
 const SLOWMO_SCALE = 0.3;
 
 function startSlowMo(ko) {
@@ -3563,14 +3565,13 @@ function triggerKOEffect(playerId) {
         playerColor = colors[colorIndex] || 0xff3366;
     }
     
-    // Create explosion particles
+    // Smash-style burst at the blast point: sparks, shockwave rings and streaks in the player's color
+    if (!koBursts) koBursts = new KOBurstManager(scene, camera, THREE);
+    koBursts.spawn(effectPosition, playerColor, { scale: 1.3, sparks: 140 });
     createKOExplosion(effectPosition, playerColor);
-    
-    // Intense screen shake
-    triggerScreenShake(0.8, 500);
-    
-    // Screen flash
-    triggerScreenFlash(playerColor);
+
+    // Flash + intense screen shake
+    koScreenPunch(document.getElementById('game-container'), playerColor, { shake: 22, duration: 550 });
     
     // SFX: KO sound
     if (sfxManager) {
@@ -3960,6 +3961,7 @@ function animate() {
     if (vfxManager) {
         vfxManager.update(delta);
     }
+    if (koBursts) koBursts.update(delta);
     
     // Update camera - Side view following system (Smash Bros style)
     updateSideViewCamera();

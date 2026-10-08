@@ -7,6 +7,7 @@ export const GAME_MODES = {
     SMASH: 'smash',
     ARENA: 'arena',
     TAG: 'tag',
+    SUMO: 'sumo',
     TUG: 'tug',
     PAINT: 'paint',
     BALLOON: 'balloon',
@@ -52,6 +53,19 @@ export const MODE_CONFIG = {
             'Vista aérea'
         ],
         color: '#ffcc00'
+    },
+    [GAME_MODES.SUMO]: {
+        id: 'sumo',
+        name: 'Sumo',
+        description: 'Ring que se encoge - ¡Empuja a los demás fuera!',
+        icon: '🥋',
+        features: [
+            'Hasta 8 jugadores',
+            'Empujón cargado',
+            'Ring que se encoge',
+            'Último en pie gana'
+        ],
+        color: '#ff8800'
     },
     [GAME_MODES.TUG]: {
         id: 'tug',
