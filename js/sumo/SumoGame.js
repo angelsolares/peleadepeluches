@@ -21,9 +21,9 @@ import { KOBurstManager, koScreenPunch } from '../effects/KOBurst.js';
 const SUMO_CONFIG = {
     RING_RADIUS: 8,            // Server start radius (ring resets to this on every round)
     RING_LERP: 8,              // Ring radius smoothing (1/s)
-    CAMERA_ANGLE: Math.PI / 3, // Same angled top-down look as tag
-    CAMERA_BASE: 9,            // Camera height = BASE + PER_RADIUS * ringRadius
-    CAMERA_PER_RADIUS: 1.8,
+    CAMERA_ANGLE: Math.PI * 0.26, // ~47° elevation: lower than tag so the characters read as figures, not dots
+    CAMERA_BASE: 7.5,          // Camera height = BASE + PER_RADIUS * ringRadius
+    CAMERA_PER_RADIUS: 1.55,
     CAMERA_LERP: 2.5,          // Camera zoom smoothing (1/s)
     HIDE_BELOW_Y: -6,          // Falling players disappear below this
     FALL_GRAVITY: 22,          // Local fall when the server loop already stopped
@@ -473,7 +473,7 @@ class SumoGame {
 
         // Camera zooms in as the ring shrinks
         this.cameraHeight = this.cameraHeightFor(SUMO_CONFIG.RING_RADIUS);
-        this.cameraLookAt = new THREE.Vector3(0, 0.5, 0);
+        this.cameraLookAt = new THREE.Vector3(0, 0.9, 0); // Slightly above the floor: the ring sits a bit lower on screen, clear of the HUD
 
         // HUD caches (DOM writes only on change)
         this.hud = {};
