@@ -10,6 +10,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL } from '../config.js';
 import TournamentManager from '../tournament/TournamentManager.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
+import { openRoom, installParty, isPartyMode } from '../party/PartyClient.js';
 
 // Race configuration
 const RACE_CONFIG = {
@@ -856,7 +857,8 @@ class RaceGame {
             reconnection: true,
             reconnectionAttempts: 5
         });
-        
+        installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
+
         this.socket.on('connect', () => {
             if (this.socket.recovered) {
                 // Connection state recovered: same socket id and room, missed events replayed.
@@ -922,7 +924,14 @@ class RaceGame {
         
         this.socket.on('game-started', (data) => {
             console.log('[Race] Game started!', data);
-            
+
+            // Leave the lobby even when the host did not click (Modo Fiesta: the server starts
+            // the match by itself). Same transition as the 'start-game' ack; idempotent.
+            if (this.gameState === 'lobby' || this.gameState === 'finished') {
+                this.gameState = 'countdown';
+                this.updateAnimationDisplay('¡Preparándose para la carrera!');
+            }
+
             // Clear existing players and add all from server
             this.clearAllPlayers();
             this.finishedPlayers.clear();
@@ -1009,18 +1018,17 @@ class RaceGame {
         
         this.selectedCharacter = character;
         
-        // Use callback like Arena does
+        // Use callback like Arena does (in a party this re-attaches to the existing room)
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
-        this.socket.emit('create-room', { 
-            gameMode: 'race',
+        openRoom(this.socket, 'race', {
             character: character,
             isBabyShower: isBabyShower
         }, (response) => {
-            console.log('[Race] create-room response:', response);
+            console.log('[Race] open-room response:', response);
             if (response && response.success) {
                 this.roomCode = response.roomCode;
                 this.isHost = true;
-                console.log(`[Race] Room created: ${this.roomCode}`);
+                console.log(`[Race] Room ready: ${this.roomCode}`);
                 this.updateAnimationDisplay(`Sala: ${this.roomCode} - Esperando corredores...`);
                 this.showRoomCode(this.roomCode);
             } else {
@@ -1104,6 +1112,8 @@ class RaceGame {
             document.getElementById('start-race-btn').addEventListener('click', () => {
                 this.startGame();
             });
+            // Modo Fiesta: the server starts the race by itself
+            if (isPartyMode()) document.getElementById('start-race-btn').style.display = 'none';
             
             // Add rounds selector listeners
             this.setupRoundsSelector();
@@ -1504,11 +1514,16 @@ class RaceGame {
         `;
         document.body.appendChild(overlay);
 
-        const rematchBtn = overlay.querySelector('.btn-rematch');
-        rematchBtn.addEventListener('click', () => this.requestRematch(rematchBtn));
-        overlay.querySelector('.btn-winner-menu').addEventListener('click', () => {
-            window.location.href = 'index.html';
-        });
+        if (isPartyMode()) {
+            // Modo Fiesta: the server moves the host to the scoreboard / next game
+            overlay.querySelector('.winner-actions')?.remove();
+        } else {
+            const rematchBtn = overlay.querySelector('.btn-rematch');
+            rematchBtn.addEventListener('click', () => this.requestRematch(rematchBtn));
+            overlay.querySelector('.btn-winner-menu').addEventListener('click', () => {
+                window.location.href = 'index.html';
+            });
+        }
         this.rematchPending = false;
         
         document.getElementById('animation-name').textContent = `¡${data.winnerName || 'Jugador'} GANA!`;

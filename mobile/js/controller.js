@@ -345,6 +345,10 @@ function connectToServer() {
     socket.on('sumo-state', handleSumoState);
     socket.on('sumo-event', handleSumoEvent);
     socket.on('sumo-game-over', handleGameOver);
+
+    // Modo Fiesta: game i/n and cumulative standings
+    socket.on('party-info', handlePartyInfo);
+    socket.on('party-go', () => {}); // host-only navigation; ignored on phones
     
     // Tug mode events
     socket.on('tug-state', handleTugState);
@@ -885,6 +889,44 @@ function handleSumoEvent(event) {
         vibrate([60, 60, 60]);
         showTagNotification('¡MUERTE SÚBITA!', '#ff3366');
     }
+}
+
+// =================================
+// Modo Fiesta
+// =================================
+
+const PARTY_LABELS = { smash: 'Pelea', sumo: 'Sumo', tag: 'La Trae', race: 'Carrera', flappy: 'Flappy', tug: 'Cuerda', paint: 'Pinta el Piso', balloon: 'Globo' };
+let partyLastState = null;
+
+/**
+ * 'party-info' { index, total, state, scores: [{id,name,points,delta}], lastResult, nextGame }
+ * Shows a small badge with the game number and my standing; a pop-up when a game ends.
+ */
+function handlePartyInfo(info) {
+    if (!info || !socket) return;
+    let badge = document.getElementById('party-phone-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'party-phone-badge';
+        badge.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:900;padding:4px 12px;border-radius:14px;' +
+            'background:rgba(10,10,21,0.85);border:1px solid #ff8800;color:#ff8800;font-family:Orbitron,sans-serif;font-size:0.7rem;letter-spacing:1px;pointer-events:none;white-space:nowrap;';
+        document.body.appendChild(badge);
+    }
+    const scores = Array.isArray(info.scores) ? info.scores : [];
+    const myIndex = scores.findIndex(s => s.id === socket.id);
+    const me = myIndex >= 0 ? scores[myIndex] : null;
+    const gameNo = typeof info.index === 'number' ? info.index + 1 : null;
+    const text = `🎉 ${gameNo ? `JUEGO ${gameNo}/${info.total}` : 'FIESTA'}${me ? ` · ${myIndex + 1}º · ${me.points} pts` : ''}`;
+    if (badge.textContent !== text) badge.textContent = text;
+
+    // A game just ended: show what I earned and what comes next
+    if (info.state === 'scores' && partyLastState !== 'scores' && me) {
+        const next = info.nextGame ? PARTY_LABELS[info.nextGame] || info.nextGame : null;
+        showTagNotification(`${me.delta > 0 ? `+${me.delta} pts` : 'Sin puntos'} · vas ${myIndex + 1}º${next ? ` · Sigue: ${next}` : ''}`, me.delta > 0 ? '#ff8800' : '#555');
+    } else if (info.state === 'finished' && partyLastState !== 'finished' && me) {
+        showTagNotification(myIndex === 0 ? '🏆 ¡GANASTE LA FIESTA!' : `Fiesta terminada · ${myIndex + 1}º lugar`, myIndex === 0 ? '#ffcc00' : '#9966ff');
+    }
+    partyLastState = info.state;
 }
 
 function handleTagTransfer(data) {

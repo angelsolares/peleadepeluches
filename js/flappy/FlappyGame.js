@@ -9,6 +9,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { SERVER_URL } from '../config.js';
 import TournamentManager from '../tournament/TournamentManager.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
+import { openRoom, installParty } from '../party/PartyClient.js';
 
 // Character Models Configuration
 const CHARACTER_MODELS = {
@@ -794,6 +795,7 @@ class FlappyGame {
     setupSocket() {
         console.log('[FlappyGame] Connecting to server...');
         this.socket = io(SERVER_URL);
+        installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
         
         this.socket.on('connect', () => {
             // Reconnected within the recovery window: same socket id, same room, missed events replayed.
@@ -1013,10 +1015,10 @@ class FlappyGame {
     }
     
     createRoom() {
+        // In a party (?party=CODE&token=T) this re-attaches to the existing room instead
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
-        this.socket.emit('create-room', {
+        openRoom(this.socket, 'flappy', {
             character: this.selectedCharacter,
-            gameMode: 'flappy',
             isBabyShower: isBabyShower
         }, (response) => {
             if (response && response.roomCode) {

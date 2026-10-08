@@ -13,6 +13,7 @@ import SumoPlayerController from './SumoPlayerController.js';
 import TournamentManager from '../tournament/TournamentManager.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
 import { KOBurstManager, koScreenPunch } from '../effects/KOBurst.js';
+import { openRoom, installParty } from '../party/PartyClient.js';
 
 // =================================
 // Configuration
@@ -899,6 +900,7 @@ class SumoGame {
     initializeSocket() {
         console.log('[Sumo] Connecting to server:', SERVER_URL);
         this.socket = io(SERVER_URL);
+        installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
 
         // Tournament rounds HUD + round/tournament overlays (shared with the other modes)
         this.tournament = new TournamentManager(this.socket, 'sumo');
@@ -922,15 +924,15 @@ class SumoGame {
                 this.gameStarted = false;
             }
 
+            // In a party (?party=CODE&token=T) this re-attaches to the existing room instead
             const isBabyShower = document.documentElement.classList.contains('baby-theme');
-            this.socket.emit('create-room', {
-                gameMode: 'sumo',
+            openRoom(this.socket, 'sumo', {
                 isBabyShower: isBabyShower
             }, (response) => {
                 if (response && response.success) {
                     this.roomCode = response.roomCode;
                     this.showRoomCode(this.roomCode);
-                    console.log(`[Sumo] Room created: ${this.roomCode}`);
+                    console.log(`[Sumo] Room ready: ${this.roomCode}`);
                 } else {
                     console.error('[Sumo] Could not create the room:', response);
                 }

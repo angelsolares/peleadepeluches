@@ -11,6 +11,7 @@ import { AnimationController } from '../animation/AnimationController.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
 import { SFXManager } from '../audio/SFXManager.js';
 import VFXManager from '../effects/VFXManager.js';
+import { openRoom, installParty, isPartyMode } from '../party/PartyClient.js';
 
 const BALLOON_CONFIG = {
     CAMERA_HEIGHT: 25,      // Altura para ver mejor los globos gigantes
@@ -509,6 +510,7 @@ class BalloonGame {
         script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
         script.onload = () => {
             this.socket = io(SERVER_URL);
+            installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
             
             this.socket.on('connect', () => {
                 // Recovered reconnect: same socket id and room, missed events are replayed.
@@ -518,14 +520,16 @@ class BalloonGame {
                     return;
                 }
                 console.log('[Balloon] Connected to server');
+                // In a party (?party=CODE&token=T) this re-attaches to the existing room instead
                 const isBabyShower = document.documentElement.classList.contains('baby-theme');
-                this.socket.emit('create-room', { 
-                    gameMode: 'balloon',
+                openRoom(this.socket, 'balloon', {
                     isBabyShower: isBabyShower
                 }, (response) => {
-                    if (response.success) {
+                    if (response && response.success) {
                         this.roomCode = response.roomCode;
                         this.showRoomUI(this.roomCode, response.room);
+                    } else {
+                        console.error('[Balloon] Could not create the room:', response);
                     }
                 });
             });
@@ -656,6 +660,8 @@ class BalloonGame {
             console.log('[Balloon] Start game button clicked');
             this.socket.emit('start-game');
         };
+        // Modo Fiesta: the server starts the match by itself
+        if (isPartyMode()) document.getElementById('start-btn').style.display = 'none';
     }
 
     hideRoomUI() {
@@ -858,7 +864,8 @@ class BalloonGame {
             status.appendChild(sub);
         }
 
-        if (final) {
+        // Modo Fiesta: the server moves the host to the scoreboard / next game (no buttons)
+        if (final && !isPartyMode()) {
             const buttons = document.createElement('div');
             buttons.style.cssText = 'display: flex; gap: 20px; justify-content: center; margin-top: 30px; flex-wrap: wrap;';
 

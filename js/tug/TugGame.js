@@ -9,6 +9,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationController.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
+import { openRoom, installParty, isPartyMode } from '../party/PartyClient.js';
 
 const TUG_CONFIG = {
     ROPE_LENGTH: 30, // Reduced from 40
@@ -670,6 +671,7 @@ class TugGame {
         script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
         script.onload = () => {
             this.socket = io(SERVER_URL);
+            installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
             this.socket.on('connect', () => {
                 // Recovered connection (Socket.IO connectionStateRecovery): same id, same room,
                 // missed events are replayed. Creating a room here would orphan all phones.
@@ -685,14 +687,16 @@ class TugGame {
                     this.gameStarted = false;
                 }
 
+                // In a party (?party=CODE&token=T) this re-attaches to the existing room instead
                 const isBabyShower = document.documentElement.classList.contains('baby-theme');
-                this.socket.emit('create-room', {
-                    gameMode: 'tug',
+                openRoom(this.socket, 'tug', {
                     isBabyShower: isBabyShower
                 }, (response) => {
-                    if (response.success) {
+                    if (response && response.success) {
                         this.roomCode = response.roomCode;
                         this.showRoomUI(this.roomCode);
+                    } else {
+                        console.error('[Tug] Could not create the room:', response);
                     }
                 });
             });
@@ -772,6 +776,8 @@ class TugGame {
         document.body.appendChild(overlay);
 
         document.getElementById('start-btn').onclick = () => this.socket.emit('start-game');
+        // Modo Fiesta: the server starts the match by itself
+        if (isPartyMode()) document.getElementById('start-btn').style.display = 'none';
     }
 
     updateLobbyCount(count) {

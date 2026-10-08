@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modo Fiesta - Pelea de Peluches</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/party.css">
+    <link rel="stylesheet" href="css/party-page.css">
+</head>
+<body class="party-page">
+    <div id="party-bg"></div>
+
+    <header id="party-header">
+        <div class="party-logo">🎉 <span>MODO FIESTA</span></div>
+        <div id="party-header-info" class="party-header-info"></div>
+        <div id="party-conn" class="party-conn">CONECTANDO…</div>
+    </header>
+
+    <main id="party-main">
+
+        <!-- Shown while connecting / attaching -->
+        <section id="view-loading" class="party-view view-center">
+            <div class="spinner"></div>
+            <p id="loading-text" class="loading-text">Conectando con el servidor…</p>
+        </section>
+
+        <!-- 1) LOBBY: room code + QR, players, game count, start -->
+        <section id="view-lobby" class="party-view hidden">
+            <div class="lobby-grid">
+                <aside class="panel panel-room">
+                    <h2>SALA</h2>
+                    <div id="lobby-room-code" class="room-code-big">····</div>
+                    <div class="qr-box"><img id="lobby-qr" alt="Código QR para unirse"></div>
+                    <p class="hint">Escanea con tu celular para unirte</p>
+                    <div id="lobby-url" class="url-line"></div>
+                </aside>
+
+                <section class="panel panel-players">
+                    <h2>JUGADORES <span id="lobby-player-count" class="h2-aside">0 / 8</span></h2>
+                    <ul id="lobby-players" class="player-slots"></ul>
+                </section>
+
+                <aside class="panel panel-setup">
+                    <h2>JUEGOS <span class="h2-aside">¿cuántos?</span></h2>
+                    <div id="lobby-games-selector" class="games-selector">
+                        <button type="button" class="games-btn" data-count="3">3</button>
+                        <button type="button" class="games-btn" data-count="5">5</button>
+                        <button type="button" class="games-btn" data-count="8">8</button>
+                    </div>
+                    <h3 class="sub-title">Pueden salir</h3>
+                    <ul id="lobby-modes" class="mode-chips"></ul>
+                    <div class="setup-spacer"></div>
+                    <button id="party-start-btn" type="button" class="party-btn party-btn-primary" disabled>¡EMPEZAR FIESTA!</button>
+                    <div id="lobby-status" class="status-line">Esperando jugadores…</div>
+                </aside>
+            </div>
+        </section>
+
+        <!-- 2) SCORES: between games -->
+        <section id="view-scores" class="party-view hidden">
+            <div class="scores-head">
+                <div id="scores-game-no" class="scores-game-no">JUEGO 1/5</div>
+                <h1 id="scores-title" class="scores-title">—</h1>
+            </div>
+            <div class="scores-grid">
+                <section class="panel panel-result">
+                    <div class="winner-label">GANÓ</div>
+                    <div id="scores-winner" class="winner-name">—</div>
+                    <ol id="scores-ranking" class="ranking"></ol>
+                </section>
+                <section class="panel panel-standings">
+                    <h2>CLASIFICACIÓN <span class="h2-aside">acumulada</span></h2>
+                    <div id="scores-bars" class="bars"></div>
+                </section>
+            </div>
+            <footer class="next-bar">
+                <div id="next-text" class="next-text">
+                    Siguiente: <b id="next-mode">…</b> en <span id="next-secs" class="next-secs">–</span> s
+                </div>
+                <div class="next-progress"><div id="next-progress-fill"></div></div>
+            </footer>
+        </section>
+
+        <!-- 3) FINAL: podium + full standings + games played -->
+        <section id="view-final" class="party-view hidden">
+            <div id="confetti" aria-hidden="true"></div>
+            <div class="final-head">
+                <h1 class="final-title">¡FIESTA TERMINADA!</h1>
+                <div id="final-champion" class="final-champion"></div>
+            </div>
+            <div class="final-grid">
+                <section class="panel panel-games">
+                    <h2>JUEGOS</h2>
+                    <ol id="final-games" class="games-played"></ol>
+                </section>
+                <div id="podium" class="podium"></div>
+                <section class="panel panel-table">
+                    <h2>CLASIFICACIÓN FINAL</h2>
+                    <table id="final-table" class="final-table"></table>
+                </section>
+            </div>
+            <div class="final-actions">
+                <div class="final-games-pick">
+                    <span class="pick-label">JUEGOS</span>
+                    <div id="final-games-selector" class="games-selector compact">
+                        <button type="button" class="games-btn" data-count="3">3</button>
+                        <button type="button" class="games-btn" data-count="5">5</button>
+                        <button type="button" class="games-btn" data-count="8">8</button>
+                    </div>
+                </div>
+                <button id="party-again-btn" type="button" class="party-btn party-btn-primary">OTRA FIESTA</button>
+                <button id="party-menu-btn" type="button" class="party-btn">MENÚ</button>
+                <div id="final-status" class="status-line"></div>
+            </div>
+        </section>
+
+        <!-- Room closed / fatal error -->
+        <section id="view-closed" class="party-view view-center hidden">
+            <div class="panel closed-box">
+                <div class="closed-emoji">🔌</div>
+                <h1 id="closed-title" class="closed-title">La sala se cerró</h1>
+                <p id="closed-reason" class="closed-reason"></p>
+                <button id="closed-menu-btn" type="button" class="party-btn">MENÚ</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- "Preparando SUMO…" while waiting for party-go -->
+    <div id="party-overlay" class="hidden">
+        <div class="party-overlay-box">
+            <div class="spinner"></div>
+            <p id="party-overlay-text">Preparando…</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script type="module" src="js/party/PartyGame.js"></script>
+</body>
+</html>

@@ -11,6 +11,7 @@ import { AnimationController, ANIMATION_CONFIG } from '../animation/AnimationCon
 import TagPlayerController from './TagPlayerController.js';
 import TournamentManager from '../tournament/TournamentManager.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
+import { openRoom, installParty } from '../party/PartyClient.js';
 
 // =================================
 // Configuration
@@ -904,6 +905,7 @@ class TagGame {
     initializeSocket() {
         console.log('[Tag] Connecting to server:', SERVER_URL);
         this.socket = io(SERVER_URL);
+        installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
 
         this.socket.on('connect', () => {
             // Recovered connection (Socket.IO connectionStateRecovery): same id, same room,
@@ -923,16 +925,17 @@ class TagGame {
                 this.gameStarted = false;
             }
 
-            // Create a new room for tag mode
+            // Create a new room for tag mode (in a party this re-attaches to the existing room)
             const isBabyShower = document.documentElement.classList.contains('baby-theme');
-            this.socket.emit('create-room', { 
-                gameMode: 'tag',
+            openRoom(this.socket, 'tag', {
                 isBabyShower: isBabyShower
             }, (response) => {
-                if (response.success) {
+                if (response && response.success) {
                     this.roomCode = response.roomCode;
                     this.showRoomCode(this.roomCode);
-                    console.log(`[Tag] Room created: ${this.roomCode}`);
+                    console.log(`[Tag] Room ready: ${this.roomCode}`);
+                } else {
+                    console.error('[Tag] Could not create the room:', response);
                 }
             });
         });

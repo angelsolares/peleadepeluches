@@ -10,6 +10,7 @@ import { SERVER_URL, CONFIG } from '../config.js';
 import { AnimationController } from '../animation/AnimationController.js';
 import { loadClips, loadModel } from '../assets/AssetLoader.js';
 import PaintHUD from './PaintHUD.js';
+import { openRoom, installParty, isPartyMode } from '../party/PartyClient.js';
 
 const PAINT_CONFIG = {
     GRID_SIZE: 60,
@@ -249,7 +250,13 @@ class PaintGame {
                 transports: ['websocket'],
                 reconnection: true
             });
-            
+            installParty(this.socket); // Modo Fiesta: 'party-go' navigation + badge
+            // Modo Fiesta: the server moves the host on; no "back to menu" from the results panel
+            if (isPartyMode()) {
+                const menuBtn = document.getElementById('btn-return-menu');
+                if (menuBtn) menuBtn.style.display = 'none';
+            }
+
             this.socket.on('connect', () => {
                 // Recovered reconnect: same socket id and room, missed events are replayed.
                 // Creating a room here would orphan every phone.
@@ -264,15 +271,14 @@ class PaintGame {
                 const isHost = urlParams.get('host') === 'true' || !this.roomCode;
 
                 if (isHost && !this.roomCode) {
-                    // Create a new room if none provided
+                    // Create a new room if none provided (in a party this re-attaches to the existing room)
                     const isBabyShower = document.documentElement.classList.contains('baby-theme');
-                    this.socket.emit('create-room', { 
-                        gameMode: 'paint',
+                    openRoom(this.socket, 'paint', {
                         isBabyShower: isBabyShower
                     }, (response) => {
                         if (response && response.success) {
                             this.roomCode = response.roomCode;
-                            console.log('Created room:', this.roomCode);
+                            console.log('Room ready:', this.roomCode);
                             this.showRoomCode(this.roomCode);
                         } else {
                             console.error('Failed to create room:', response);

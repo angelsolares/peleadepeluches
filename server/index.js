@@ -16,6 +16,7 @@ import { RaceStateManager } from './raceState.js';
 import { FlappyStateManager } from './flappyState.js';
 import TagStateManager from './tagState.js';
 import SumoStateManager from './sumoState.js';
+import PartyManager from './partyManager.js';
 import TugStateManager from './tugState.js';
 import PaintStateManager from './paintState.js';
 import BalloonStateManager from './balloonState.js';
@@ -107,6 +108,14 @@ const mazeStateManager = new MazeStateManager(lobbyManager);
 // Attach io to lobbyManager so managers can use it for global broadcasts
 lobbyManager.io = io;
 
+// Modo Fiesta: chains minigames; it starts matches, awards points and moves the host between pages
+const partyManager = new PartyManager(lobbyManager, io, {
+    startGame: (roomCode) => startRoomGame(roomCode),
+    scheduleTimer: (roomCode, fn, ms) => scheduleRoomTimer(roomCode, fn, ms),
+    clearTimer: (roomCode) => clearRoomTimer(roomCode),
+    closeRoom: (roomCode) => closeRoomByServer(roomCode)
+});
+
 // Set up flappy game end callback for tournament handling
 flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
     const room = lobbyManager.rooms.get(roomCode);
@@ -139,7 +148,10 @@ flappyStateManager.setOnGameEndCallback((roomCode, winner, results, io) => {
             return false; // Don't emit default game-over
         }
     }
-    
+
+    // Modo Fiesta: award points (results come sorted: survivors first, then by distance)
+    partyManager.onGameFinished(roomCode, 'flappy', { winnerId: winner?.id, ranking: (results || []).map(r => r.id) });
+
     return true; // Emit default game-over
 });
 
@@ -318,10 +330,16 @@ io.on('connection', (socket) => {
         const result = lobbyManager.createRoom(socket.id, gameMode, { isBabyShower });
         console.log('[Socket] Room created with isBabyShower:', result.room?.isBabyShower);
         console.log('[Socket] createRoom result:', result);
-        
+
         if (result.success) {
             socket.join(result.roomCode);
             console.log(`[Socket] Room ${result.roomCode} created with mode: ${gameMode}`);
+
+            // Modo Fiesta: the room chains several minigames (see partyManager.js)
+            if (gameMode === 'party') {
+                const party = partyManager.create(lobbyManager.rooms.get(result.roomCode));
+                result.party = { token: party.token, total: party.total };
+            }
         }
         
         console.log('[Socket] Calling callback:', typeof actualCallback);
@@ -393,90 +411,8 @@ io.on('connection', (socket) => {
             return;
         }
         
-        const result = lobbyManager.startGame(roomCode);
-        
-        if (result.success) {
-            // Prepare players data
-            let playersData = result.players;
+        const result = startRoomGame(roomCode);
 
-            // Get tournament state
-            const tournamentState = lobbyManager.getTournamentState(roomCode);
-            
-            // Handle mode-specific data initialization
-            if (room.gameMode === 'race') {
-                playersData = result.players.map(p => ({
-                    ...p,
-                    name: p.characterName || (p.character ? p.character.charAt(0).toUpperCase() + p.character.slice(1) : p.name)
-                }));
-            } else if (room.gameMode === 'tug') {
-                // Initialize tug state and get players with assigned teams
-                const tugPlayers = tugStateManager.initializeTug(roomCode);
-                if (tugPlayers) {
-                    playersData = tugPlayers;
-                }
-            } else if (room.gameMode === 'flappy') {
-                flappyStateManager.initializeGame(roomCode, result.players);
-            } else if (room.gameMode === 'arena') {
-                arenaStateManager.initializeArena(roomCode);
-            } else if (room.gameMode === 'tag') {
-                tagStateManager.initializeTag(roomCode);
-            } else if (room.gameMode === 'sumo') {
-                sumoStateManager.initializeSumo(roomCode);
-            } else if (room.gameMode === 'paint') {
-                paintStateManager.initializePaint(roomCode);
-            } else if (room.gameMode === 'balloon') {
-                balloonStateManager.initializeBalloon(roomCode);
-            } else if (room.gameMode === 'trivia') {
-                triviaStateManager.initializeTrivia(roomCode);
-            } else if (room.gameMode === 'word_puzzle') {
-                wordPuzzleStateManager.initializePuzzle(roomCode);
-            } else if (room.gameMode === 'maze') {
-                mazeStateManager.initializeMaze(roomCode);
-            }
-
-            // Common game-started emit
-            io.to(roomCode).emit('game-started', {
-                ...result,
-                players: playersData,
-                gameMode: room.gameMode || 'smash',
-                stage: gameStateManager.getStage(roomCode),
-                tournamentRounds: tournamentState?.tournamentRounds || 1,
-                currentRound: tournamentState?.currentRound || 1,
-                playerScores: tournamentState?.playerScores || {}
-            });
-            
-            // Start appropriate game loop/countdown
-            if (room.gameMode === 'arena') {
-                startArenaLoop(roomCode);
-                console.log(`[Socket] Arena game started in room ${roomCode}`);
-            } else if (room.gameMode === 'race') {
-                raceStateManager.initializeRace(roomCode);
-                raceStateManager.startCountdown(roomCode, io, () => {
-                    startRaceLoop(roomCode);
-                });
-            } else if (room.gameMode === 'flappy') {
-                flappyStateManager.startCountdown(roomCode, io);
-            } else if (room.gameMode === 'tag') {
-                startTagLoop(roomCode);
-            } else if (room.gameMode === 'sumo') {
-                startSumoLoop(roomCode);
-            } else if (room.gameMode === 'tug') {
-                startTugLoop(roomCode);
-            } else if (room.gameMode === 'paint') {
-                startPaintLoop(roomCode);
-            } else if (room.gameMode === 'balloon') {
-                startBalloonLoop(roomCode);
-            } else if (room.gameMode === 'trivia') {
-                startTriviaLoop(roomCode);
-            } else if (room.gameMode === 'word_puzzle') {
-                startPuzzleLoop(roomCode);
-            } else if (room.gameMode === 'maze') {
-                startMazeLoop(roomCode);
-            } else {
-                startGameLoop(roomCode);
-            }
-        }
-        
         if (typeof callback === 'function') {
             callback(result);
         }
@@ -1073,9 +1009,60 @@ io.on('connection', (socket) => {
         if (!isHost && isModeRunning(roomCode, mode)) {
             return reply({ success: false, error: 'Match in progress' });
         }
+        // Modo Fiesta: the server moves on to the scoreboard / next game by itself
+        if (partyManager.isParty(room)) {
+            return reply({ success: false, error: 'Party in progress' });
+        }
 
         restartMatch(roomCode);
         reply({ success: true });
+    });
+
+    // ========== MODO FIESTA ==========
+
+    /**
+     * Number of games in the party (host, lobby or after a party)
+     */
+    socket.on('party-set-games', (count, callback) => {
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        const room = roomCode && lobbyManager.rooms.get(roomCode);
+        if (!room || room.hostId !== socket.id) {
+            if (typeof callback === 'function') callback({ success: false, error: 'Only the host can set the games' });
+            return;
+        }
+        const result = partyManager.setGames(roomCode, count);
+        if (typeof callback === 'function') callback(result);
+    });
+
+    /**
+     * Start (or restart) the party: shuffles the sequence and sends the host to the first game
+     */
+    socket.on('party-start', (data, callback) => {
+        if (typeof data === 'function') { callback = data; data = {}; }
+        const roomCode = lobbyManager.getRoomCodeBySocketId(socket.id);
+        const room = roomCode && lobbyManager.rooms.get(roomCode);
+        if (!room || room.hostId !== socket.id) {
+            if (typeof callback === 'function') callback({ success: false, error: 'Only the host can start the party' });
+            return;
+        }
+        const result = partyManager.start(roomCode, data && data.sequence);
+        if (typeof callback === 'function') callback(result);
+    });
+
+    /**
+     * A host page (game or scoreboard) takes over the party room
+     */
+    socket.on('party-attach-host', (data, callback) => {
+        const result = partyManager.attachHost(socket, data || {});
+        if (typeof callback === 'function') callback(result);
+        if (result.success) {
+            const room = lobbyManager.rooms.get(result.roomCode);
+            if (room && room.party && room.party.pendingGo) {
+                const go = room.party.pendingGo;
+                room.party.pendingGo = null;
+                socket.emit('party-go', go);
+            }
+        }
     });
     
     /**
@@ -1361,9 +1348,128 @@ function restartMatch(roomCode) {
 }
 
 /**
+ * Start the room's match: initializes the mode state, emits 'game-started' and starts the
+ * loop/countdown. Used by the host's 'start-game' and by Modo Fiesta (no click needed).
+ * @returns {object} lobbyManager.startGame result
+ */
+function startRoomGame(roomCode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const result = lobbyManager.startGame(roomCode);
+    if (!result.success) return result;
+
+    // Prepare players data
+    let playersData = result.players;
+
+    // Get tournament state
+    const tournamentState = lobbyManager.getTournamentState(roomCode);
+
+    // Handle mode-specific data initialization
+    if (room.gameMode === 'race') {
+        playersData = result.players.map(p => ({
+            ...p,
+            name: p.characterName || (p.character ? p.character.charAt(0).toUpperCase() + p.character.slice(1) : p.name)
+        }));
+    } else if (room.gameMode === 'tug') {
+        // Initialize tug state and get players with assigned teams
+        const tugPlayers = tugStateManager.initializeTug(roomCode);
+        if (tugPlayers) {
+            playersData = tugPlayers;
+        }
+    } else if (room.gameMode === 'flappy') {
+        flappyStateManager.initializeGame(roomCode, result.players);
+    } else if (room.gameMode === 'arena') {
+        arenaStateManager.initializeArena(roomCode);
+    } else if (room.gameMode === 'tag') {
+        tagStateManager.initializeTag(roomCode);
+    } else if (room.gameMode === 'sumo') {
+        sumoStateManager.initializeSumo(roomCode);
+    } else if (room.gameMode === 'paint') {
+        paintStateManager.initializePaint(roomCode);
+    } else if (room.gameMode === 'balloon') {
+        balloonStateManager.initializeBalloon(roomCode);
+    } else if (room.gameMode === 'trivia') {
+        triviaStateManager.initializeTrivia(roomCode);
+    } else if (room.gameMode === 'word_puzzle') {
+        wordPuzzleStateManager.initializePuzzle(roomCode);
+    } else if (room.gameMode === 'maze') {
+        mazeStateManager.initializeMaze(roomCode);
+    }
+
+    // Common game-started emit
+    io.to(roomCode).emit('game-started', {
+        ...result,
+        players: playersData,
+        gameMode: room.gameMode || 'smash',
+        stage: gameStateManager.getStage(roomCode),
+        party: room.party ? partyManager.summary(room) : null,
+        tournamentRounds: tournamentState?.tournamentRounds || 1,
+        currentRound: tournamentState?.currentRound || 1,
+        playerScores: tournamentState?.playerScores || {}
+    });
+
+    // Start appropriate game loop/countdown
+    if (room.gameMode === 'arena') {
+        startArenaLoop(roomCode);
+        console.log(`[Socket] Arena game started in room ${roomCode}`);
+    } else if (room.gameMode === 'race') {
+        raceStateManager.initializeRace(roomCode);
+        raceStateManager.startCountdown(roomCode, io, () => {
+            startRaceLoop(roomCode);
+        });
+    } else if (room.gameMode === 'flappy') {
+        flappyStateManager.startCountdown(roomCode, io);
+    } else if (room.gameMode === 'tag') {
+        startTagLoop(roomCode);
+    } else if (room.gameMode === 'sumo') {
+        startSumoLoop(roomCode);
+    } else if (room.gameMode === 'tug') {
+        startTugLoop(roomCode);
+    } else if (room.gameMode === 'paint') {
+        startPaintLoop(roomCode);
+    } else if (room.gameMode === 'balloon') {
+        startBalloonLoop(roomCode);
+    } else if (room.gameMode === 'trivia') {
+        startTriviaLoop(roomCode);
+    } else if (room.gameMode === 'word_puzzle') {
+        startPuzzleLoop(roomCode);
+    } else if (room.gameMode === 'maze') {
+        startMazeLoop(roomCode);
+    } else {
+        startGameLoop(roomCode);
+    }
+
+    return result;
+}
+
+/**
+ * Close a room from the server side (Modo Fiesta: no host page came back)
+ */
+function closeRoomByServer(roomCode) {
+    const room = lobbyManager.rooms.get(roomCode);
+    if (!room) return;
+    stopAllLoops(roomCode);
+    clearRoomTimer(roomCode);
+    arenaStateManager.cleanup(roomCode);
+    sumoStateManager.cleanup(roomCode);
+    raceStateManager.removeRace(roomCode);
+    partyManager.cleanup(roomCode);
+    const playerIds = [...room.players.keys()];
+    playerIds.forEach(id => lobbyManager.playerRooms.delete(id));
+    if (room.hostId) lobbyManager.playerRooms.delete(room.hostId);
+    lobbyManager.rooms.delete(roomCode);
+    playerIds.forEach(id => io.to(id).emit('room-closed', { reason: 'La fiesta se interrumpió' }));
+    console.log(`[Party] Room ${roomCode} closed by the server`);
+}
+
+/**
  * Handle player disconnect/leave
  */
 function handleDisconnect(socket) {
+    // Modo Fiesta: the host page is switching to another page, keep the room for it
+    if (partyManager.onHostDisconnected(socket)) return;
+
     const result = lobbyManager.leaveRoom(socket.id);
     
     if (result.success) {
@@ -1513,6 +1619,7 @@ function finishSmashMatch(roomCode, gameOver) {
     } else {
         // Single round, just emit game-over
         io.to(roomCode).emit('game-over', gameOver);
+        partyManager.onGameFinished(roomCode, 'smash', { winnerId: gameOver.winner?.id });
     }
 }
 
@@ -1717,6 +1824,7 @@ function startTagLoop(roomCode) {
                 } else {
                     // Single round, just emit game-over
                     io.to(roomCode).emit('tag-game-over', state);
+                    partyManager.onGameFinished(roomCode, 'tag', { winnerId: state.winner?.id, ranking: (state.ranking || []).map(r => r.id) });
                 }
             }
         } else {
@@ -1775,6 +1883,7 @@ function startSumoLoop(roomCode) {
                     }
                 } else {
                     io.to(roomCode).emit('sumo-game-over', state);
+                    partyManager.onGameFinished(roomCode, 'sumo', { winnerId: state.winner?.id, ranking: (state.ranking || []).map(r => r.id) });
                 }
             }
         } else {
@@ -1839,6 +1948,10 @@ function startTugLoop(roomCode) {
                     }
                 } else {
                     io.to(roomCode).emit('tug-game-over', state);
+                    const winners = state.winnerTeam === 'left' || state.winnerTeam === 'right'
+                        ? (state.players || []).filter(p => p.team === state.winnerTeam).map(p => p.id)
+                        : [];
+                    partyManager.onGameFinished(roomCode, 'tug', { winningTeam: winners });
                 }
             }
         } else {
@@ -1905,6 +2018,7 @@ function startPaintLoop(roomCode) {
                     }
                 } else {
                     io.to(roomCode).emit('paint-game-over', state);
+                    partyManager.onGameFinished(roomCode, 'paint', { winnerId: state.winner?.id, ranking: (state.results || []).map(r => r.id) });
                 }
             }
         } else {
@@ -1969,6 +2083,7 @@ function startBalloonLoop(roomCode) {
                     }
                 } else {
                     io.to(roomCode).emit('balloon-game-over', state);
+                    partyManager.onGameFinished(roomCode, 'balloon', { winnerId: state.winner?.id, ranking: (state.results || []).filter(r => !r.isDQ).map(r => r.id) });
                 }
             }
         } else {
@@ -2064,6 +2179,7 @@ function startRaceLoop(roomCode) {
                 } else if (winnerInfo) {
                     // Single round, just emit race-winner
                     io.to(roomCode).emit('race-winner', winnerInfo);
+                    partyManager.onGameFinished(roomCode, 'race', { winnerId: winnerInfo.winnerId, ranking: (winnerInfo.positions || []).map(p => p.id) });
                 }
                 raceStateManager.endRace(roomCode);
             }

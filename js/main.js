@@ -14,6 +14,7 @@ import TournamentManager from './tournament/TournamentManager.js';
 import { loadClips, loadModel } from './assets/AssetLoader.js';
 import { retargetMixamoClip } from './animation/MixamoRetarget.js';
 import { KOBurstManager, koScreenPunch } from './effects/KOBurst.js';
+import { openRoom, installParty, isPartyMode } from './party/PartyClient.js';
 
 // VFX Manager will be loaded dynamically
 let VFXManager = null;
@@ -2160,6 +2161,7 @@ function initializeSocket() {
         reconnectionAttempts: 5,
         reconnectionDelay: 1000
     });
+    installParty(socket); // Modo Fiesta: 'party-go' navigation + badge
     
     socket.on('connect', () => {
         // Recovered reconnect (connectionStateRecovery): same socket id, same room, missed
@@ -2172,19 +2174,19 @@ function initializeSocket() {
         console.log('[Socket] Connected to server');
         isHost = true;
 
-        // Create room as host with selected game mode (host is display only, not a player)
+        // Create room as host with selected game mode (host is display only, not a player).
+        // In a party (?party=CODE&token=T) this re-attaches to the existing room instead.
         const isBabyShower = document.documentElement.classList.contains('baby-theme');
-        socket.emit('create-room', { 
-            gameMode: selectedGameMode,
-            isBabyShower: isBabyShower 
+        openRoom(socket, selectedGameMode, {
+            isBabyShower: isBabyShower
         }, (response) => {
-            if (response.success) {
+            if (response && response.success) {
                 roomCode = response.roomCode;
-                console.log(`[Socket] Room created: ${roomCode} with mode: ${selectedGameMode}`);
+                console.log(`[Socket] Room ready: ${roomCode} with mode: ${selectedGameMode}`);
                 updateAnimationDisplay(`Sala: ${roomCode} - Esperando jugadores...`);
                 showRoomCode(roomCode);
             } else {
-                console.error('[Socket] Failed to create room:', response.error);
+                console.error('[Socket] Failed to create room:', response && response.error);
             }
         });
     });
@@ -2255,6 +2257,8 @@ function initializeSocket() {
         tournamentRematchBtn.dataset.wired = 'true';
         tournamentRematchBtn.addEventListener('click', () => requestRematch());
     }
+    // Modo Fiesta: the server drives the flow (no rematch from the host)
+    if (tournamentRematchBtn && isPartyMode()) tournamentRematchBtn.style.display = 'none';
 }
 
 function showRoomCode(code) {

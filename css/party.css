@@ -1,0 +1,70 @@
+/* Modo Fiesta: badge shown on every game page + things that make no sense mid-party */
+
+#party-badge {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 14px;
+    background: rgba(10, 10, 21, 0.85);
+    border: 2px solid #ff8800;
+    border-radius: 12px;
+    box-shadow: 0 0 18px rgba(255, 136, 0, 0.35);
+    font-family: 'Orbitron', sans-serif;
+    pointer-events: none;
+}
+
+.party-badge-title {
+    color: #ff8800;
+    font-size: 0.85rem;
+    letter-spacing: 2px;
+    font-weight: 700;
+}
+
+.party-badge-scores {
+    display: flex;
+    gap: 12px;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 0.95rem;
+    color: #fff;
+}
+
+.party-badge-scores b {
+    color: #ffcc00;
+}
+
+#party-error {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    padding: 12px 20px;
+    background: rgba(255, 51, 102, 0.9);
+    color: #fff;
+    border-radius: 10px;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+}
+
+/* In a party the server drives the flow: no rematch buttons, no rounds pickers, no start button */
+body.party-mode .btn-rematch,
+body.party-mode #rematch-btn,
+body.party-mode #tug-rematch-btn,
+body.party-mode .rounds-selector,
+body.party-mode #start-game-btn,
+body.party-mode .btn-start,
+body.party-mode #next-round-countdown,
+body.party-mode .round-end-actions .btn-return-menu,
+body.party-mode #start-race-btn,
+body.party-mode #start-btn,
+body.party-mode #tournament-rematch-btn,
+body.party-mode #btn-return-menu,
+body.party-mode .balloon-rematch-btn,
+body.party-mode .balloon-menu-btn,
+body.party-mode .winner-actions {
+    display: none !important;
+}
