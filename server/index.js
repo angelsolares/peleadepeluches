@@ -37,6 +37,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Health check (Render/Railway) and a quick way to see which build is running
+app.get('/health', (req, res) => {
+    res.json({ ok: true, rooms: lobbyManager.rooms.size, uptime: Math.round(process.uptime()) });
+});
+
 // Serve static files from parent directory (project root)
 const projectRoot = path.join(__dirname, '..');
 app.use('/assets', express.static(path.join(projectRoot, 'assets')));

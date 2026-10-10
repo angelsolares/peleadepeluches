@@ -1,0 +1,17 @@
+# Render blueprint: backend Socket.IO de Pelea de Peluches.
+# En render.com: New + > Blueprint > repo angelsolares/peleadepeluches > Apply.
+# El frontend sigue en Vercel; aquí solo va server/ (Node + Socket.IO).
+services:
+  - type: web
+    name: peleadepeluches-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: CORS_ORIGIN
+        value: https://peleadepeluches.vercel.app
